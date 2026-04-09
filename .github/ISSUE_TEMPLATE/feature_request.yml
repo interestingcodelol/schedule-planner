@@ -1,0 +1,52 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for Schedule Planner? We'd love to hear it!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the problem or frustration this would address.
+      placeholder: "I find it hard to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: What would the ideal experience look like?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you've thought about?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Calendar
+        - Time Off Planner
+        - Bank Hours
+        - Upcoming Events
+        - Status Cards
+        - Projection / Balance calculations
+        - Chat Assistant
+        - Settings
+        - Data / Privacy
+        - UI / UX
+        - Other
+    validations:
+      required: false

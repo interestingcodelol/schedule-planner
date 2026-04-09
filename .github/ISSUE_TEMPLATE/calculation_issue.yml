@@ -1,0 +1,42 @@
+name: Calculation Issue
+description: Report incorrect balance projections or hour calculations
+labels: ["bug", "calculation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If a projected balance, affordability check, or hour calculation seems wrong, please provide as much detail as possible so we can verify.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What calculation is wrong?
+      description: Describe what number you see vs what you expect.
+      placeholder: "The Year-End card shows 15 hrs but I expect 44 hrs..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup
+      description: |
+        Please share your relevant settings (no PII needed):
+        - Accrual tier and rate
+        - Current balances (vacation, sick, bank)
+        - Planned time off dates
+        - Pay period length
+      placeholder: |
+        - Accrual: 3.08 hrs/period, bi-weekly
+        - Vacation: 62 hrs, Sick: 32 hrs, Bank: 3 hrs
+        - Planned: Aug 6-17, Oct 25-29
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What should the number be, and how did you calculate it?
+    validations:
+      required: true
