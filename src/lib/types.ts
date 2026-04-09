@@ -88,7 +88,7 @@ export type AppState = {
 
 export type ProjectionEvent = {
   date: string // ISO date string
-  type: 'accrual' | 'vacation_deduction' | 'carryover_adjustment' | 'bank_payout'
+  type: 'accrual' | 'vacation_deduction' | 'carryover_adjustment' | 'bank_payout' | 'sick_grant'
   delta: number
   runningBalance: number
   label?: string

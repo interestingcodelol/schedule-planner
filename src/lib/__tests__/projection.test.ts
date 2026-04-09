@@ -201,15 +201,15 @@ describe('projectBalance', () => {
     // Need 60 more hours at 3.08/pp = ~19.5 pay periods = ~273 days
     // So somewhere around March 2026
     if (result) {
-      // Verify the balance actually reaches 80 on that date
+      // Verify the total available reaches 80 on that date
       const projection = projectBalance(state, result)
-      expect(projection.vacationBalance).toBeGreaterThanOrEqual(80)
+      expect(projection.totalAvailable).toBeGreaterThanOrEqual(80)
 
       // And that one pay period earlier, it hadn't yet
       const oneBefore = addDays(result, -14)
       if (oneBefore > new Date('2025-06-15')) {
         const projBefore = projectBalance(state, oneBefore)
-        expect(projBefore.vacationBalance).toBeLessThan(80)
+        expect(projBefore.totalAvailable).toBeLessThan(80)
       }
     }
   })

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useRef, useEffect } from 'react'
 import {
   addMonths,
   subMonths,
@@ -9,6 +9,8 @@ import {
   eachDayOfInterval,
   format,
   getDay,
+  setMonth,
+  setYear,
 } from 'date-fns'
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react'
 import { useAppState } from '../context'
@@ -61,6 +63,8 @@ export function CalendarView() {
     }
   }, [currentMonth, state.plannedVacations, state.policy])
 
+  const [showMonthPicker, setShowMonthPicker] = useState(false)
+  const monthPickerRef = useRef<HTMLDivElement>(null)
   const [popoverDate, setPopoverDate] = useState<Date | null>(null)
   const [popoverExisting, setPopoverExisting] = useState<PlannedVacation | undefined>()
 
@@ -112,6 +116,18 @@ export function CalendarView() {
     setPopoverDate(null)
   }
 
+  // Close month picker on click outside
+  useEffect(() => {
+    if (!showMonthPicker) return
+    const handleClick = (e: MouseEvent) => {
+      if (monthPickerRef.current && !monthPickerRef.current.contains(e.target as Node)) {
+        setShowMonthPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showMonthPicker])
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowLeft') {
       e.preventDefault()
@@ -128,16 +144,68 @@ export function CalendarView() {
       onKeyDown={handleKeyDown}
     >
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">
-        <div>
-          <h2 className="text-base font-semibold">{format(currentMonth, 'MMMM yyyy')}</h2>
-          {monthStats.plannedDays > 0 ? (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {monthStats.plannedDays} planned work day{monthStats.plannedDays !== 1 ? 's' : ''} ({monthStats.plannedHours} hours)
-            </p>
-          ) : (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              No planned time off this month
-            </p>
+        <div className="relative" ref={monthPickerRef}>
+          <button
+            onClick={() => setShowMonthPicker(!showMonthPicker)}
+            className="text-left hover:bg-gray-100 dark:hover:bg-gray-800/60 rounded-lg px-2 py-1 -mx-2 -my-1 transition-colors"
+            title="Click to jump to a month"
+          >
+            <h2 className="text-base font-semibold">{format(currentMonth, 'MMMM yyyy')}</h2>
+            {monthStats.plannedDays > 0 ? (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {monthStats.plannedDays} planned work day{monthStats.plannedDays !== 1 ? 's' : ''} ({monthStats.plannedHours} hours)
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                No planned time off this month
+              </p>
+            )}
+          </button>
+
+          {showMonthPicker && (
+            <div className="absolute top-full left-0 mt-2 z-30 glass-card rounded-xl shadow-xl p-3 w-64 animate-slide-up">
+              {/* Year selector */}
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  onClick={() => setCurrentMonth((m) => setYear(m, m.getFullYear() - 1))}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700/60 transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-sm font-bold">{currentMonth.getFullYear()}</span>
+                <button
+                  onClick={() => setCurrentMonth((m) => setYear(m, m.getFullYear() + 1))}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700/60 transition-all"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              {/* Month grid */}
+              <div className="grid grid-cols-3 gap-1">
+                {Array.from({ length: 12 }, (_, i) => {
+                  const isActive = currentMonth.getMonth() === i
+                  const isCurrent = new Date().getMonth() === i && currentMonth.getFullYear() === new Date().getFullYear()
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setCurrentMonth(startOfMonth(setMonth(currentMonth, i)))
+                        setShowMonthPicker(false)
+                      }}
+                      className={`py-1.5 text-xs font-medium rounded-lg transition-all ${
+                        isActive
+                          ? 'bg-blue-600 text-white'
+                          : isCurrent
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                            : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/40'
+                      }`}
+                    >
+                      {format(new Date(2024, i, 1), 'MMM')}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           )}
         </div>
         <div className="flex items-center gap-1.5">

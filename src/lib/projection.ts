@@ -182,7 +182,7 @@ export function projectBalance(
 
   type PendingEvent = {
     date: Date
-    type: 'accrual' | 'vacation_deduction' | 'carryover_adjustment' | 'bank_payout'
+    type: 'accrual' | 'vacation_deduction' | 'carryover_adjustment' | 'bank_payout' | 'sick_grant'
     process: () => number
     label?: string
     hourSource?: 'vacation' | 'sick' | 'bank' | 'any'
@@ -245,19 +245,41 @@ export function projectBalance(
     }
   }
 
-  // Add bank hours payout events (start of payout window each year)
-  for (let y = startYear; y <= endYear; y++) {
-    const bankPayoutDate = new Date(
+  // Add bank hours payout events — both start AND end of payout window each year
+  // Bank hours get paid out at the start of the window, and again at the end
+  for (let y = startYear; y <= endYear + 1; y++) {
+    const payoutStart = new Date(
       y,
       state.policy.bankHoursPayoutStart.month - 1,
       state.policy.bankHoursPayoutStart.day,
     )
-    if (isAfter(bankPayoutDate, today) && !isAfter(bankPayoutDate, target)) {
+    const payoutEnd = new Date(
+      y,
+      state.policy.bankHoursPayoutEnd.month - 1,
+      state.policy.bankHoursPayoutEnd.day,
+    )
+    for (const payoutDate of [payoutStart, payoutEnd]) {
+      if (isAfter(payoutDate, today) && !isAfter(payoutDate, target)) {
+        pendingEvents.push({
+          date: payoutDate,
+          type: 'bank_payout',
+          process: () => 0,
+          label: `Bank hours payout (${format(payoutDate, 'MMM d')})`,
+        })
+      }
+    }
+  }
+
+  // Add annual sick leave grant events (Jan 1 each year)
+  // Sick hours are granted at the start of each year, capped at maxBalance
+  for (let y = startYear + 1; y <= endYear; y++) {
+    const grantDate = new Date(y, 0, 1) // January 1
+    if (isAfter(grantDate, today) && !isAfter(grantDate, target)) {
       pendingEvents.push({
-        date: bankPayoutDate,
-        type: 'bank_payout',
-        process: () => 0,
-        label: 'Bank hours payout',
+        date: grantDate,
+        type: 'sick_grant',
+        process: () => state.policy.sickLeaveAnnualGrant,
+        label: `Annual sick leave grant (+${state.policy.sickLeaveAnnualGrant} hrs)`,
       })
     }
   }
@@ -266,13 +288,28 @@ export function projectBalance(
   pendingEvents.sort((a, b) => {
     const dayDiff = differenceInCalendarDays(a.date, b.date)
     if (dayDiff !== 0) return dayDiff
-    const order = { accrual: 0, vacation_deduction: 1, carryover_adjustment: 2, bank_payout: 3 }
+    const order = { sick_grant: 0, accrual: 1, vacation_deduction: 2, carryover_adjustment: 3, bank_payout: 4 }
     return order[a.type] - order[b.type]
   })
 
   // Process events
   for (const pe of pendingEvents) {
-    if (pe.type === 'carryover_adjustment') {
+    if (pe.type === 'sick_grant') {
+      // Annual sick leave grant — add hours, capped at max balance
+      const grant = pe.process()
+      const newBalance = Math.min(sickBalance + grant, state.policy.sickLeaveMaxBalance)
+      const actualGrant = newBalance - sickBalance
+      if (actualGrant > 0) {
+        sickBalance = newBalance
+        events.push({
+          date: format(pe.date, 'yyyy-MM-dd'),
+          type: 'sick_grant',
+          delta: actualGrant,
+          runningBalance: vacationBalance,
+          label: pe.label,
+        })
+      }
+    } else if (pe.type === 'carryover_adjustment') {
       const yos = differenceInYears(pe.date, hireDate)
       const tier = computeAccrualTier(state.policy, yos)
       const cap = computeCarryoverCap(state.policy, tier)
