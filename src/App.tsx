@@ -209,9 +209,11 @@ export default function App() {
         resetToSetup,
       }}
     >
-      <div className="min-h-screen">
+      <div className="h-screen flex flex-col overflow-hidden">
         {isDemo && <DemoBanner onReset={resetToSetup} />}
-        <Dashboard />
+        <div className="flex-1 min-h-0">
+          <Dashboard />
+        </div>
       </div>
     </AppContext.Provider>
   )

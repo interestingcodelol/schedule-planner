@@ -30,7 +30,7 @@ export function Dashboard() {
     : null
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden px-4 sm:px-6 py-4">
+    <div className="h-full flex flex-col overflow-hidden px-4 sm:px-6 py-4">
       {/* Header */}
       <header className="flex items-center justify-between mb-4 shrink-0">
         <div className="flex items-center gap-6">
@@ -102,7 +102,7 @@ export function Dashboard() {
         <div className="lg:col-span-8 min-h-0 flex flex-col" data-tour="calendar">
           <CalendarView />
         </div>
-        <div className="lg:col-span-4 min-h-0 flex flex-col gap-4 scroll-panel">
+        <div className="lg:col-span-4 min-h-0 overflow-y-auto scroll-panel space-y-4">
           <div data-tour="planner">
             <VacationPlanner />
           </div>
