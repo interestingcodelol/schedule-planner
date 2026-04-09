@@ -437,18 +437,15 @@ export function processChat(input: string, state: AppState): ChatResponse {
       const sickHoursUsed = count * hoursPerDay
       const afterSick = buffer - sickHoursUsed
       if (afterSick >= 0) {
-        return { text: `If you take **${count} sick day${count !== 1 ? 's' : ''}** (${fmt(sickHoursUsed)} hrs), you'd still have **${fmt(afterSick)} hrs** of buffer for your planned time off. You'd be fine!` }
-      } else {
-        return { text: `Taking **${count} sick day${count !== 1 ? 's' : ''}** would put you **${fmt(Math.abs(afterSick))} hrs short** for your planned time off. You might want to move or cancel one of your planned trips, or try to bank some extra hours.` }
+        return { text: `**${count} sick day${count !== 1 ? 's' : ''}** would use ${fmt(sickHoursUsed)} hrs, leaving **${fmt(afterSick)} hrs** of buffer above your planned time off.` }
       }
+      return { text: `**${count} sick day${count !== 1 ? 's' : ''}** would put you **${fmt(Math.abs(afterSick))} hrs short** of covering your planned time off.` }
     }
 
     return {
-      text: sickDays >= 3
-        ? `You have room for about **${sickDays} sick days** and still cover all your planned time off (**${fmt(buffer)} hrs** buffer). You're in good shape.`
-        : sickDays >= 1
-          ? `You have room for about **${sickDays} sick day${sickDays !== 1 ? 's' : ''}** (**${fmt(buffer)} hrs** buffer). After that, your planned time off would be at risk.`
-          : `You're **tight on hours** — your planned time off uses most of your balance. A sick day would put your plans at risk. Consider banking extra hours.`,
+      text: sickDays >= 1
+        ? `Your current balance has room for about **${sickDays} sick day${sickDays !== 1 ? 's' : ''}** beyond your planned time off (**${fmt(buffer)} hrs** buffer).`
+        : `Your planned time off accounts for nearly all of your available hours (**${fmt(buffer)} hrs** buffer).`,
     }
   }
 
@@ -467,10 +464,9 @@ export function processChat(input: string, state: AppState): ChatResponse {
     if (cap !== null) {
       const surplus = proj.vacationBalance - cap
       if (surplus > 0) {
-        const daysToUse = Math.ceil(surplus / hoursPerDay)
-        text += `\n\n**Warning:** You'll exceed your carryover cap (**${fmt(cap)} hrs**) by **${fmt(surplus)} hrs**. Plan **${daysToUse} more day${daysToUse !== 1 ? 's' : ''}** off before year-end to avoid losing hours.`
+        text += `\n\nProjected to exceed the **${fmt(cap)} hr** carryover cap by **${fmt(surplus)} hrs**. Excess is paid out on the configured payout date.`
       } else {
-        text += `\n\nYou're under the carryover cap (**${fmt(cap)} hrs**) — no risk of losing hours.`
+        text += `\n\nProjected vacation is under the **${fmt(cap)} hr** carryover cap.`
       }
     }
     return { text }
@@ -491,7 +487,6 @@ export function processChat(input: string, state: AppState): ChatResponse {
     }
 
     if (isQuestion && !isRequest) {
-      // Answering a question about affordability
       if (a.affordable) {
         return {
           text: `**Yes, you can!** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.\n\nWant me to add it to your plan?`,
@@ -505,7 +500,6 @@ export function processChat(input: string, state: AppState): ChatResponse {
         return { text }
       }
     } else {
-      // Planning/booking request, or general mention of dates
       if (a.affordable) {
         return {
           text: `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after). Looks good!`,
@@ -522,7 +516,6 @@ export function processChat(input: string, state: AppState): ChatResponse {
     }
   }
 
-  // No dates found — check if they seem to be talking about time off but we couldn't parse
   if (isRequest || isQuestion) {
     return {
       text: `I'd love to help with that! I couldn't figure out the specific dates though. I understand:\n\n- **"the second week of December"**\n- **"4/15 to 4/17"** or **"April 15-17"**\n- **"next Friday"** or **"tomorrow"**\n- **"a week in July"**\n- **"Wednesday through Friday"**\n\nCould you rephrase with dates?`,

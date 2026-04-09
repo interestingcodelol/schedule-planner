@@ -9,6 +9,13 @@ export type AppContextType = {
   addVacation: (vacation: PlannedVacation) => void
   removeVacation: (id: string) => void
   updateVacation: (id: string, updates: Partial<PlannedVacation>) => void
+  /** Log a retroactive past absence and immediately debit the matching pool. */
+  addPastAbsence: (vacation: PlannedVacation) => void
+  /** Remove a past absence; refunds the matching pool for logged-past entries. */
+  removePastAbsence: (id: string) => void
+  /** Update the actual hours used on a past entry, applying the delta to the
+   *  matching pool when the entry is a logged-past absence. */
+  adjustActualHours: (id: string, actualHoursUsed: number) => void
   addBankHours: (entry: BankHoursEntry) => void
   removeBankHours: (id: string) => void
   toggleTheme: () => void

@@ -4,7 +4,8 @@ import './index.css'
 import App from './App.tsx'
 import { startUpdateChecker } from './lib/updateChecker'
 
-// Global update state — components can read this
+/** Module-level flag flipped by the update checker. Components subscribe via
+ *  onUpdateChange to be notified when a new build is available. */
 export let updateAvailable = false
 const listeners = new Set<() => void>()
 

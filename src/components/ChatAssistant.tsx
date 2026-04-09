@@ -23,7 +23,7 @@ export function ChatAssistant() {
       text: 'Hi! I can help you plan time off. Try "take off July 14-18" or "can I afford next week?" Type **help** for more.',
     },
   ])
-  // Conversation context — track last discussed date range for follow-ups
+  // Last discussed date range, used to enrich follow-up messages.
   const [lastContext, setLastContext] = useState<{ startDate?: string; endDate?: string }>({})
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -48,30 +48,22 @@ export function ChatAssistant() {
       text: userText,
     }
 
-    // If the message is vague and we have context, inject it
     let enrichedInput = userText
     const lower = userText.toLowerCase()
     const hasDate = /\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|monday|tuesday|wednesday|thursday|friday|tomorrow|next\s+week|this\s+week/i.test(lower)
 
-    if (!hasDate && lastContext.startDate) {
-      // Follow-up without dates — try to reference last context
-      if (/\b(yes|yeah|yep|sure|ok|do\s+it|add\s+it|go\s+ahead|book\s+it|plan\s+it|sounds\s+good|let.?s\s+do|confirm)\b/i.test(lower)) {
-        // They're confirming the last suggestion
-        if (lastContext.startDate && lastContext.endDate) {
-          enrichedInput = `book ${lastContext.startDate} to ${lastContext.endDate}`
-        }
-      } else if (/\b(what\s+about|how\s+about|instead|or\s+maybe|alternatively|change|switch|move)\b/i.test(lower)) {
-        // They want to modify — keep context for date extraction
-        // The parser will handle this
-      } else if (/\b(why|explain|tell\s+me\s+more|details|breakdown|how|when\s+will|when\s+can)\b/i.test(lower)) {
-        // Asking for more info about last topic
+    if (!hasDate && lastContext.startDate && lastContext.endDate) {
+      const isConfirmation = /\b(yes|yeah|yep|sure|ok|do\s+it|add\s+it|go\s+ahead|book\s+it|plan\s+it|sounds\s+good|let.?s\s+do|confirm)\b/i.test(lower)
+      const isFollowUpQuestion = /\b(why|explain|tell\s+me\s+more|details|breakdown|how|when\s+will|when\s+can)\b/i.test(lower)
+      if (isConfirmation) {
+        enrichedInput = `book ${lastContext.startDate} to ${lastContext.endDate}`
+      } else if (isFollowUpQuestion) {
         enrichedInput = `tell me more about ${lastContext.startDate} to ${lastContext.endDate}`
       }
     }
 
     const response = processChat(enrichedInput, state)
 
-    // Track context from response
     if (response.action?.startDate) {
       setLastContext({ startDate: response.action.startDate, endDate: response.action.endDate })
     }
@@ -140,8 +132,8 @@ export function ChatAssistant() {
   }
 
   const panelSize = expanded
-    ? 'w-[560px] h-[600px]'
-    : 'w-96 h-[480px]'
+    ? 'w-[min(560px,calc(100vw-2rem))] h-[min(600px,calc(100vh-3rem))]'
+    : 'w-[min(384px,calc(100vw-2rem))] h-[min(480px,calc(100vh-3rem))]'
 
   return (
     <>

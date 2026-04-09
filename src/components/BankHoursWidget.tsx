@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { Wallet, Plus, X, History } from 'lucide-react'
 import { useAppState } from '../context'
-import { showToast } from './Toast'
+import { showToast } from '../lib/toastBus'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
@@ -34,7 +34,6 @@ export function BankHoursWidget() {
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-5 py-3.5">
         <div className="flex items-center gap-2.5">
           <div className="p-1.5 rounded-lg bg-teal-100 dark:bg-teal-900/30">
@@ -60,7 +59,6 @@ export function BankHoursWidget() {
         )}
       </div>
 
-      {/* Quick add */}
       <div className="px-5 py-3 border-t border-gray-200/60 dark:border-gray-700/40">
         <div className="flex gap-2">
           <input
@@ -93,7 +91,6 @@ export function BankHoursWidget() {
         </div>
       </div>
 
-      {/* History panel — toggled */}
       {showHistory && allEntries.length > 0 && (
         <div className="border-t border-gray-200/60 dark:border-gray-700/40 divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[200px] overflow-y-auto scroll-panel">
           {allEntries.map((entry) => (

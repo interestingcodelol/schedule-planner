@@ -20,7 +20,7 @@ import type { PlannedVacation } from '../lib/types'
 import { isHoliday } from '../lib/holidays'
 
 export function CalendarView() {
-  const { state, addVacation, removeVacation } = useAppState()
+  const { state, addVacation, removeVacation, addPastAbsence, adjustActualHours } = useAppState()
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
 
   const days = useMemo(() => {
@@ -43,25 +43,44 @@ export function CalendarView() {
     const monthEnd = endOfMonth(currentMonth)
     const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd })
 
-    let plannedDays = 0
+    let fullDays = 0
+    let partialDays = 0
+    let totalHours = 0
     for (const d of daysInMonth) {
       const dateStr = format(d, 'yyyy-MM-dd')
       const dow = getDay(d)
       const isWorkDay = state.policy.workDaysPerWeek.includes(dow)
       const isHol = isHoliday(state.policy, d)
-      const isPlanned = state.plannedVacations.some(
-        (v) => dateStr >= v.startDate && dateStr <= v.endDate,
+      if (!isWorkDay || isHol) continue
+      const v = state.plannedVacations.find(
+        (x) => dateStr >= x.startDate && dateStr <= x.endDate,
       )
-      if (isPlanned && isWorkDay && !isHol) {
-        plannedDays++
-      }
+      if (!v) continue
+      const hrs =
+        v.actualHoursUsed ??
+        v.hoursPerDay ??
+        state.policy.hoursPerWorkDay
+      if (hrs >= state.policy.hoursPerWorkDay) fullDays++
+      else partialDays++
+      totalHours += hrs
     }
 
-    return {
-      plannedDays,
-      plannedHours: plannedDays * state.policy.hoursPerWorkDay,
-    }
+    return { fullDays, partialDays, totalHours }
   }, [currentMonth, state.plannedVacations, state.policy])
+
+  const monthLabel = (() => {
+    const { fullDays, partialDays, totalHours } = monthStats
+    if (fullDays === 0 && partialDays === 0) return 'No planned time off this month'
+    const fmtH = (h: number) => (Number.isInteger(h) ? String(h) : (Math.round(h * 100) / 100).toString())
+    const totalDays = fullDays + partialDays
+    if (partialDays === 0) {
+      return `${fullDays} full day${fullDays === 1 ? '' : 's'} off · ${fmtH(totalHours)}h`
+    }
+    if (fullDays === 0) {
+      return `${fmtH(totalHours)}h off across ${partialDays} partial day${partialDays === 1 ? '' : 's'}`
+    }
+    return `${totalDays} days off (${fullDays} full, ${partialDays} partial) · ${fmtH(totalHours)}h`
+  })()
 
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const monthPickerRef = useRef<HTMLDivElement>(null)
@@ -85,11 +104,35 @@ export function CalendarView() {
     timeOffEnd?: string
     hourSource: 'vacation' | 'sick' | 'bank' | 'any'
     note?: string
+    asPastAbsence?: boolean
+    adjustActualHoursTo?: number
   }) => {
     if (!popoverDate) return
     const dateStr = format(popoverDate, 'yyyy-MM-dd')
 
-    // Remove existing if editing
+    if (config.adjustActualHoursTo !== undefined && popoverExisting) {
+      adjustActualHours(popoverExisting.id, config.adjustActualHoursTo)
+      setPopoverDate(null)
+      return
+    }
+
+    if (config.asPastAbsence) {
+      addPastAbsence({
+        id: crypto.randomUUID(),
+        startDate: dateStr,
+        endDate: dateStr,
+        hoursPerDay: config.hoursPerDay,
+        timeOffStart: config.timeOffStart,
+        timeOffEnd: config.timeOffEnd,
+        hourSource: config.hourSource,
+        note: config.note,
+        locked: false,
+        kind: 'logged_past',
+      })
+      setPopoverDate(null)
+      return
+    }
+
     if (popoverExisting) {
       removeVacation(popoverExisting.id)
     }
@@ -143,7 +186,7 @@ export function CalendarView() {
       className="glass-card rounded-2xl overflow-hidden flex flex-col h-full"
       onKeyDown={handleKeyDown}
     >
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">
+      <div className="flex items-center justify-between px-3 sm:px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">
         <div className="relative" ref={monthPickerRef}>
           <button
             onClick={() => setShowMonthPicker(!showMonthPicker)}
@@ -151,15 +194,7 @@ export function CalendarView() {
             title="Click to jump to a month"
           >
             <h2 className="text-base font-semibold">{format(currentMonth, 'MMMM yyyy')}</h2>
-            {monthStats.plannedDays > 0 ? (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {monthStats.plannedDays} planned work day{monthStats.plannedDays !== 1 ? 's' : ''} ({monthStats.plannedHours} hours)
-              </p>
-            ) : (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                No planned time off this month
-              </p>
-            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400">{monthLabel}</p>
           </button>
 
           {showMonthPicker && (
@@ -274,7 +309,7 @@ export function CalendarView() {
         />
       )}
 
-      <div className="px-5 py-2 border-t border-gray-200/60 dark:border-gray-700/40 flex items-center gap-5 text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0">
+      <div className="px-3 sm:px-5 py-2 border-t border-gray-200/60 dark:border-gray-700/40 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0">
         <span className="inline-flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-blue-500" />
           Planned

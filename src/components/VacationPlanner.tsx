@@ -14,7 +14,7 @@ import {
   CalendarSearch,
 } from 'lucide-react'
 import { useAppState } from '../context'
-import { showToast } from './Toast'
+import { showToast } from '../lib/toastBus'
 import {
   projectBalance,
   countWorkDays,
@@ -59,7 +59,7 @@ export function VacationPlanner() {
       suggestion = earliestAffordableDate(state, hoursNeeded, start)
     }
 
-    // Fun message for multi-day ranges
+    // Contextual note for the result panel
     let funNote = ''
     if (workDays >= 5) funNote = '🌴 A full week — nice!'
     else if (workDays >= 3) funNote = '✨ Mini vacation!'
@@ -190,32 +190,59 @@ export function VacationPlanner() {
 
         {whatIfResult && !('error' in whatIfResult) && (
           <div
-            className={`p-4 rounded-xl text-sm ${
+            className={`relative overflow-hidden rounded-xl border-l-4 ${
               whatIfResult.affordable
-                ? 'bg-emerald-50 dark:bg-emerald-900/15 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/30'
-                : 'bg-red-50 dark:bg-red-900/15 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800/30'
+                ? 'bg-emerald-50 dark:bg-emerald-900/15 text-emerald-700 dark:text-emerald-300 border-emerald-500'
+                : 'bg-red-50 dark:bg-red-900/15 text-red-700 dark:text-red-300 border-red-500'
             }`}
           >
-            <div className="flex items-center gap-2 font-semibold">
-              {whatIfResult.affordable ? (
-                <CheckCircle className="w-4 h-4" />
-              ) : (
-                <XCircle className="w-4 h-4" />
-              )}
-              {whatIfResult.affordable ? 'Affordable' : 'Not yet affordable'}
-              {whatIfResult.funNote && (
-                <span className="font-normal text-xs ml-1">{whatIfResult.funNote}</span>
-              )}
-            </div>
-            <div className="mt-2 text-sm space-y-0.5 opacity-80">
-              <div>
-                {whatIfResult.workDays} work days &middot; {fmt(whatIfResult.hoursNeeded)} hrs
-                needed
+            <div className="px-4 py-3.5">
+              {/* Big yes/no headline */}
+              <div className="flex items-center gap-2.5">
+                {whatIfResult.affordable ? (
+                  <CheckCircle className="w-6 h-6 shrink-0" />
+                ) : (
+                  <XCircle className="w-6 h-6 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-base font-bold leading-tight">
+                    {whatIfResult.affordable ? 'Yes — affordable' : 'Not yet affordable'}
+                  </div>
+                  {whatIfResult.funNote && (
+                    <div className="text-xs font-normal opacity-80 mt-0.5">
+                      {whatIfResult.funNote}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>Total available on start: {fmt(whatIfResult.balanceOnStart)} hrs</div>
+
+              {/* Detail rows */}
+              <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs opacity-90">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
+                    Needed
+                  </div>
+                  <div className="font-semibold tabular-nums">
+                    {fmt(whatIfResult.hoursNeeded)} hrs
+                    <span className="font-normal opacity-70"> · {whatIfResult.workDays} day{whatIfResult.workDays === 1 ? '' : 's'}</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
+                    You'll have
+                  </div>
+                  <div className="font-semibold tabular-nums">
+                    {fmt(whatIfResult.balanceOnStart)} hrs
+                  </div>
+                </div>
+              </div>
+
               {!whatIfResult.affordable && whatIfResult.suggestion && (
-                <div className="font-medium">
-                  Earliest affordable: {format(whatIfResult.suggestion, 'MMM d, yyyy')}
+                <div className="mt-3 pt-2.5 border-t border-current/15 text-xs">
+                  <span className="opacity-70">Earliest affordable: </span>
+                  <span className="font-bold">
+                    {format(whatIfResult.suggestion, 'EEE, MMM d, yyyy')}
+                  </span>
                 </div>
               )}
             </div>

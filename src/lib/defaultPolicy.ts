@@ -1,22 +1,25 @@
 import type { PolicyConfig } from './types'
 
 /**
- * These defaults represent a common US employer policy pattern.
- * Edit in Settings to match your own employer's rules.
+ * Default policy:
+ *   year 1 → 8 days/yr, years 2–5 → 10 days/yr,
+ *   years 6–10 → 15 days/yr, years 11+ → 20 days/yr
+ * Customize via Settings → Policy.
  */
 export const defaultPolicy: PolicyConfig = {
   accrualTiers: [
-    { minYears: 0, maxYears: 1, hoursPerPayPeriod: 2.46, label: 'Year 1' },
-    { minYears: 1, maxYears: 5, hoursPerPayPeriod: 3.08, label: 'Years 1–5' },
-    { minYears: 5, maxYears: 10, hoursPerPayPeriod: 4.62, label: 'Years 5–10' },
-    { minYears: 10, maxYears: null, hoursPerPayPeriod: 6.15, label: '10+ Years' },
+    { minYears: 0, maxYears: 1, hoursPerPayPeriod: 2.461, label: 'Year 1' },
+    { minYears: 1, maxYears: 5, hoursPerPayPeriod: 3.076, label: 'Years 2–5' },
+    { minYears: 5, maxYears: 10, hoursPerPayPeriod: 4.615, label: 'Years 6–10' },
+    { minYears: 10, maxYears: null, hoursPerPayPeriod: 6.153, label: 'Years 11+' },
   ],
   payPeriodLengthDays: 14,
   carryoverCapStrategy: 'annual_accrual',
-  carryoverPayoutDate: { month: 2, day: 1 }, // February 1
+  carryoverPayoutDate: { month: 2, day: 1 },
   sickLeaveAnnualGrant: 40,
   sickLeaveMaxBalance: 80,
-  workDaysPerWeek: [1, 2, 3, 4, 5], // Monday through Friday
+  sickLeaveCarryoverCap: 40,
+  workDaysPerWeek: [1, 2, 3, 4, 5],
   hoursPerWorkDay: 8,
   holidays: [
     { type: 'fixed', month: 1, day: 1, name: "New Year's Day", weekendObservance: 'nearest_weekday' },
@@ -32,6 +35,6 @@ export const defaultPolicy: PolicyConfig = {
     { type: 'fixed', month: 12, day: 24, name: 'Christmas Eve', weekendObservance: 'nearest_weekday' },
     { type: 'fixed', month: 12, day: 25, name: 'Christmas Day', weekendObservance: 'nearest_weekday' },
   ],
-  bankHoursPayoutStart: { month: 12, day: 15 }, // Mid-December
-  bankHoursPayoutEnd: { month: 2, day: 15 }, // Through mid-February
+  bankHoursPayoutStart: { month: 12, day: 15 },
+  bankHoursPayoutEnd: { month: 2, day: 15 },
 }

@@ -4,6 +4,7 @@ import {
   projectBalance,
   earliestAffordableDate,
   computeAccrualTier,
+  getEffectiveCurrentBalances,
 } from '../projection'
 import { computeHolidayDates } from '../holidays'
 import { defaultPolicy } from '../defaultPolicy'
@@ -256,15 +257,200 @@ describe('projectBalance', () => {
   })
 })
 
+describe('getEffectiveCurrentBalances (timezone-aware EOD cutoff)', () => {
+  it('does NOT deduct same-day vacation before the local end-of-work-day', () => {
+    // Mock current time to 10:00 ET (before 4 PM cutoff)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-06-16T14:00:00Z')) // 10 AM ET in summer (UTC-4)
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 20,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'today-vacation',
+          startDate: '2025-06-16',
+          endDate: '2025-06-16',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+
+    const eff = getEffectiveCurrentBalances(state)
+    // Before 4 PM ET — vacation balance should still be 40, not 32.
+    expect(eff.vacation).toBe(40)
+    expect(eff.total).toBe(60)
+  })
+
+  it('DOES deduct same-day vacation after the local end-of-work-day', () => {
+    // Mock to 5 PM ET — past the 4 PM cutoff for an 8-hour day starting at 8 AM
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-06-16T21:00:00Z')) // 5 PM ET
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 20,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'today-vacation',
+          startDate: '2025-06-16',
+          endDate: '2025-06-16',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+
+    const eff = getEffectiveCurrentBalances(state)
+    expect(eff.vacation).toBe(32)
+    expect(eff.total).toBe(52)
+  })
+
+  it('respects user timezone — PT user at 10 AM PT (1 PM ET) is still pre-cutoff', () => {
+    // 10 AM PT = 5 PM UTC = 1 PM ET. Both ET and PT users see "before 4 PM local",
+    // but specifically the PT user's clock should be honored.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-06-16T17:00:00Z')) // 10 AM PT
+
+    const state = makeState({
+      profile: {
+        displayName: 'PT User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 20,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+        timezone: 'America/Los_Angeles',
+      },
+      plannedVacations: [
+        {
+          id: 'today-vacation',
+          startDate: '2025-06-16',
+          endDate: '2025-06-16',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+
+    const eff = getEffectiveCurrentBalances(state)
+    // Still pre-cutoff in PT — should not deduct
+    expect(eff.vacation).toBe(40)
+  })
+
+  it('logged_past entries are NOT re-deducted (already mutated stored balances)', () => {
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 16, // already debited 4 by the logged-past entry
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'past-sick',
+          startDate: '2025-06-10',
+          endDate: '2025-06-10',
+          hoursPerDay: 4,
+          actualHoursUsed: 4,
+          hourSource: 'sick',
+          locked: false,
+          kind: 'logged_past',
+        },
+      ],
+    })
+
+    const eff = getEffectiveCurrentBalances(state)
+    // Sick should remain at 16, not 12 — the entry already drained it on creation.
+    expect(eff.sick).toBe(16)
+  })
+})
+
+describe('sick leave carryover cap', () => {
+  it('forfeits hours above the carryover cap, then grants the new annual amount, capped at max', () => {
+    // Project across a year boundary so the sick_grant event fires.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-12-15T12:00:00'))
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 60, // above the 40-hour carryover cap
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-12',
+      },
+      policy: {
+        ...defaultPolicy,
+        sickLeaveAnnualGrant: 40,
+        sickLeaveCarryoverCap: 40,
+        sickLeaveMaxBalance: 80,
+      },
+    })
+
+    const result = projectBalance(state, new Date('2026-02-01'))
+    // Carryover from 60 → cap to 40, then +40 grant = 80 (the max)
+    expect(result.sickBalance).toBe(80)
+  })
+
+  it('does NOT forfeit hours when balance is within the carryover cap', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-12-15T12:00:00'))
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 25, // below the 40-hour carryover cap
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-12',
+      },
+      policy: {
+        ...defaultPolicy,
+        sickLeaveAnnualGrant: 40,
+        sickLeaveCarryoverCap: 40,
+        sickLeaveMaxBalance: 80,
+      },
+    })
+
+    const result = projectBalance(state, new Date('2026-02-01'))
+    // 25 carries over (below 40 cap), +40 grant = 65
+    expect(result.sickBalance).toBe(65)
+  })
+})
+
 describe('computeAccrualTier', () => {
   it('returns correct tier for each range', () => {
-    expect(computeAccrualTier(defaultPolicy, 0).hoursPerPayPeriod).toBe(2.46)
-    expect(computeAccrualTier(defaultPolicy, 0.5).hoursPerPayPeriod).toBe(2.46)
-    expect(computeAccrualTier(defaultPolicy, 1).hoursPerPayPeriod).toBe(3.08)
-    expect(computeAccrualTier(defaultPolicy, 3).hoursPerPayPeriod).toBe(3.08)
-    expect(computeAccrualTier(defaultPolicy, 5).hoursPerPayPeriod).toBe(4.62)
-    expect(computeAccrualTier(defaultPolicy, 10).hoursPerPayPeriod).toBe(6.15)
-    expect(computeAccrualTier(defaultPolicy, 25).hoursPerPayPeriod).toBe(6.15)
+    expect(computeAccrualTier(defaultPolicy, 0).hoursPerPayPeriod).toBe(2.461)
+    expect(computeAccrualTier(defaultPolicy, 0.5).hoursPerPayPeriod).toBe(2.461)
+    expect(computeAccrualTier(defaultPolicy, 1).hoursPerPayPeriod).toBe(3.076)
+    expect(computeAccrualTier(defaultPolicy, 3).hoursPerPayPeriod).toBe(3.076)
+    expect(computeAccrualTier(defaultPolicy, 5).hoursPerPayPeriod).toBe(4.615)
+    expect(computeAccrualTier(defaultPolicy, 10).hoursPerPayPeriod).toBe(6.153)
+    expect(computeAccrualTier(defaultPolicy, 25).hoursPerPayPeriod).toBe(6.153)
   })
 })
 

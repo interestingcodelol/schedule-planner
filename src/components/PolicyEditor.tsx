@@ -68,7 +68,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Accrual Tiers — prominently displayed for easy editing */}
+      {/* Accrual Tiers */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
           Accrual Tiers

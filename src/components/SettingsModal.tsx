@@ -5,6 +5,7 @@ import { useAppState } from '../context'
 import { PolicyEditor } from './PolicyEditor'
 import { exportState, validateImportedState } from '../lib/storage'
 import { generateDemoState } from '../lib/demoData'
+import { COMMON_TIMEZONES } from '../lib/timeUtils'
 
 type Props = {
   onClose: () => void
@@ -204,6 +205,35 @@ export function SettingsModal({ onClose }: Props) {
                   max={format(new Date(), 'yyyy-MM-dd')}
                   className={inputClass}
                 />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1.5 font-medium">
+                  Timezone
+                </label>
+                <select
+                  value={
+                    COMMON_TIMEZONES.some((tz) => tz.value === state.profile.timezone)
+                      ? state.profile.timezone
+                      : '__other__'
+                  }
+                  onChange={(e) => {
+                    if (e.target.value === '__other__') return
+                    updateProfile({ timezone: e.target.value })
+                  }}
+                  className={inputClass}
+                >
+                  {COMMON_TIMEZONES.map((tz) => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </option>
+                  ))}
+                  {!COMMON_TIMEZONES.some((tz) => tz.value === state.profile.timezone) && (
+                    <option value="__other__">{state.profile.timezone} (current)</option>
+                  )}
+                </select>
+                <p className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
+                  Used so same-day time off doesn't deduct from your available hours until after your local end-of-work-day.
+                </p>
               </div>
             </div>
           )}

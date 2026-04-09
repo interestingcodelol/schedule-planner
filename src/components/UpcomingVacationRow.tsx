@@ -1,32 +1,17 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
-import {
-  format,
-  parseISO,
-  addDays,
-  isBefore,
-  isSameDay,
-  startOfDay,
-  differenceInDays,
-  getDay,
-} from 'date-fns'
+import { useEffect, useRef, useState } from 'react'
+import { differenceInDays, format, getDay, isBefore, parseISO, startOfDay } from 'date-fns'
 import {
   CalendarDays,
-  Gift,
-  TrendingUp,
-  Lock,
-  Unlock,
-  Trash2,
   CheckCircle,
+  Lock,
+  Trash2,
+  Unlock,
   XCircle,
-  Palmtree,
 } from 'lucide-react'
 import { useAppState } from '../context'
-import { projectBalance, countWorkDays, getNextPayday } from '../lib/projection'
-import { showToast } from './Toast'
-
-function fmt(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(2)
-}
+import { countWorkDays, projectBalance } from '../lib/projection'
+import type { PlannedVacation } from '../lib/types'
+import { showToast } from '../lib/toastBus'
 
 const SOURCE_LABELS: Record<string, string> = {
   any: '',
@@ -40,133 +25,15 @@ const EMOJI_OPTIONS = [
   '💼', '🏠', '🎮', '🧘', '🏕️', '🎵', '🚗', '👶', '🐾', '💤',
 ]
 
-export function UpcomingEvents() {
-  const { state } = useAppState()
-  const today = startOfDay(new Date())
-
-  // Sorted planned vacations (future + current)
-  const sortedVacations = useMemo(
-    () =>
-      [...state.plannedVacations]
-        .filter((v) => !isBefore(parseISO(v.endDate), today))
-        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
-    [state.plannedVacations, today],
-  )
-
-  // Info events (holidays, paydays) — non-interactive
-  const infoEvents = useMemo(() => {
-    const items: Array<{
-      key: string
-      icon: React.ElementType
-      label: string
-      detail: string
-      accent: string
-      sortDate: Date
-    }> = []
-
-    // Next payday
-    const nextPayday = getNextPayday(
-      parseISO(state.profile.lastPaydayDate),
-      state.policy.payPeriodLengthDays,
-    )
-    const daysToPayday = differenceInDays(nextPayday, today)
-    if (daysToPayday >= 0 && daysToPayday <= 30) {
-      items.push({
-        key: `payday-${format(nextPayday, 'yyyy-MM-dd')}`,
-        icon: TrendingUp,
-        label: `Payday${daysToPayday === 0 ? ' today' : ''}`,
-        detail: `${format(nextPayday, 'EEE, MMM d')}${daysToPayday > 0 ? ` — ${daysToPayday}d away` : ''}`,
-        accent: 'text-emerald-500',
-        sortDate: nextPayday,
-      })
-    }
-
-    // Upcoming holidays (next 90 days)
-    const lookAhead = addDays(today, 90)
-    for (const rule of state.policy.holidays) {
-      for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
-        let holidayDate: Date
-        try {
-          if (rule.type === 'fixed') {
-            holidayDate = new Date(year, rule.month - 1, rule.day)
-          } else if (rule.type === 'nth_weekday') {
-            const firstOfMonth = new Date(year, rule.month - 1, 1)
-            const firstDow = firstOfMonth.getDay()
-            let dayOffset = rule.weekday - firstDow
-            if (dayOffset < 0) dayOffset += 7
-            holidayDate = addDays(firstOfMonth, dayOffset + (rule.n - 1) * 7)
-          } else {
-            continue
-          }
-        } catch {
-          continue
-        }
-
-        if (!isBefore(holidayDate, today) && isBefore(holidayDate, lookAhead) && !isSameDay(holidayDate, today)) {
-          const daysUntil = differenceInDays(holidayDate, today)
-          items.push({
-            key: `holiday-${rule.name}-${year}`,
-            icon: Gift,
-            label: rule.name,
-            detail: `${format(holidayDate, 'EEE, MMM d')} — ${daysUntil}d away`,
-            accent: 'text-amber-500',
-            sortDate: holidayDate,
-          })
-        }
-      }
-    }
-
-    return items.sort((a, b) => a.sortDate.getTime() - b.sortDate.getTime())
-  }, [state, today])
-
-  const hasContent = sortedVacations.length > 0 || infoEvents.length > 0
-
-  return (
-    <div className="glass-card rounded-2xl overflow-hidden h-full flex flex-col">
-      <div className="px-5 py-3.5 border-b border-gray-200/60 dark:border-gray-700/40">
-        <h3 className="text-base font-semibold">Upcoming</h3>
-      </div>
-
-      {!hasContent ? (
-        <div className="px-5 py-8 text-center">
-          <Palmtree className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-          <p className="text-sm text-gray-400 dark:text-gray-500">
-            No upcoming events
-          </p>
-        </div>
-      ) : (
-        <div className="divide-y divide-gray-100 dark:divide-gray-800/60 flex-1 min-h-0 overflow-y-auto scroll-panel">
-          {/* Planned vacations — with full controls */}
-          {sortedVacations.map((vacation) => (
-            <VacationRow key={vacation.id} vacation={vacation} />
-          ))}
-
-          {/* Info events — holidays, paydays */}
-          {infoEvents.map((event) => (
-            <div key={event.key} className="px-5 py-3.5 flex items-start gap-3">
-              <event.icon className={`w-4.5 h-4.5 mt-0.5 shrink-0 ${event.accent}`} />
-              <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{event.label}</div>
-                <div className="text-sm text-gray-400 dark:text-gray-500">{event.detail}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+function fmt(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2)
 }
 
-function VacationRow({ vacation }: { vacation: {
-  id: string
-  startDate: string
-  endDate: string
-  hoursPerDay?: number
-  hourSource: 'vacation' | 'sick' | 'bank' | 'any'
-  note?: string
-  locked: boolean
-  customEmoji?: string
-}}) {
+type Props = {
+  vacation: PlannedVacation
+}
+
+export function UpcomingVacationRow({ vacation }: Props) {
   const { state, addVacation, removeVacation, updateVacation } = useAppState()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiRef = useRef<HTMLSpanElement>(null)
@@ -176,7 +43,6 @@ function VacationRow({ vacation }: { vacation: {
   const isPast = isBefore(end, today)
   const daysUntil = differenceInDays(start, today)
 
-  // Close emoji picker on click outside
   useEffect(() => {
     if (!showEmojiPicker) return
     const handleClick = (e: MouseEvent) => {
@@ -226,7 +92,11 @@ function VacationRow({ vacation }: { vacation: {
   }
 
   return (
-    <div className={`px-5 py-3 group hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors ${isPast ? 'opacity-40' : ''}`}>
+    <div
+      className={`px-5 py-3 group hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors ${
+        isPast ? 'opacity-40' : ''
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
           <CalendarDays className="w-4 h-4 mt-0.5 shrink-0 text-blue-500" />

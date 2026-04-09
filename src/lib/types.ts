@@ -40,6 +40,10 @@ export type PolicyConfig = {
   carryoverPayoutDate: { month: number; day: number }
   sickLeaveAnnualGrant: number
   sickLeaveMaxBalance: number
+  /** Optional cap on how many sick hours carry over into the next calendar year.
+   *  When set, the balance is capped to this value on Jan 1 before the annual
+   *  grant is applied. */
+  sickLeaveCarryoverCap?: number
   workDaysPerWeek: number[] // 0=Sun, 1=Mon, ..., 6=Sat
   hoursPerWorkDay: number
   holidays: HolidayRule[]
@@ -61,19 +65,31 @@ export type UserProfile = {
   currentSickHours: number
   currentBankHours: number
   lastPaydayDate: string // ISO date string
+  /** IANA timezone. Optional for backward compatibility; migrateState
+   *  populates it from Intl.DateTimeFormat() when missing. */
+  timezone?: string
 }
 
 export type PlannedVacation = {
   id: string
-  startDate: string // ISO date string
-  endDate: string // ISO date string
-  hoursPerDay?: number // Override hours per day (for partial days). Undefined = full day.
-  timeOffStart?: string // e.g. "08:00" — when time off begins (display only)
-  timeOffEnd?: string // e.g. "12:00" — when time off ends (display only)
+  startDate: string
+  endDate: string
+  /** Hours per day in 15-minute increments. Undefined means a full work day. */
+  hoursPerDay?: number
+  /** "HH:MM" start time (display only). */
+  timeOffStart?: string
+  /** "HH:MM" end time (display only). */
+  timeOffEnd?: string
   hourSource: 'vacation' | 'sick' | 'bank' | 'any'
   note?: string
   locked: boolean
   customEmoji?: string
+  /** 'planned' = scheduled in advance (default).
+   *  'logged_past' = retroactively logged absence; decrements the matching
+   *  balance pool when created. */
+  kind?: 'planned' | 'logged_past'
+  /** Actual hours used on a past entry, when different from `hoursPerDay`. */
+  actualHoursUsed?: number
 }
 
 export type AppState = {

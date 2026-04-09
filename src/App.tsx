@@ -6,12 +6,21 @@ import { Dashboard } from './components/Dashboard'
 import { UpdateBanner } from './components/UpdateBanner'
 import { AppContext } from './context'
 
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
+  } catch {
+    return 'America/New_York'
+  }
+}
+
 function migrateState(loaded: AppState): AppState {
   return {
     ...loaded,
     profile: {
       ...loaded.profile,
       currentBankHours: loaded.profile.currentBankHours ?? 0,
+      timezone: loaded.profile.timezone ?? detectTimezone(),
     },
     bankHoursLog: loaded.bankHoursLog ?? [],
     showTour: loaded.showTour ?? false,
@@ -23,8 +32,56 @@ function migrateState(loaded: AppState): AppState {
     plannedVacations: loaded.plannedVacations.map((v) => ({
       ...v,
       hourSource: v.hourSource ?? ('any' as const),
+      kind: v.kind ?? ('planned' as const),
     })),
   }
+}
+
+/** Subtract hours from the matching pool. For 'any', drain bank → vacation → sick. */
+function applyDebit(
+  state: AppState,
+  hours: number,
+  source: 'vacation' | 'sick' | 'bank' | 'any',
+): { vacation: number; sick: number; bank: number } {
+  let vacation = state.profile.currentVacationHours
+  let sick = state.profile.currentSickHours
+  let bank = state.profile.currentBankHours
+  if (source === 'vacation') {
+    vacation -= hours
+  } else if (source === 'sick') {
+    sick -= hours
+  } else if (source === 'bank') {
+    bank -= hours
+  } else {
+    let remaining = hours
+    const fromBank = Math.min(remaining, Math.max(0, bank))
+    bank -= fromBank
+    remaining -= fromBank
+    if (remaining > 0) {
+      const fromVaca = Math.min(remaining, Math.max(0, vacation))
+      vacation -= fromVaca
+      remaining -= fromVaca
+    }
+    if (remaining > 0) {
+      const fromSick = Math.min(remaining, Math.max(0, sick))
+      sick -= fromSick
+    }
+  }
+  return { vacation, sick, bank }
+}
+
+/** Refund hours to the matching pool. 'any' credits back to vacation. */
+function applyRefund(
+  state: AppState,
+  hours: number,
+  source: 'vacation' | 'sick' | 'bank' | 'any',
+): { vacation: number; sick: number; bank: number } {
+  const vacation = state.profile.currentVacationHours
+  const sick = state.profile.currentSickHours
+  const bank = state.profile.currentBankHours
+  if (source === 'sick') return { vacation, sick: sick + hours, bank }
+  if (source === 'bank') return { vacation, sick, bank: bank + hours }
+  return { vacation: vacation + hours, sick, bank }
 }
 
 function getInitialState(): { state: AppState | null; isDemo: boolean } {
@@ -38,12 +95,10 @@ function getInitialState(): { state: AppState | null; isDemo: boolean } {
 export default function App() {
   const [{ state, isDemo }, setAppData] = useState(getInitialState)
 
-  // Try loading from IndexedDB on mount (may have data even if localStorage was cleared)
   useEffect(() => {
     loadStateAsync().then((idbState) => {
       if (idbState) {
         setAppData((prev) => {
-          // Only use IDB state if we don't already have state loaded
           if (prev.state) return prev
           return { state: migrateState(idbState), isDemo: idbState.profile.displayName === 'Demo User' }
         })
@@ -119,11 +174,98 @@ export default function App() {
   const removeVacation = useCallback((id: string) => {
     setAppData((prev) => {
       if (!prev.state) return prev
+      const entry = prev.state.plannedVacations.find((v) => v.id === id)
+      if (entry && entry.kind === 'logged_past') {
+        const hrs = entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
+        const refunded = applyRefund(prev.state, hrs, entry.hourSource || 'any')
+        return {
+          ...prev,
+          state: {
+            ...prev.state,
+            profile: {
+              ...prev.state.profile,
+              currentVacationHours: refunded.vacation,
+              currentSickHours: refunded.sick,
+              currentBankHours: refunded.bank,
+            },
+            plannedVacations: prev.state.plannedVacations.filter((v) => v.id !== id),
+          },
+        }
+      }
       return {
         ...prev,
         state: {
           ...prev.state,
           plannedVacations: prev.state.plannedVacations.filter((v) => v.id !== id),
+        },
+      }
+    })
+  }, [])
+
+  const addPastAbsence = useCallback((vacation: PlannedVacation) => {
+    setAppData((prev) => {
+      if (!prev.state) return prev
+      const entry: PlannedVacation = { ...vacation, kind: 'logged_past' }
+      const hrs = entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
+      const debited = applyDebit(prev.state, hrs, entry.hourSource || 'sick')
+      return {
+        ...prev,
+        state: {
+          ...prev.state,
+          profile: {
+            ...prev.state.profile,
+            currentVacationHours: debited.vacation,
+            currentSickHours: debited.sick,
+            currentBankHours: debited.bank,
+          },
+          plannedVacations: [...prev.state.plannedVacations, entry],
+        },
+      }
+    })
+  }, [])
+
+  const removePastAbsence = removeVacation
+
+  const adjustActualHours = useCallback((id: string, actualHoursUsed: number) => {
+    setAppData((prev) => {
+      if (!prev.state) return prev
+      const entry = prev.state.plannedVacations.find((v) => v.id === id)
+      if (!entry) return prev
+
+      const newEntries = prev.state.plannedVacations.map((v) =>
+        v.id === id ? { ...v, actualHoursUsed } : v,
+      )
+
+      if (entry.kind !== 'logged_past') {
+        return {
+          ...prev,
+          state: { ...prev.state, plannedVacations: newEntries },
+        }
+      }
+
+      const oldHrs = entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
+      const delta = actualHoursUsed - oldHrs
+      let pools = {
+        vacation: prev.state.profile.currentVacationHours,
+        sick: prev.state.profile.currentSickHours,
+        bank: prev.state.profile.currentBankHours,
+      }
+      if (delta > 0) {
+        pools = applyDebit(prev.state, delta, entry.hourSource || 'sick')
+      } else if (delta < 0) {
+        pools = applyRefund(prev.state, -delta, entry.hourSource || 'sick')
+      }
+      return {
+        ...prev,
+        state: {
+          ...prev.state,
+          profile: {
+            ...prev.state.profile,
+            currentVacationHours: pools.vacation,
+            currentSickHours: pools.sick,
+            currentBankHours: pools.bank,
+          },
+          plannedVacations: newEntries,
         },
       }
     })
@@ -224,6 +366,9 @@ export default function App() {
         addVacation,
         removeVacation,
         updateVacation,
+        addPastAbsence,
+        removePastAbsence,
+        adjustActualHours,
         addBankHours,
         removeBankHours,
         toggleTheme,
@@ -232,7 +377,7 @@ export default function App() {
         resetToSetup,
       }}
     >
-      <div className="h-screen flex flex-col overflow-hidden">
+      <div className="min-h-screen lg:h-screen flex flex-col lg:overflow-hidden">
         <UpdateBanner />
         <div className="flex-1 min-h-0">
           <Dashboard />

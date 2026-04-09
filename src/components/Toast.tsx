@@ -1,32 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
+import { subscribeToToasts, type ToastData } from '../lib/toastBus'
 
-type ToastData = {
-  id: string
-  message: string
-  action?: { label: string; onClick: () => void }
-  duration?: number
-}
-
-const toastListeners = new Set<(t: ToastData) => void>()
-
-export function showToast(toast: Omit<ToastData, 'id'>) {
-  const data: ToastData = { ...toast, id: crypto.randomUUID() }
-  toastListeners.forEach((fn) => fn(data))
-}
-
-/**
- * Inline toast that sits in the header bar — not a floating overlay.
- * Shows the most recent notification, auto-dismisses.
- */
 export function InlineToast() {
   const [toast, setToast] = useState<ToastData | null>(null)
 
-  useEffect(() => {
-    const handler = (t: ToastData) => setToast(t)
-    toastListeners.add(handler)
-    return () => { toastListeners.delete(handler) }
-  }, [])
+  useEffect(() => subscribeToToasts(setToast), [])
 
   const dismiss = useCallback(() => setToast(null), [])
 

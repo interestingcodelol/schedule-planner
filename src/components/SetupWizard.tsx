@@ -73,6 +73,13 @@ export function SetupWizard({ onComplete }: Props) {
         currentSickHours: Number(sickHours) || 0,
         currentBankHours: 0,
         lastPaydayDate: lastPayday,
+        timezone: (() => {
+          try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
+          } catch {
+            return 'America/New_York'
+          }
+        })(),
       },
       policy: { ...defaultPolicy },
       plannedVacations: [],

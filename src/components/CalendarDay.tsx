@@ -13,6 +13,7 @@ import {
 import { useAppState } from '../context'
 import { projectBalance } from '../lib/projection'
 import { getHolidayName } from '../lib/holidays'
+import { formatTimeCompact, isWorkDayOverInZone } from '../lib/timeUtils'
 
 type Props = {
   date: Date
@@ -45,9 +46,9 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   const today = startOfDay(new Date())
   const isToday = isSameDay(date, today)
   const isCurrentMonth = isSameMonth(date, currentMonth)
-  // Today counts as "past" once the work day is over (e.g. after 4 PM for an 8AM+8hr day)
-  const workDayEndHour = 8 + state.policy.hoursPerWorkDay // e.g. 16 (4 PM)
-  const isTodayWorkDayOver = isToday && new Date().getHours() >= workDayEndHour
+  const isTodayWorkDayOver =
+    isToday &&
+    isWorkDayOverInZone(state.profile.timezone || 'America/New_York', state.policy.hoursPerWorkDay)
   const isPast = isBefore(date, today) || isTodayWorkDayOver
   const dow = getDay(date)
   const isWeekend = !state.policy.workDaysPerWeek.includes(dow)
@@ -86,15 +87,19 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     return result.totalAvailable
   }, [state, date, isPast, isToday])
 
-  const deductHours = plannedVacation?.hoursPerDay ?? state.policy.hoursPerWorkDay
+  const isLoggedPast = plannedVacation?.kind === 'logged_past'
+  const deductHours =
+    plannedVacation?.actualHoursUsed ??
+    plannedVacation?.hoursPerDay ??
+    state.policy.hoursPerWorkDay
   const isUnaffordable =
     isPlannedVacation && !isWeekend && !isHolidayDay &&
     projectedBalance !== null && projectedBalance < deductHours
 
-  // Can plan new time off on future work days; can edit existing planned days even if past
   const canPlanNew = !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
   const canEdit = isPlannedVacation && isCurrentMonth && !isWeekend && !isHolidayDay
-  const canClick = canPlanNew || canEdit
+  const canLogPast = !isWeekend && !isHolidayDay && isCurrentMonth && isPast && !isPlannedVacation
+  const canClick = canPlanNew || canEdit || canLogPast
 
   const handleClick = () => {
     if (canClick) onDayClick(date)
@@ -107,7 +112,6 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     }
   }
 
-  // Build tooltip text with fun messages
   const buildTooltip = (): string => {
     const parts: string[] = []
     parts.push(format(date, 'EEEE, MMMM d'))
@@ -123,6 +127,22 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         const tier = state.policy.accrualTiers.find(t => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears))
         return tier?.hoursPerPayPeriod ?? 0
       })() : 0)} hrs vacation`)
+    }
+
+    if (isPlannedVacation && isPast) {
+      const verb = isLoggedPast ? 'Logged absence' : 'Past time off'
+      const noteSuffix = plannedVacation?.note ? ` (${plannedVacation.note})` : ''
+      parts.push(`${isLoggedPast ? '🤒' : '✓'} ${verb} — ${fmt(deductHours)}h${noteSuffix}`)
+      if (
+        plannedVacation?.actualHoursUsed !== undefined &&
+        plannedVacation.hoursPerDay !== undefined &&
+        plannedVacation.actualHoursUsed !== plannedVacation.hoursPerDay
+      ) {
+        parts.push(`Originally planned: ${fmt(plannedVacation.hoursPerDay)}h`)
+      }
+      parts.push('Click to adjust hours actually used')
+    } else if (canLogPast) {
+      parts.push('Click to log a past absence')
     }
 
     if (isPlannedVacation && !isPast) {
@@ -158,7 +178,9 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   if (isHolidayDay && isCurrentMonth) {
     bgClass = 'bg-gradient-to-br from-amber-50/60 to-orange-50/40 dark:from-amber-950/25 dark:to-orange-950/15'
   } else if (isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth) {
-    if (isPast) {
+    if (isLoggedPast) {
+      bgClass = 'bg-rose-100/40 dark:bg-rose-900/15'
+    } else if (isPast) {
       bgClass = 'bg-blue-100/30 dark:bg-blue-900/10'
     } else if (isUnaffordable) {
       bgClass = 'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
@@ -229,6 +251,11 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
               className={`w-2 h-2 rounded-full ${isUnaffordable ? 'bg-red-500' : isPartialDay ? 'bg-sky-500' : 'bg-blue-500'}`}
             />
           )}
+          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && isPast && (
+            <span className="text-xs leading-none" title={isLoggedPast ? 'Logged absence' : 'Past time off'}>
+              {isLoggedPast ? '🤒' : '✓'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -239,7 +266,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
             <>
               <div className={`text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
                 {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
-                  ? `${fmtTime(plannedVacation.timeOffStart)} – ${fmtTime(plannedVacation.timeOffEnd)}`
+                  ? `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`
                   : `${fmt(deductHours)}h`}
               </div>
               <div className={`w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`} />
@@ -281,13 +308,5 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 }
 
 function fmt(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(2)
-}
-
-function fmtTime(t: string): string {
-  const h = parseInt(t.split(':')[0])
-  if (h === 0) return '12a'
-  if (h < 12) return `${h}a`
-  if (h === 12) return '12p'
-  return `${h - 12}p`
+  return Number.isInteger(n) ? String(n) : (Math.round(n * 100) / 100).toString()
 }

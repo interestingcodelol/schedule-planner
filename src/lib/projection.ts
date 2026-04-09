@@ -14,11 +14,92 @@ import {
 import type {
   AccrualTier,
   AppState,
+  PlannedVacation,
   PolicyConfig,
   ProjectionEvent,
   ProjectionResult,
 } from './types'
 import { computeHolidayDates } from './holidays'
+import { getNowInZone, isWorkDayOverInZone } from './timeUtils'
+
+const DEFAULT_TZ = 'America/New_York'
+
+function applyDeduction(
+  hours: number,
+  source: 'vacation' | 'sick' | 'bank' | 'any',
+  pools: { vacation: number; sick: number; bank: number },
+): void {
+  if (source === 'vacation') {
+    pools.vacation -= hours
+    return
+  }
+  if (source === 'sick') {
+    pools.sick -= hours
+    return
+  }
+  if (source === 'bank') {
+    pools.bank -= hours
+    return
+  }
+  let remaining = hours
+  const fromBank = Math.min(remaining, Math.max(0, pools.bank))
+  pools.bank -= fromBank
+  remaining -= fromBank
+  if (remaining > 0) {
+    const fromVaca = Math.min(remaining, Math.max(0, pools.vacation))
+    pools.vacation -= fromVaca
+    remaining -= fromVaca
+  }
+  if (remaining > 0) {
+    const fromSick = Math.min(remaining, Math.max(0, pools.sick))
+    pools.sick -= fromSick
+  }
+}
+
+function resolveDeductHours(v: PlannedVacation, hoursPerWorkDay: number): number {
+  if (v.actualHoursUsed !== undefined) return v.actualHoursUsed
+  if (v.hoursPerDay !== undefined) return v.hoursPerDay
+  return hoursPerWorkDay
+}
+
+/**
+ * The user's currently-displayable balance, with same-day planned time off
+ * applied only after the user's local end-of-work-day cutoff. `logged_past`
+ * entries are excluded since they already mutated the stored balances when
+ * created.
+ */
+export function getEffectiveCurrentBalances(state: AppState): {
+  vacation: number
+  sick: number
+  bank: number
+  total: number
+} {
+  const pools = {
+    vacation: state.profile.currentVacationHours,
+    sick: state.profile.currentSickHours,
+    bank: state.profile.currentBankHours,
+  }
+
+  const tz = state.profile.timezone || DEFAULT_TZ
+  const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
+  if (todayIsOver) {
+    const isoToday = getNowInZone(tz).isoDate
+    for (const v of state.plannedVacations) {
+      if (v.kind === 'logged_past') continue
+      if (v.startDate <= isoToday && v.endDate >= isoToday) {
+        const hrs = resolveDeductHours(v, state.policy.hoursPerWorkDay)
+        applyDeduction(hrs, v.hourSource || 'any', pools)
+      }
+    }
+  }
+
+  return {
+    vacation: pools.vacation,
+    sick: pools.sick,
+    bank: pools.bank,
+    total: pools.vacation + pools.sick + pools.bank,
+  }
+}
 
 /**
  * Determine which accrual tier applies based on years of service.
@@ -110,20 +191,12 @@ function isInBankPayoutWindow(date: Date, policy: PolicyConfig): boolean {
 }
 
 /**
- * Project vacation balance forward from today to a target date.
+ * Project balances forward from today to a target date by walking the
+ * chronological event stream: paydays (accruals), planned vacation deductions,
+ * carryover cap adjustments, bank hours payouts, and annual sick grants.
  *
- * Algorithm:
- * 1. Start from profile.currentVacationHours on today.
- * 2. Generate all payday boundaries from lastPaydayDate forward to targetDate.
- * 3. For each payday, determine accrual tier based on years since hireDate.
- *    IMPORTANT: Tier transitions take effect on the FIRST payday that falls on
- *    or after the anniversary date.
- * 4. For each planned vacation day, deduct hoursPerWorkDay if the day is a work
- *    day and falls in a planned range. Hours come from the specified source pool
- *    (vacation, sick, bank, or "any" which uses vacation first, then sick, then bank).
- * 5. On each carryoverPayoutDate, if balance exceeds cap, reduce to cap.
- * 6. On the bank hours payout start date, bank hours are zeroed (paid out).
- * 7. Return final balances and complete event trail.
+ * Tier transitions take effect on the first payday on or after the service
+ * anniversary. Returns the final balances together with the full event trail.
  */
 export function projectBalance(
   state: AppState,
@@ -141,7 +214,10 @@ export function projectBalance(
   let totalCarryoverAdjustment = 0
   let totalBankPayout = 0
 
-  // Add future bank log entries to bankBalance
+  const tz = state.profile.timezone || DEFAULT_TZ
+  const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
+  const earliestDeductDay = todayIsOver ? today : addDays(today, 1)
+
   if (state.bankHoursLog) {
     for (const entry of state.bankHoursLog) {
       const entryDate = parseISO(entry.date)
@@ -151,21 +227,19 @@ export function projectBalance(
     }
   }
 
-  // If target is today or in the past, return current state
   if (!isAfter(target, today)) {
-    const total = vacationBalance + sickBalance + bankBalance
+    const eff = getEffectiveCurrentBalances(state)
     return {
-      vacationBalance,
-      sickBalance,
-      bankBalance,
-      totalAvailable: total,
+      vacationBalance: eff.vacation,
+      sickBalance: eff.sick,
+      bankBalance: eff.bank,
+      totalAvailable: eff.total,
       carryoverAdjustment: 0,
       bankPayout: 0,
       events: [],
     }
   }
 
-  // Collect holidays for all years in the projection range
   const startYear = today.getFullYear()
   const endYear = target.getFullYear()
   const allHolidays: Date[] = []
@@ -173,9 +247,8 @@ export function projectBalance(
     allHolidays.push(...computeHolidayDates(state.policy, y))
   }
 
-  // Only consider future planned vacations
   const futureVacations = state.plannedVacations.filter(
-    (v) => !isBefore(parseISO(v.endDate), today),
+    (v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today),
   )
 
   const paydays = generatePaydays(lastPayday, target, state.policy.payPeriodLengthDays)
@@ -189,7 +262,6 @@ export function projectBalance(
   }
   const pendingEvents: PendingEvent[] = []
 
-  // Add accrual events
   for (const payday of paydays) {
     if (!isAfter(payday, today)) continue
     pendingEvents.push({
@@ -204,16 +276,15 @@ export function projectBalance(
     })
   }
 
-  // Add vacation deduction events
   for (const vacation of futureVacations) {
     const vStart = parseISO(vacation.startDate)
     const vEnd = parseISO(vacation.endDate)
-    const rangeStart = isAfter(vStart, today) ? vStart : addDays(today, 1)
+    const rangeStart = isBefore(vStart, earliestDeductDay) ? earliestDeductDay : vStart
     const rangeEnd = isAfter(vEnd, target) ? target : vEnd
 
     if (isAfter(rangeStart, rangeEnd)) continue
 
-    const deductHours = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
+    const deductHours = resolveDeductHours(vacation, state.policy.hoursPerWorkDay)
     const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd })
     for (const day of days) {
       if (isWorkDay(day, state.policy, allHolidays)) {
@@ -228,7 +299,6 @@ export function projectBalance(
     }
   }
 
-  // Add carryover payout events
   for (let y = startYear; y <= endYear; y++) {
     const payoutDate = new Date(
       y,
@@ -245,8 +315,6 @@ export function projectBalance(
     }
   }
 
-  // Add bank hours payout events — both start AND end of payout window each year
-  // Bank hours get paid out at the start of the window, and again at the end
   for (let y = startYear; y <= endYear + 1; y++) {
     const payoutStart = new Date(
       y,
@@ -270,8 +338,6 @@ export function projectBalance(
     }
   }
 
-  // Add annual sick leave grant events (Jan 1 each year)
-  // Sick hours are granted at the start of each year, capped at maxBalance
   for (let y = startYear + 1; y <= endYear; y++) {
     const grantDate = new Date(y, 0, 1) // January 1
     if (isAfter(grantDate, today) && !isAfter(grantDate, target)) {
@@ -284,7 +350,6 @@ export function projectBalance(
     }
   }
 
-  // Sort events chronologically
   pendingEvents.sort((a, b) => {
     const dayDiff = differenceInCalendarDays(a.date, b.date)
     if (dayDiff !== 0) return dayDiff
@@ -292,21 +357,28 @@ export function projectBalance(
     return order[a.type] - order[b.type]
   })
 
-  // Process events
   for (const pe of pendingEvents) {
     if (pe.type === 'sick_grant') {
-      // Annual sick leave grant — add hours, capped at max balance
+      const carryoverCap = state.policy.sickLeaveCarryoverCap
+      let forfeited = 0
+      if (carryoverCap !== undefined && sickBalance > carryoverCap) {
+        forfeited = sickBalance - carryoverCap
+        sickBalance = carryoverCap
+      }
       const grant = pe.process()
       const newBalance = Math.min(sickBalance + grant, state.policy.sickLeaveMaxBalance)
       const actualGrant = newBalance - sickBalance
-      if (actualGrant > 0) {
+      if (actualGrant > 0 || forfeited > 0) {
         sickBalance = newBalance
         events.push({
           date: format(pe.date, 'yyyy-MM-dd'),
           type: 'sick_grant',
-          delta: actualGrant,
+          delta: actualGrant - forfeited,
           runningBalance: vacationBalance,
-          label: pe.label,
+          label:
+            forfeited > 0
+              ? `${pe.label} (forfeited ${forfeited.toFixed(2)} hrs over carryover cap)`
+              : pe.label,
         })
       }
     } else if (pe.type === 'carryover_adjustment') {
@@ -327,7 +399,6 @@ export function projectBalance(
         })
       }
     } else if (pe.type === 'bank_payout') {
-      // Bank hours get paid out — balance goes to zero
       if (bankBalance > 0) {
         const payout = bankBalance
         totalBankPayout += payout
@@ -341,33 +412,12 @@ export function projectBalance(
         })
       }
     } else if (pe.type === 'vacation_deduction') {
-      const hours = Math.abs(pe.process()) // deductHours from the vacation (respects partial days)
-      const source = pe.hourSource || 'any'
-
-      // Deduct from the appropriate pool (allow negative to show unaffordable, but track it)
-      if (source === 'vacation') {
-        vacationBalance -= hours
-      } else if (source === 'sick') {
-        sickBalance -= hours
-      } else if (source === 'bank') {
-        bankBalance -= hours
-      } else {
-        // "any" — use bank first (use-it-or-lose-it), then vacation, then sick
-        let remaining = hours
-        const fromBank = Math.min(remaining, Math.max(0, bankBalance))
-        bankBalance -= fromBank
-        remaining -= fromBank
-        if (remaining > 0) {
-          const fromVaca = Math.min(remaining, Math.max(0, vacationBalance))
-          vacationBalance -= fromVaca
-          remaining -= fromVaca
-        }
-        if (remaining > 0) {
-          const fromSick = Math.min(remaining, Math.max(0, sickBalance))
-          sickBalance -= fromSick
-          // remaining beyond all pools is simply unaffordable — don't go negative
-        }
-      }
+      const hours = Math.abs(pe.process())
+      const pools = { vacation: vacationBalance, sick: sickBalance, bank: bankBalance }
+      applyDeduction(hours, pe.hourSource || 'any', pools)
+      vacationBalance = pools.vacation
+      sickBalance = pools.sick
+      bankBalance = pools.bank
 
       events.push({
         date: format(pe.date, 'yyyy-MM-dd'),
@@ -377,7 +427,6 @@ export function projectBalance(
         label: pe.label,
       })
     } else {
-      // Accrual
       const delta = pe.process()
       vacationBalance += delta
       events.push({

@@ -52,18 +52,17 @@ export function clearState(): void {
   clearIdbState().catch(() => {})
 }
 
-/** Async load: tries IndexedDB first (survives cache clears), then localStorage */
+/** Tries IndexedDB first, then falls back to localStorage. */
 export async function loadStateAsync(): Promise<AppState | null> {
-  // Try IndexedDB first
   const idbState = await loadStateFromIdb()
   if (idbState && idbState.version === CURRENT_VERSION && idbState.profile && idbState.policy) {
-    // Ensure localStorage is also up to date
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(idbState))
-    } catch {}
+    } catch {
+      // localStorage may be full or unavailable — IndexedDB is still authoritative.
+    }
     return idbState
   }
-  // Fall back to localStorage
   return loadState()
 }
 

@@ -141,13 +141,11 @@ export function GuidedTour() {
   const step = steps[currentStep]
   const isLast = currentStep === steps.length - 1
 
-  // SVG mask approach: dark overlay with a rounded-rect hole for the spotlight
   const vw = window.innerWidth
   const vh = window.innerHeight
 
   return (
     <>
-      {/* Dark overlay with cutout — no blur, so spotlight is perfectly clear */}
       <svg
         className="fixed inset-0 z-40 w-full h-full"
         style={{ pointerEvents: 'auto' }}
@@ -179,7 +177,6 @@ export function GuidedTour() {
         />
       </svg>
 
-      {/* Glowing border around spotlight */}
       {spotlightRect && (
         <div
           className="fixed z-40 pointer-events-none"
@@ -196,7 +193,6 @@ export function GuidedTour() {
         />
       )}
 
-      {/* Tooltip */}
       <div
         className="fixed z-50 rounded-2xl shadow-2xl p-6"
         style={{
@@ -211,7 +207,6 @@ export function GuidedTour() {
         role="dialog"
         aria-label={`Tour step ${currentStep + 1} of ${steps.length}`}
       >
-        {/* Progress bar */}
         <div className="flex gap-1.5 mb-4">
           {steps.map((_, i) => (
             <div

@@ -1,8 +1,18 @@
 import { useMemo } from 'react'
-import { endOfYear, differenceInYears, parseISO } from 'date-fns'
+import {
+  addDays,
+  differenceInDays,
+  differenceInYears,
+  endOfYear,
+  isBefore,
+  parseISO,
+  startOfDay,
+  startOfYear,
+} from 'date-fns'
 import { Lightbulb } from 'lucide-react'
 import { useAppState } from '../context'
 import { projectBalance, computeAccrualTier, countWorkDays } from '../lib/projection'
+import { computeHolidayDates } from '../lib/holidays'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
@@ -17,8 +27,7 @@ export function Insights() {
   const { state } = useAppState()
 
   const insights = useMemo(() => {
-    const results: Insight[] = []
-    const today = new Date()
+    const today = startOfDay(new Date())
     const yearEnd = endOfYear(today)
     const hireDate = parseISO(state.profile.hireDate)
     const yos = differenceInYears(today, hireDate)
@@ -34,32 +43,19 @@ export function Insights() {
 
     const yearEndProj = projectBalance(state, yearEnd)
 
-    // How many sick days can they take and still afford planned vacations?
-    const plannedHours = state.plannedVacations.reduce((sum, v) => {
+    const futureVacations = state.plannedVacations.filter(
+      (v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today),
+    )
+    const plannedHours = futureVacations.reduce((sum, v) => {
       const start = parseISO(v.startDate)
       const end = parseISO(v.endDate)
-      if (end < today) return sum
       const effectiveStart = start > today ? start : today
       const workDays = countWorkDays(effectiveStart, end, state.policy)
-      return sum + workDays * hoursPerDay
+      const perDay = v.hoursPerDay ?? hoursPerDay
+      return sum + workDays * perDay
     }, 0)
+    const sickDaysBuffer = Math.floor(Math.max(0, total - plannedHours) / hoursPerDay)
 
-    const bufferHours = total - plannedHours
-    const sickDaysBuffer = Math.floor(Math.max(0, bufferHours) / hoursPerDay)
-
-    if (sickDaysBuffer >= 2) {
-      results.push({
-        text: `You can take up to ${sickDaysBuffer} sick days and still cover all your planned time off`,
-        type: 'positive',
-      })
-    } else if (sickDaysBuffer < 1 && state.plannedVacations.length > 0) {
-      results.push({
-        text: `Your planned time off uses nearly all your hours — a sick day could put you short`,
-        type: 'warning',
-      })
-    }
-
-    // Year-end usage check
     const carryoverCap =
       state.policy.carryoverCapStrategy === 'unlimited'
         ? null
@@ -67,40 +63,100 @@ export function Insights() {
           ? (state.policy.carryoverFixedCap ?? 0)
           : annualAccrual
 
+    const pool: Array<Insight | null> = []
+
     if (carryoverCap !== null) {
       const surplus = yearEndProj.vacationBalance - carryoverCap
       if (surplus > 0) {
-        const daysToUse = Math.ceil(surplus / hoursPerDay)
-        results.push({
-          text: `You'll exceed your carryover cap by ${fmt(surplus)} hrs — plan ${daysToUse} more day${daysToUse !== 1 ? 's' : ''} off before year-end to avoid losing hours`,
+        pool.push({
+          text: `Projected to exceed the ${Math.round(carryoverCap)}h carryover cap by ${fmt(surplus)} hrs — excess is paid out on the first February pay date`,
           type: 'warning',
         })
-      } else if (surplus > -20 && surplus <= 0) {
-        results.push({
-          text: `You're on track — projected year-end balance is ${fmt(yearEndProj.vacationBalance)} hrs (cap: ${fmt(carryoverCap)} hrs)`,
+      }
+    }
+
+    if (sickDaysBuffer < 1 && futureVacations.length > 0) {
+      pool.push({
+        text: `Your planned time off accounts for nearly all of your available hours`,
+        type: 'warning',
+      })
+    }
+
+    // Tier transition coming up within 6 months
+    pool.push((() => {
+      const tiers = state.policy.accrualTiers
+      const idx = tiers.findIndex(
+        (t) => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears),
+      )
+      if (idx < 0 || idx >= tiers.length - 1) return null
+      const nextTier = tiers[idx + 1]
+      const yearsToNext = nextTier.minYears - yos
+      if (yearsToNext <= 0 || yearsToNext > 0.5) return null
+      const daysToNext = Math.max(1, Math.ceil(yearsToNext * 365.25))
+      return {
+        text: `Accrual rate increases from ${fmt(tier.hoursPerPayPeriod)} to ${fmt(nextTier.hoursPerPayPeriod)} hrs/period in ${daysToNext} day${daysToNext !== 1 ? 's' : ''} (work anniversary)`,
+        type: 'positive',
+      }
+    })())
+
+    if (carryoverCap !== null) {
+      const surplus = yearEndProj.vacationBalance - carryoverCap
+      if (surplus > -20 && surplus <= 0) {
+        pool.push({
+          text: `Projected year-end vacation is ${fmt(yearEndProj.vacationBalance)} hrs, under the ${Math.round(carryoverCap)}h carryover cap`,
           type: 'positive',
         })
       }
     }
 
-    // Accrual rate insight
-    const monthlyAccrual = (tier.hoursPerPayPeriod * 30) / state.policy.payPeriodLengthDays
-    results.push({
-      text: `You earn ~${fmt(monthlyAccrual)} hrs/month — that's about ${fmt(monthlyAccrual / hoursPerDay)} days of time off per month`,
-      type: 'info',
-    })
-
-    // Bank hours payout warning
     if (state.profile.currentBankHours > 0) {
       const payoutMonth = state.policy.bankHoursPayoutStart.month
       const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      results.push({
-        text: `You have ${fmt(state.profile.currentBankHours)} bank hrs — use them before the ${monthNames[payoutMonth]} payout window or they get paid out`,
+      pool.push({
+        text: `${fmt(state.profile.currentBankHours)} bank hrs in your account — payout window opens in ${monthNames[payoutMonth]}`,
         type: 'info',
       })
     }
 
-    return results.slice(0, 3) // Show max 3
+    pool.push((() => {
+      const yStart = startOfYear(today)
+      const yEnd = endOfYear(today)
+      const totalDays = Math.max(1, differenceInDays(yEnd, yStart))
+      const daysIn = differenceInDays(today, yStart)
+      const yearPct = Math.round((daysIn / totalDays) * 100)
+      const periodsSoFar = Math.max(
+        0,
+        Math.floor(differenceInDays(today, yStart) / state.policy.payPeriodLengthDays),
+      )
+      const ytdAccrual = periodsSoFar * tier.hoursPerPayPeriod
+      if (yearPct < 5 || ytdAccrual < 1) return null
+      return {
+        text: `${yearPct}% through the year — you've accrued ~${fmt(ytdAccrual)} vacation hrs so far`,
+        type: 'info',
+      }
+    })())
+
+    pool.push((() => {
+      const lookahead = addDays(today, 90)
+      const all = [
+        ...computeHolidayDates(state.policy, today.getFullYear()),
+        ...computeHolidayDates(state.policy, today.getFullYear() + 1),
+      ]
+      const upcoming = all.filter((d) => d > today && d <= lookahead).length
+      if (upcoming === 0) return null
+      return {
+        text: `${upcoming} paid holiday${upcoming !== 1 ? 's' : ''} on the calendar in the next 90 days`,
+        type: 'positive',
+      }
+    })())
+
+    const monthlyAccrual = (tier.hoursPerPayPeriod * 30) / state.policy.payPeriodLengthDays
+    pool.push({
+      text: `You earn ~${fmt(monthlyAccrual)} hrs/month — that's about ${fmt(monthlyAccrual / hoursPerDay)} days of time off per month`,
+      type: 'info',
+    })
+
+    return pool.filter((x): x is Insight => x !== null).slice(0, 4)
   }, [state])
 
   if (insights.length === 0) return null

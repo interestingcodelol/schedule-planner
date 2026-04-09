@@ -2,10 +2,7 @@ import { format, subYears, subDays, previousFriday, addDays } from 'date-fns'
 import type { AppState } from './types'
 import { defaultPolicy } from './defaultPolicy'
 
-/**
- * Generate a realistic demo state for showcasing the app.
- * Uses generic names — no real personal data.
- */
+/** Build a sample AppState used by the "Try the demo" path. */
 export function generateDemoState(): AppState {
   const today = new Date()
   const hireDate = subYears(today, 3.5)
@@ -19,6 +16,13 @@ export function generateDemoState(): AppState {
       currentSickHours: 32,
       currentBankHours: 4.75,
       lastPaydayDate: format(lastFriday, 'yyyy-MM-dd'),
+      timezone: (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
+        } catch {
+          return 'America/New_York'
+        }
+      })(),
     },
     policy: { ...defaultPolicy },
     plannedVacations: [
