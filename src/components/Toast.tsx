@@ -15,44 +15,37 @@ export function showToast(toast: Omit<ToastData, 'id'>) {
   toastListeners.forEach((fn) => fn(data))
 }
 
-export function ToastContainer() {
-  const [toasts, setToasts] = useState<ToastData[]>([])
+/**
+ * Inline toast that sits in the header bar — not a floating overlay.
+ * Shows the most recent notification, auto-dismisses.
+ */
+export function InlineToast() {
+  const [toast, setToast] = useState<ToastData | null>(null)
 
   useEffect(() => {
-    const handler = (t: ToastData) => {
-      setToasts((prev) => [...prev, t])
-    }
+    const handler = (t: ToastData) => setToast(t)
     toastListeners.add(handler)
     return () => { toastListeners.delete(handler) }
   }, [])
 
-  const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }, [])
+  const dismiss = useCallback(() => setToast(null), [])
 
-  return (
-    <div className="fixed top-4 right-48 z-50 flex flex-col gap-2 items-end">
-      {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
-      ))}
-    </div>
-  )
-}
-
-function ToastItem({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: string) => void }) {
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(toast.id), toast.duration ?? 4000)
+    if (!toast) return
+    const timer = setTimeout(dismiss, toast.duration ?? 4000)
     return () => clearTimeout(timer)
-  }, [toast.id, toast.duration, onDismiss])
+  }, [toast, dismiss])
+
+  if (!toast) return null
 
   return (
-    <div className="glass-card rounded-xl shadow-xl px-4 py-3 flex items-center gap-3 text-sm animate-slide-up max-w-xs">
-      <span className="text-gray-700 dark:text-gray-200">{toast.message}</span>
+    <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-sm animate-slide-up">
+      <span className="text-gray-600 dark:text-gray-300">{toast.message}</span>
       {toast.action && (
         <button
           onClick={() => {
             toast.action!.onClick()
-            onDismiss(toast.id)
+            dismiss()
           }}
           className="text-blue-500 hover:text-blue-400 font-semibold whitespace-nowrap transition-colors"
         >
@@ -60,10 +53,10 @@ function ToastItem({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: str
         </button>
       )}
       <button
-        onClick={() => onDismiss(toast.id)}
+        onClick={dismiss}
         className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 transition-colors"
       >
-        <X className="w-3.5 h-3.5" />
+        <X className="w-3 h-3" />
       </button>
     </div>
   )

@@ -274,7 +274,7 @@ export function CalendarView() {
         />
       )}
 
-      <div className="px-3 py-2 border-t border-gray-200/60 dark:border-gray-700/40 flex items-center gap-5 text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0">
+      <div className="px-5 py-2 border-t border-gray-200/60 dark:border-gray-700/40 flex items-center gap-5 text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0">
         <span className="inline-flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-blue-500" />
           Planned

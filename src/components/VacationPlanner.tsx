@@ -106,12 +106,12 @@ export function VacationPlanner() {
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
-      <div className="px-6 py-5 border-b border-gray-200/60 dark:border-gray-700/40">
+      <div className="px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40">
         <h2 className="text-lg font-semibold">Time Off Planner</h2>
       </div>
 
       {/* What-if planner */}
-      <div className="px-6 py-5 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
+      <div className="px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 font-medium">
           <CalendarSearch className="w-4 h-4" />
           What-if planner

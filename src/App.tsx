@@ -4,7 +4,6 @@ import { loadState, loadStateAsync, saveState, clearState } from './lib/storage'
 import { SetupWizard } from './components/SetupWizard'
 import { Dashboard } from './components/Dashboard'
 import { UpdateBanner } from './components/UpdateBanner'
-import { ToastContainer } from './components/Toast'
 import { AppContext } from './context'
 
 function migrateState(loaded: AppState): AppState {
@@ -238,7 +237,6 @@ export default function App() {
         <div className="flex-1 min-h-0">
           <Dashboard />
         </div>
-        <ToastContainer />
       </div>
     </AppContext.Provider>
   )

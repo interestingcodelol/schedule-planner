@@ -12,6 +12,7 @@ import { GuidedTour } from './GuidedTour'
 import { BankHoursWidget } from './BankHoursWidget'
 import { ChatAssistant } from './ChatAssistant'
 import { UpcomingEvents } from './UpcomingEvents'
+import { InlineToast } from './Toast'
 
 export function Dashboard() {
   const { state, setShowTour, isDemo, resetToSetup } = useAppState()
@@ -30,11 +31,11 @@ export function Dashboard() {
     : null
 
   return (
-    <div className="h-full flex flex-col overflow-hidden px-4 sm:px-6 py-4">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between mb-4 shrink-0">
-        <div className="flex items-center gap-6">
-          <div className="flex items-baseline gap-3">
+      <header className="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="flex items-baseline gap-3 shrink-0">
             <h1 className="text-xl font-bold tracking-tight">
               <span className="gradient-text">Schedule Planner</span>
             </h1>
@@ -56,7 +57,7 @@ export function Dashboard() {
           {/* Upcoming time off badge */}
           {nextTimeOff && daysUntilNext !== null && daysUntilNext >= 0 && (
             <div
-              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs"
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200/50 dark:border-blue-800/30 text-xs shrink-0"
               title={`Next time off: ${format(parseISO(nextTimeOff.startDate), 'MMM d')}${nextTimeOff.startDate !== nextTimeOff.endDate ? ` – ${format(parseISO(nextTimeOff.endDate), 'MMM d')}` : ''}${nextTimeOff.note ? ` (${nextTimeOff.note})` : ''}`}
             >
               <CalendarClock className="w-3.5 h-3.5 text-blue-500" />
@@ -74,8 +75,10 @@ export function Dashboard() {
               )}
             </div>
           )}
+          {/* Inline notification */}
+          <InlineToast />
         </div>
-        <div className="flex items-center gap-1" data-tour="settings">
+        <div className="flex items-center gap-1 shrink-0" data-tour="settings">
           <button
             onClick={() => setShowTour(true)}
             className="p-2 rounded-xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
@@ -96,30 +99,33 @@ export function Dashboard() {
         </div>
       </header>
 
-      {/* Status cards */}
-      <div className="mb-3 shrink-0" data-tour="status-cards">
-        <StatusCards />
-      </div>
-
-      {/* Insights */}
-      <div className="mb-3 shrink-0">
-        <Insights />
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-8 min-h-0 flex flex-col" data-tour="calendar">
-          <CalendarView />
+      {/* Content area — consistent horizontal padding matching header */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden px-5 sm:px-6 pb-4 gap-3">
+        {/* Status cards */}
+        <div className="shrink-0" data-tour="status-cards">
+          <StatusCards />
         </div>
-        <div className="lg:col-span-4 min-h-0 flex flex-col gap-4 pb-16">
-          <div data-tour="planner" className="shrink-0">
-            <VacationPlanner />
+
+        {/* Insights */}
+        <div className="shrink-0">
+          <Insights />
+        </div>
+
+        {/* Main content */}
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-8 min-h-0 flex flex-col" data-tour="calendar">
+            <CalendarView />
           </div>
-          <div data-tour="bank-hours" className="shrink-0">
-            <BankHoursWidget />
-          </div>
-          <div className="flex-1 min-h-0">
-            <UpcomingEvents />
+          <div className="lg:col-span-4 min-h-0 flex flex-col gap-4 pb-16">
+            <div data-tour="planner" className="shrink-0">
+              <VacationPlanner />
+            </div>
+            <div data-tour="bank-hours" className="shrink-0">
+              <BankHoursWidget />
+            </div>
+            <div className="flex-1 min-h-0">
+              <UpcomingEvents />
+            </div>
           </div>
         </div>
       </div>
