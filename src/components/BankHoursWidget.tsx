@@ -33,12 +33,12 @@ export function BankHoursWidget() {
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 px-5 py-3">
-        <div className="p-1 rounded-lg bg-teal-100 dark:bg-teal-900/30">
-          <Wallet className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+      <div className="flex items-center gap-2.5 px-5 py-3.5">
+        <div className="p-1.5 rounded-lg bg-teal-100 dark:bg-teal-900/30">
+          <Wallet className="w-4 h-4 text-teal-600 dark:text-teal-400" />
         </div>
-        <span className="text-sm font-semibold">Bank Hours</span>
-        <span className="text-sm text-teal-600 dark:text-teal-400 font-bold tabular-nums">
+        <span className="text-base font-semibold">Bank Hours</span>
+        <span className="text-base text-teal-600 dark:text-teal-400 font-bold tabular-nums">
           {fmt(state.profile.currentBankHours)} hrs
         </span>
       </div>

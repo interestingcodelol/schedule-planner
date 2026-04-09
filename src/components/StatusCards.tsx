@@ -27,20 +27,20 @@ function Card({
 }) {
   return (
     <div
-      className={`glass-card rounded-xl px-4 py-3 relative overflow-hidden ${glow || ''}`}
+      className={`glass-card rounded-xl px-4 py-3 relative overflow-hidden hover:scale-[1.02] hover:-translate-y-0.5 transition-all duration-200 ${glow || ''}`}
     >
       <div
         className={`absolute top-0 left-0 right-0 h-0.5 ${accent || 'bg-gradient-to-r from-blue-500 to-cyan-500'}`}
       />
       <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-medium">
+        <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-sm font-medium">
           <Icon className="w-3.5 h-3.5" />
           {label}
         </div>
         {badge}
       </div>
       <div className="text-xl font-bold tabular-nums tracking-tight">{value}</div>
-      <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{sub}</div>
+      <div className="text-sm text-gray-400 dark:text-gray-500 mt-0.5 truncate">{sub}</div>
     </div>
   )
 }

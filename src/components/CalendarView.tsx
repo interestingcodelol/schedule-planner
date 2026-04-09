@@ -206,21 +206,21 @@ export function CalendarView() {
         />
       )}
 
-      <div className="px-3 py-1.5 border-t border-gray-200/60 dark:border-gray-700/40 flex items-center gap-4 text-[10px] text-gray-500 dark:text-gray-400 shrink-0">
-        <span className="inline-flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+      <div className="px-3 py-2 border-t border-gray-200/60 dark:border-gray-700/40 flex items-center gap-5 text-xs font-medium text-gray-500 dark:text-gray-400 shrink-0">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-blue-500" />
           Planned
         </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-amber-500" />
           Holiday
         </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
           Payday
         </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-red-500" />
           Can't afford
         </span>
       </div>

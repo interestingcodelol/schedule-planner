@@ -118,13 +118,13 @@ export function Insights() {
   }
 
   return (
-    <div className="glass-card rounded-xl px-4 py-2.5 flex items-start gap-3">
+    <div className="glass-card rounded-xl px-4 py-3 flex items-start gap-3">
       <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-      <div className="flex flex-wrap gap-x-6 gap-y-1">
+      <div className="flex flex-wrap gap-x-6 gap-y-1.5">
         {insights.map((insight, i) => (
           <div key={i} className="flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotMap[insight.type]}`} />
-            <span className={`text-xs ${colorMap[insight.type]}`}>{insight.text}</span>
+            <span className={`w-2 h-2 rounded-full shrink-0 ${dotMap[insight.type]}`} />
+            <span className={`text-sm ${colorMap[insight.type]}`}>{insight.text}</span>
           </div>
         ))}
       </div>

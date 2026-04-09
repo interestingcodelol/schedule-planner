@@ -22,7 +22,12 @@ body {
 
 /* Glass card effect */
 .glass-card {
-  @apply bg-white/80 dark:bg-gray-900/60 backdrop-blur-xl border border-gray-200/60 dark:border-gray-700/40;
+  @apply bg-white/80 dark:bg-gray-900/60 backdrop-blur-xl border border-gray-200/60 dark:border-gray-700/40 transition-shadow duration-200;
+}
+
+/* Smooth focus rings everywhere */
+*:focus-visible {
+  @apply outline-none ring-2 ring-blue-500/50 ring-offset-1 ring-offset-transparent;
 }
 
 /* Gradient text */

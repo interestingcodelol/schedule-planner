@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import {
   format,
   parseISO,
@@ -121,9 +121,9 @@ export function UpcomingEvents() {
   const hasContent = sortedVacations.length > 0 || infoEvents.length > 0
 
   return (
-    <div className="glass-card rounded-2xl overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40">
-        <h3 className="text-sm font-semibold">Upcoming</h3>
+    <div className="glass-card rounded-2xl overflow-hidden h-full flex flex-col">
+      <div className="px-5 py-3.5 border-b border-gray-200/60 dark:border-gray-700/40">
+        <h3 className="text-base font-semibold">Upcoming</h3>
       </div>
 
       {!hasContent ? (
@@ -134,7 +134,7 @@ export function UpcomingEvents() {
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[400px] overflow-y-auto scroll-panel">
+        <div className="divide-y divide-gray-100 dark:divide-gray-800/60 flex-1 min-h-0 overflow-y-auto scroll-panel">
           {/* Planned vacations — with full controls */}
           {sortedVacations.map((vacation) => (
             <VacationRow key={vacation.id} vacation={vacation} />
@@ -142,11 +142,11 @@ export function UpcomingEvents() {
 
           {/* Info events — holidays, paydays */}
           {infoEvents.map((event) => (
-            <div key={event.key} className="px-5 py-3 flex items-start gap-3">
-              <event.icon className={`w-4 h-4 mt-0.5 shrink-0 ${event.accent}`} />
+            <div key={event.key} className="px-5 py-3.5 flex items-start gap-3">
+              <event.icon className={`w-4.5 h-4.5 mt-0.5 shrink-0 ${event.accent}`} />
               <div className="min-w-0">
-                <div className="text-sm font-medium truncate">{event.label}</div>
-                <div className="text-xs text-gray-400 dark:text-gray-500">{event.detail}</div>
+                <div className="text-sm font-semibold truncate">{event.label}</div>
+                <div className="text-sm text-gray-400 dark:text-gray-500">{event.detail}</div>
               </div>
             </div>
           ))}
@@ -168,10 +168,31 @@ function VacationRow({ vacation }: { vacation: {
 }}) {
   const { state, removeVacation, updateVacation } = useAppState()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiRef = useRef<HTMLSpanElement>(null)
   const today = startOfDay(new Date())
   const start = parseISO(vacation.startDate)
   const end = parseISO(vacation.endDate)
   const isPast = isBefore(end, today)
+  const daysUntil = differenceInDays(start, today)
+
+  // Close emoji picker on click outside
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    const handleClick = (e: MouseEvent) => {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowEmojiPicker(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [showEmojiPicker])
 
   const workDays = countWorkDays(start, end, state.policy)
   const hrsPerDay = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
@@ -197,25 +218,30 @@ function VacationRow({ vacation }: { vacation: {
     metaParts.push(`${fmt(hoursNeeded)} hrs`)
   }
   if (sourceLabel) metaParts.push(sourceLabel)
+  if (!isPast && daysUntil > 0) {
+    metaParts.push(`${daysUntil}d away`)
+  } else if (daysUntil === 0) {
+    metaParts.push('today')
+  }
 
   return (
-    <div className={`px-5 py-3 ${isPast ? 'opacity-40' : ''}`}>
+    <div className={`px-5 py-3 group hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors ${isPast ? 'opacity-40' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
           <CalendarDays className="w-4 h-4 mt-0.5 shrink-0 text-blue-500" />
           <div className="min-w-0">
             <div className="text-sm font-semibold flex items-center gap-1">
               {displayEmoji && (
-                <span className="relative">
+                <span className="relative" ref={emojiRef}>
                   <button
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    className="hover:scale-125 transition-transform cursor-pointer"
+                    className="hover:scale-125 active:scale-95 transition-transform cursor-pointer"
                     title="Click to change emoji"
                   >
                     {displayEmoji}
                   </button>
                   {showEmojiPicker && (
-                    <div className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48">
+                    <div className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48 animate-in fade-in zoom-in-95 duration-150">
                       {EMOJI_OPTIONS.map((emoji) => (
                         <button
                           key={emoji}
@@ -223,7 +249,7 @@ function VacationRow({ vacation }: { vacation: {
                             updateVacation(vacation.id, { customEmoji: emoji })
                             setShowEmojiPicker(false)
                           }}
-                          className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700/60 rounded-lg p-1 transition-colors"
+                          className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700/60 hover:scale-110 active:scale-90 rounded-lg p-1 transition-all"
                         >
                           {emoji}
                         </button>
@@ -254,12 +280,12 @@ function VacationRow({ vacation }: { vacation: {
                 {vacation.note}
               </div>
             )}
-            <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            <div className="text-sm text-gray-400 dark:text-gray-500 mt-0.5">
               {metaParts.join(' · ')}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
           {!isPast && (
             <span
               className="cursor-help"
@@ -278,7 +304,7 @@ function VacationRow({ vacation }: { vacation: {
           )}
           <button
             onClick={() => updateVacation(vacation.id, { locked: !vacation.locked })}
-            className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all"
+            className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 active:scale-90 transition-all"
             title={vacation.locked ? 'Unlock' : 'Lock'}
           >
             {vacation.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
@@ -286,7 +312,7 @@ function VacationRow({ vacation }: { vacation: {
           {!vacation.locked && (
             <button
               onClick={() => removeVacation(vacation.id)}
-              className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+              className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 active:scale-90 transition-all"
               title="Delete"
             >
               <Trash2 className="w-3.5 h-3.5" />

@@ -111,14 +111,16 @@ export function Dashboard() {
         <div className="lg:col-span-8 min-h-0 flex flex-col" data-tour="calendar">
           <CalendarView />
         </div>
-        <div className="lg:col-span-4 min-h-0 overflow-y-auto scroll-panel space-y-4">
-          <div data-tour="planner">
+        <div className="lg:col-span-4 min-h-0 flex flex-col gap-4">
+          <div data-tour="planner" className="shrink-0">
             <VacationPlanner />
           </div>
-          <div data-tour="bank-hours">
+          <div data-tour="bank-hours" className="shrink-0">
             <BankHoursWidget />
           </div>
-          <UpcomingEvents />
+          <div className="flex-1 min-h-0">
+            <UpcomingEvents />
+          </div>
         </div>
       </div>
 

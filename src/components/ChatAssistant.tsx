@@ -149,7 +149,7 @@ export function ChatAssistant() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-5 right-5 z-30 p-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full shadow-lg shadow-blue-500/30 transition-all duration-150 hover:scale-105"
+          className="fixed bottom-5 right-5 z-30 p-3.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white rounded-full shadow-lg shadow-blue-500/30 transition-all duration-200 hover:scale-110 hover:shadow-xl hover:shadow-blue-500/40"
           title="Open chat assistant — plan time off with natural language"
           aria-label="Open chat assistant"
         >

@@ -116,7 +116,7 @@ export function VacationPlanner() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Start
             </label>
             <input
@@ -128,7 +128,7 @@ export function VacationPlanner() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               End
             </label>
             <input
@@ -144,7 +144,7 @@ export function VacationPlanner() {
         {/* Hour source + partial day */}
         <div className="grid grid-cols-3 gap-2">
           <div className="col-span-2">
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Use hours from
             </label>
             <select
@@ -159,7 +159,7 @@ export function VacationPlanner() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Hrs/day
             </label>
             <input
@@ -227,7 +227,7 @@ export function VacationPlanner() {
         <button
           onClick={handleCommit}
           disabled={!whatIfStart || !whatIfEnd}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-colors duration-150"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-500/30"
           title="Add this time off to your plan"
         >
           <Plus className="w-4 h-4" />
