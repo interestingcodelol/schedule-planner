@@ -35,7 +35,7 @@ const steps: TourStep[] = [
     target: '[data-tour="bank-hours"]',
     title: 'Bank Hours',
     description:
-      'Log extra hours you work beyond your regular day. Bank hours can be used for time off and are used first when you select "Any available". They get paid out during the Dec-Feb window.',
+      'Log extra hours you work beyond your regular day. Bank hours can be used for time off and are used first when you select "Auto". They get paid out during the Dec-Feb window.',
     placement: 'left',
   },
   {
@@ -56,8 +56,8 @@ export function GuidedTour() {
   const [spotlightRect, setSpotlightRect] = useState<Rect | null>(null)
 
   const active = state.showTour
-  const TOOLTIP_W = 380
-  const TOOLTIP_H = 240
+  const TOOLTIP_W = 400
+  const TOOLTIP_H = 260
 
   const updatePosition = useCallback(() => {
     if (!active) return
@@ -66,7 +66,7 @@ export function GuidedTour() {
     if (!el) return
 
     const rect = el.getBoundingClientRect()
-    const pad = 8
+    const pad = 12
 
     // Spotlight rect (viewport-relative)
     setSpotlightRect({
@@ -79,7 +79,7 @@ export function GuidedTour() {
     // Compute tooltip position
     let top = 0
     let left = 0
-    const gap = 16
+    const gap = 20
 
     switch (step.placement) {
       case 'bottom':
@@ -143,85 +143,117 @@ export function GuidedTour() {
   const step = steps[currentStep]
   const isLast = currentStep === steps.length - 1
 
-  // Build clip-path to create a "spotlight" hole in the overlay
-  const clipPath = spotlightRect
-    ? `polygon(
-        0% 0%, 0% 100%, 100% 100%, 100% 0%, 0% 0%,
-        ${spotlightRect.left}px ${spotlightRect.top}px,
-        ${spotlightRect.left}px ${spotlightRect.top + spotlightRect.height}px,
-        ${spotlightRect.left + spotlightRect.width}px ${spotlightRect.top + spotlightRect.height}px,
-        ${spotlightRect.left + spotlightRect.width}px ${spotlightRect.top}px,
-        ${spotlightRect.left}px ${spotlightRect.top}px
-      )`
-    : undefined
-
   return (
     <>
-      {/* Overlay with spotlight cutout */}
+      {/* Blurred backdrop — covers everything */}
       <div
-        className="fixed inset-0 z-40 bg-black/50"
-        style={{ clipPath }}
+        className="fixed inset-0 z-40"
+        style={{
+          backgroundColor: 'rgba(0, 0, 0, 0.35)',
+          backdropFilter: 'blur(3px)',
+          WebkitBackdropFilter: 'blur(3px)',
+        }}
         onClick={dismiss}
       />
-      {/* Spotlight border glow */}
+
+      {/* Spotlight cutout — bright, clear window over the target */}
       {spotlightRect && (
-        <div
-          className="fixed z-40 rounded-xl border-2 border-blue-500/50 pointer-events-none"
-          style={{
-            top: spotlightRect.top,
-            left: spotlightRect.left,
-            width: spotlightRect.width,
-            height: spotlightRect.height,
-            boxShadow: '0 0 0 9999px transparent, 0 0 30px rgba(59,130,246,0.3)',
-          }}
-        />
+        <>
+          {/* Clear window (removes blur/darken over target) */}
+          <div
+            className="fixed z-40 pointer-events-none"
+            style={{
+              top: spotlightRect.top,
+              left: spotlightRect.left,
+              width: spotlightRect.width,
+              height: spotlightRect.height,
+              borderRadius: 16,
+              boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.35)',
+              backdropFilter: 'blur(0px)',
+            }}
+          />
+          {/* Glowing border ring */}
+          <div
+            className="fixed z-40 pointer-events-none"
+            style={{
+              top: spotlightRect.top - 2,
+              left: spotlightRect.left - 2,
+              width: spotlightRect.width + 4,
+              height: spotlightRect.height + 4,
+              borderRadius: 18,
+              border: '2px solid rgba(59, 130, 246, 0.6)',
+              boxShadow:
+                '0 0 20px rgba(59, 130, 246, 0.4), 0 0 60px rgba(59, 130, 246, 0.15), inset 0 0 20px rgba(59, 130, 246, 0.1)',
+            }}
+          />
+          {/* Bright highlight overlay on target */}
+          <div
+            className="fixed z-40 pointer-events-none"
+            style={{
+              top: spotlightRect.top,
+              left: spotlightRect.left,
+              width: spotlightRect.width,
+              height: spotlightRect.height,
+              borderRadius: 16,
+              background: 'rgba(59, 130, 246, 0.04)',
+            }}
+          />
+        </>
       )}
 
       {/* Tooltip */}
       <div
-        className="fixed z-50 glass-card rounded-2xl shadow-2xl p-5"
+        className="fixed z-50 rounded-2xl shadow-2xl p-6"
         style={{
           top: tooltipPos.top,
           left: tooltipPos.left,
           width: TOOLTIP_W,
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
         }}
         role="dialog"
         aria-label={`Tour step ${currentStep + 1} of ${steps.length}`}
       >
         {/* Progress bar */}
-        <div className="flex gap-1 mb-3">
+        <div className="flex gap-1.5 mb-4">
           {steps.map((_, i) => (
             <div
               key={i}
-              className={`h-1 flex-1 rounded-full transition-colors duration-200 ${
-                i <= currentStep ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'
+              className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                i < currentStep
+                  ? 'bg-blue-500'
+                  : i === currentStep
+                    ? 'bg-blue-400 shadow-sm shadow-blue-400/50'
+                    : 'bg-gray-700'
               }`}
             />
           ))}
         </div>
 
-        <div className="flex items-start justify-between mb-2">
-          <h3 className="text-sm font-bold pr-4">{step.title}</h3>
+        <div className="flex items-start justify-between mb-3">
+          <h3 className="text-base font-bold text-white pr-4">{step.title}</h3>
           <button
             onClick={dismiss}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors shrink-0"
+            className="p-1 text-gray-500 hover:text-gray-300 transition-colors shrink-0"
             aria-label="Close tour"
             title="Close tour"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed mb-4">
+        <p className="text-sm text-gray-400 leading-relaxed mb-5">
           {step.description}
         </p>
         <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-400 font-medium">
+          <span className="text-xs text-gray-500 font-medium">
             {currentStep + 1} of {steps.length}
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={dismiss}
-              className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+              className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors rounded-lg"
               title="Skip tour"
             >
               Skip
@@ -229,20 +261,20 @@ export function GuidedTour() {
             {currentStep > 0 && (
               <button
                 onClick={prev}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all"
+                className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700/60 transition-all"
                 aria-label="Previous step"
                 title="Previous step"
               >
-                <ArrowLeft className="w-3.5 h-3.5" />
+                <ArrowLeft className="w-4 h-4" />
               </button>
             )}
             <button
               onClick={next}
-              className="flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-colors shadow-lg shadow-blue-600/30"
               title={isLast ? 'Finish tour' : 'Next step'}
             >
               {isLast ? 'Done' : 'Next'}
-              {!isLast && <ArrowRight className="w-3 h-3" />}
+              {!isLast && <ArrowRight className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>

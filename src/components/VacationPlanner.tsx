@@ -259,8 +259,8 @@ export function VacationPlanner() {
         </button>
       </div>
 
-      {/* Planned list */}
-      <div className="divide-y divide-gray-100 dark:divide-gray-800/60">
+      {/* Planned list — capped height with scroll */}
+      <div className="divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[280px] overflow-y-auto scroll-panel">
         {sortedVacations.length === 0 ? (
           <div className="px-6 py-10 text-center">
             <Palmtree className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
