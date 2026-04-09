@@ -1,8 +1,6 @@
-# Leave Lens
+# Schedule Planner
 
 A personal PTO and vacation planning tool that projects your vacation accrual forward in time and lets you plan time off against that projection.
-
-![Leave Lens Screenshot](/docs/screenshot.png)
 
 ## Why this exists
 
@@ -12,7 +10,7 @@ Many employers use timecard systems that track vacation accrual balances but off
 - "What will my balance be on December 31?"
 - "Am I going to lose hours to the carryover cap?"
 
-Leave Lens solves this by letting you input your current balance, hire date, and accrual rules, then projects balances forward day-by-day across a calendar view where you can plan time off interactively.
+Schedule Planner solves this by letting you input your current balance, hire date, and accrual rules, then projects balances forward day-by-day across a calendar view where you can plan time off interactively.
 
 ## Features
 
@@ -22,6 +20,8 @@ Leave Lens solves this by letting you input your current balance, hire date, and
 - **Accrual tier tracking** — handles tier transitions based on years of service
 - **Carryover cap warnings** — alerts when you might lose hours
 - **Holiday awareness** — deducts only actual work days from planned vacations
+- **Bank hours** — track extra hours worked and use them for time off
+- **Chat assistant** — plan time off with natural language
 - **Fully customizable** — accrual tiers, rates, holidays, pay periods, work schedule
 - **Dark mode** — refined dark-first aesthetic
 - **Import/Export** — backup and restore your data as JSON
@@ -39,8 +39,8 @@ Leave Lens solves this by letting you input your current balance, hire date, and
 ## Quick start
 
 ```bash
-git clone <repo-url>
-cd leave-lens
+git clone https://github.com/interestingcodelol/schedule-planner.git
+cd schedule-planner
 npm install
 npm run dev       # start dev server
 npm test          # run tests
@@ -74,7 +74,7 @@ The defaults represent a common US employer policy pattern and are not specific 
 
 ## Privacy
 
-All data is stored in your browser's localStorage. Nothing is sent to any server, API, or third-party service. There is no analytics, tracking, or telemetry of any kind.
+All data is stored in your browser's localStorage and IndexedDB. Nothing is sent to any server, API, or third-party service. There is no analytics, tracking, or telemetry of any kind.
 
 To move your data between browsers, use the Export/Import feature in Settings.
 
