@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { useAppState } from '../context'
 import { projectBalance, countWorkDays, getNextPayday } from '../lib/projection'
+import { showToast } from './Toast'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
@@ -166,7 +167,7 @@ function VacationRow({ vacation }: { vacation: {
   locked: boolean
   customEmoji?: string
 }}) {
-  const { state, removeVacation, updateVacation } = useAppState()
+  const { state, addVacation, removeVacation, updateVacation } = useAppState()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiRef = useRef<HTMLSpanElement>(null)
   const today = startOfDay(new Date())
@@ -311,7 +312,18 @@ function VacationRow({ vacation }: { vacation: {
           </button>
           {!vacation.locked && (
             <button
-              onClick={() => removeVacation(vacation.id)}
+              onClick={() => {
+                const deleted = { ...vacation }
+                removeVacation(vacation.id)
+                showToast({
+                  message: 'Time off removed',
+                  action: {
+                    label: 'Undo',
+                    onClick: () => addVacation(deleted),
+                  },
+                  duration: 5000,
+                })
+              }}
               className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 active:scale-90 transition-all"
               title="Delete"
             >

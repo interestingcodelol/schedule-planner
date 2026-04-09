@@ -3,6 +3,8 @@ import type { AppState, BankHoursEntry, PlannedVacation } from './lib/types'
 import { loadState, loadStateAsync, saveState, clearState } from './lib/storage'
 import { SetupWizard } from './components/SetupWizard'
 import { Dashboard } from './components/Dashboard'
+import { UpdateBanner } from './components/UpdateBanner'
+import { ToastContainer } from './components/Toast'
 import { AppContext } from './context'
 
 function migrateState(loaded: AppState): AppState {
@@ -163,6 +165,25 @@ export default function App() {
     })
   }, [])
 
+  const removeBankHours = useCallback((id: string) => {
+    setAppData((prev) => {
+      if (!prev.state) return prev
+      const entry = prev.state.bankHoursLog.find((e) => e.id === id)
+      if (!entry) return prev
+      return {
+        ...prev,
+        state: {
+          ...prev.state,
+          profile: {
+            ...prev.state.profile,
+            currentBankHours: prev.state.profile.currentBankHours - entry.hours,
+          },
+          bankHoursLog: prev.state.bankHoursLog.filter((e) => e.id !== id),
+        },
+      }
+    })
+  }, [])
+
   const toggleTheme = useCallback(() => {
     setAppData((prev) => {
       if (!prev.state) return prev
@@ -205,6 +226,7 @@ export default function App() {
         removeVacation,
         updateVacation,
         addBankHours,
+        removeBankHours,
         toggleTheme,
         setShowTour,
         isDemo,
@@ -212,9 +234,11 @@ export default function App() {
       }}
     >
       <div className="h-screen flex flex-col overflow-hidden">
+        <UpdateBanner />
         <div className="flex-1 min-h-0">
           <Dashboard />
         </div>
+        <ToastContainer />
       </div>
     </AppContext.Provider>
   )

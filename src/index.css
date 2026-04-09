@@ -71,6 +71,18 @@ input[type="date"] {
   appearance: none;
 }
 
+/* Animations */
+@keyframes slide-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes slide-up {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-down { animation: slide-down 0.3s ease-out; }
+.animate-slide-up { animation: slide-up 0.25s ease-out; }
+
 /* Allow scrolling only inside specific panels */
 .scroll-panel {
   overflow-y: auto;

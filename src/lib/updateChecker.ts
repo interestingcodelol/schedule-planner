@@ -4,6 +4,8 @@ const CURRENT_BUILD = __BUILD_TIME__
 const CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
 const VERSION_URL = `${import.meta.env.BASE_URL}version.json`
 
+type UpdateCallback = (available: boolean) => void
+
 async function fetchVersion(): Promise<string | null> {
   try {
     const res = await fetch(VERSION_URL, { cache: 'no-store' })
@@ -15,15 +17,17 @@ async function fetchVersion(): Promise<string | null> {
   }
 }
 
-export function startUpdateChecker(): () => void {
+/**
+ * Check for new deployments. Instead of auto-reloading (jarring),
+ * calls the callback so the UI can show a gentle update banner.
+ */
+export function startUpdateChecker(onUpdate: UpdateCallback): () => void {
   const knownVersion = CURRENT_BUILD
 
   const check = async () => {
     const latest = await fetchVersion()
     if (latest && knownVersion && latest !== knownVersion) {
-      // New version deployed — reload to get it
-      // Data is safe in IndexedDB + localStorage
-      window.location.reload()
+      onUpdate(true)
     }
   }
 
@@ -36,7 +40,6 @@ export function startUpdateChecker(): () => void {
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
 
-  // Return cleanup function
   return () => {
     clearInterval(intervalId)
     document.removeEventListener('visibilitychange', onVisibilityChange)

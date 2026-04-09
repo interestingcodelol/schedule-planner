@@ -14,6 +14,7 @@ import {
   CalendarSearch,
 } from 'lucide-react'
 import { useAppState } from '../context'
+import { showToast } from './Toast'
 import {
   projectBalance,
   countWorkDays,
@@ -100,6 +101,7 @@ export function VacationPlanner() {
     setWhatIfEnd('')
     setWhatIfNote('')
     setWhatIfHours('')
+    showToast({ message: 'Time off added to plan' })
   }
 
   return (

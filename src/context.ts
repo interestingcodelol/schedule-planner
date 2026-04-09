@@ -10,6 +10,7 @@ export type AppContextType = {
   removeVacation: (id: string) => void
   updateVacation: (id: string, updates: Partial<PlannedVacation>) => void
   addBankHours: (entry: BankHoursEntry) => void
+  removeBankHours: (id: string) => void
   toggleTheme: () => void
   setShowTour: (show: boolean) => void
   isDemo: boolean

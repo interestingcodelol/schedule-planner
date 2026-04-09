@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { Wallet, Plus } from 'lucide-react'
+import { Wallet, Plus, X } from 'lucide-react'
 import { useAppState } from '../context'
+import { showToast } from './Toast'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
 }
 
 export function BankHoursWidget() {
-  const { state, addBankHours } = useAppState()
+  const { state, addBankHours, removeBankHours } = useAppState()
   const [hours, setHours] = useState('')
   const [note, setNote] = useState('')
 
@@ -78,18 +79,38 @@ export function BankHoursWidget() {
       {recentEntries.length > 0 && (
         <div className="border-t border-gray-200/60 dark:border-gray-700/40 divide-y divide-gray-100 dark:divide-gray-800/60">
           {recentEntries.map((entry) => (
-            <div key={entry.id} className="px-5 py-2 flex items-center justify-between">
+            <div key={entry.id} className="px-5 py-2 flex items-center justify-between group">
               <div className="text-sm">
                 <span className="font-medium text-teal-600 dark:text-teal-400">
                   +{fmt(entry.hours)} hrs
                 </span>
                 {entry.note && (
-                  <span className="text-gray-500 dark:text-gray-400 ml-1.5 text-xs">
+                  <span className="text-gray-500 dark:text-gray-400 ml-1.5 text-sm">
                     {entry.note}
                   </span>
                 )}
               </div>
-              <span className="text-xs text-gray-400">{format(parseISO(entry.date), 'MMM d')}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-400">{format(parseISO(entry.date), 'MMM d')}</span>
+                <button
+                  onClick={() => {
+                    const deleted = { ...entry }
+                    removeBankHours(entry.id)
+                    showToast({
+                      message: `Removed ${fmt(entry.hours)} bank hrs`,
+                      action: {
+                        label: 'Undo',
+                        onClick: () => addBankHours(deleted),
+                      },
+                      duration: 5000,
+                    })
+                  }}
+                  className="p-0.5 rounded text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                  title="Remove"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { format, parseISO, endOfYear, differenceInYears } from 'date-fns'
-import { Clock, TrendingUp, Calendar, AlertTriangle, Wallet, Layers } from 'lucide-react'
+import { Clock, TrendingUp, Calendar, AlertTriangle, Wallet, Layers, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
 import { projectBalance, getNextPayday, computeAccrualTier } from '../lib/projection'
 
@@ -90,7 +90,7 @@ export function StatusCards() {
     state.profile.currentBankHours
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
       {/* Total Available — hero card */}
       <Card
         icon={Layers}
@@ -108,6 +108,15 @@ export function StatusCards() {
         value={`${fmt(state.profile.currentVacationHours)} hrs`}
         sub={`Accruing ${fmt(currentTier.hoursPerPayPeriod)} hrs/period`}
         accent="bg-gradient-to-r from-blue-500 to-sky-500"
+      />
+
+      {/* Sick Hours */}
+      <Card
+        icon={HeartPulse}
+        label="Sick"
+        value={`${fmt(state.profile.currentSickHours)} hrs`}
+        sub={`Max: ${fmt(state.policy.sickLeaveMaxBalance)} hrs`}
+        accent="bg-gradient-to-r from-rose-500 to-pink-500"
       />
 
       {/* Bank Hours */}
