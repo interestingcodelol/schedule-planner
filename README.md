@@ -43,24 +43,13 @@ Schedule Planner solves this by projecting your balances forward day-by-day — 
 - lucide-react for icons
 - Vitest + React Testing Library for tests
 
-## Quick start
-
-```bash
-git clone https://github.com/interestingcodelol/schedule-planner.git
-cd schedule-planner
-npm install
-npm run dev       # start dev server
-npm test          # run tests
-npm run build     # production build
-```
-
 ## How the projection works
 
 The projection engine (`src/lib/projection.ts`) is a pure function that processes events chronologically:
 
 1. **Start** from current balances (vacation, sick, bank) as of today
 2. **Generate events** — paydays (accruals), planned vacation deductions, carryover adjustments, bank hour payouts, annual sick leave grants
-3. **Sort chronologically** with deterministic ordering for same-day events: sick grants first, then accruals, then deductions, then carryover caps, then bank payouts
+3. **Sort chronologically** with deterministic ordering for same-day events
 4. **Process each event** updating the appropriate balance pool
 5. **Return** final balances, event trail, and totals
 
@@ -79,17 +68,6 @@ Data is stored in two independent locations for resilience:
 - **localStorage** — fallback, read on initial load
 
 On every state change, data is written to both. On load, IndexedDB is tried first. Export/Import provides an additional backup mechanism.
-
-## Deployment
-
-The app deploys to GitHub Pages via a GitHub Actions workflow (`.github/workflows/pages.yml`). On push to `main`:
-
-1. Vite builds with `VITE_BASE_PATH=/schedule-planner/`
-2. A `version.json` is generated with the build timestamp
-3. `index.html` is copied to `404.html` for SPA routing
-4. The build artifact is deployed to GitHub Pages
-
-A built-in update checker polls `version.json` every 5 minutes and on tab focus. When a new version is detected, a gentle banner offers to refresh — user data is never lost.
 
 ## Customizing for your employer
 
@@ -111,6 +89,12 @@ The defaults represent a common US employer policy pattern and are not specific 
 All data is stored locally in your browser's IndexedDB and localStorage. Nothing is sent to any server, API, or third-party service. There is no analytics, tracking, or telemetry of any kind. No account is needed.
 
 To move your data between browsers, use the Export/Import feature in Settings.
+
+## Feedback & Issues
+
+Found a bug, incorrect calculation, or have a feature idea? [Open an issue](https://github.com/interestingcodelol/schedule-planner/issues/new/choose) — templates are provided for bug reports, feature requests, and calculation issues.
+
+This project is maintained by a single developer. Pull requests are not accepted at this time, but feedback via issues is welcome.
 
 ## License
 

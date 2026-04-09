@@ -1,39 +1,15 @@
 # Contributing to Schedule Planner
 
-Thanks for your interest in contributing! Here's how to get started.
+This project is maintained by a single developer. **Pull requests are not accepted at this time.**
 
-## Development
+## How to help
 
-```bash
-git clone https://github.com/interestingcodelol/schedule-planner.git
-cd schedule-planner
-npm install
-npm run dev
-```
+The best way to contribute is by [opening an issue](https://github.com/interestingcodelol/schedule-planner/issues/new/choose):
 
-## Running tests
-
-```bash
-npm test          # single run
-npm run test:watch # watch mode
-```
-
-## Code style
-
-- TypeScript strict mode
-- Prettier for formatting (`npm run format`)
-- ESLint for linting (`npm run lint`)
-
-## Pull requests
-
-1. Fork the repo and create a feature branch
-2. Make your changes
-3. Run `npm run typecheck && npm run lint && npm test` to verify
-4. Open a PR with a clear description
+- **Bug reports** — describe what went wrong, steps to reproduce, and expected behavior
+- **Calculation issues** — if a projected balance or affordability check seems wrong, share your setup details (no PII needed) so we can verify
+- **Feature requests** — describe the problem you're trying to solve and your ideal solution
 
 ## Privacy
 
-Schedule Planner is a client-side-only tool. Please do not introduce:
-- External API calls or telemetry
-- Server-side dependencies
-- Hardcoded personal data or employer-specific information
+Schedule Planner is a client-side-only tool with no server, no accounts, and no telemetry. All data stays in the user's browser.
