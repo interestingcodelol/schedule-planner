@@ -111,7 +111,7 @@ export function Dashboard() {
         <div className="lg:col-span-8 min-h-0 flex flex-col" data-tour="calendar">
           <CalendarView />
         </div>
-        <div className="lg:col-span-4 min-h-0 flex flex-col gap-4">
+        <div className="lg:col-span-4 min-h-0 flex flex-col gap-4 pb-16">
           <div data-tour="planner" className="shrink-0">
             <VacationPlanner />
           </div>
