@@ -304,7 +304,7 @@ export function projectBalance(
         })
       }
     } else if (pe.type === 'vacation_deduction') {
-      const hours = state.policy.hoursPerWorkDay
+      const hours = Math.abs(pe.process()) // deductHours from the vacation (respects partial days)
       const source = pe.hourSource || 'any'
 
       // Deduct from the appropriate pool
@@ -326,7 +326,9 @@ export function projectBalance(
           remaining -= fromVaca
         }
         if (remaining > 0) {
-          sickBalance -= remaining
+          const fromSick = Math.min(remaining, Math.max(0, sickBalance))
+          sickBalance -= fromSick
+          // remaining beyond all pools is simply unaffordable — don't go negative
         }
       }
 

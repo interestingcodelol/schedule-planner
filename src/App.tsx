@@ -40,11 +40,14 @@ export default function App() {
   // Try loading from IndexedDB on mount (may have data even if localStorage was cleared)
   useEffect(() => {
     loadStateAsync().then((idbState) => {
-      if (idbState && !state) {
-        setAppData({ state: migrateState(idbState), isDemo: idbState.profile.displayName === 'Demo User' })
+      if (idbState) {
+        setAppData((prev) => {
+          // Only use IDB state if we don't already have state loaded
+          if (prev.state) return prev
+          return { state: migrateState(idbState), isDemo: idbState.profile.displayName === 'Demo User' }
+        })
       }
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

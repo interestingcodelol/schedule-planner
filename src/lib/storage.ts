@@ -89,14 +89,21 @@ export function validateImportedState(data: unknown): data is AppState {
 
   const profile = obj.profile as Record<string, unknown> | undefined
   if (!profile) return false
-  if (typeof profile.hireDate !== 'string') return false
-  if (typeof profile.currentVacationHours !== 'number') return false
-  if (typeof profile.lastPaydayDate !== 'string') return false
+  if (typeof profile.hireDate !== 'string' || !isValidIsoDate(profile.hireDate)) return false
+  if (typeof profile.currentVacationHours !== 'number' || !isFinite(profile.currentVacationHours)) return false
+  if (typeof profile.currentSickHours !== 'number' || !isFinite(profile.currentSickHours)) return false
+  if (typeof profile.lastPaydayDate !== 'string' || !isValidIsoDate(profile.lastPaydayDate)) return false
 
   const policy = obj.policy as Record<string, unknown> | undefined
   if (!policy) return false
-  if (!Array.isArray(policy.accrualTiers)) return false
-  if (!Array.isArray(policy.workDaysPerWeek)) return false
+  if (!Array.isArray(policy.accrualTiers) || policy.accrualTiers.length === 0) return false
+  if (!Array.isArray(policy.workDaysPerWeek) || policy.workDaysPerWeek.length === 0) return false
+  if (typeof policy.payPeriodLengthDays !== 'number' || policy.payPeriodLengthDays <= 0) return false
+  if (typeof policy.hoursPerWorkDay !== 'number' || policy.hoursPerWorkDay <= 0) return false
 
   return true
+}
+
+function isValidIsoDate(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}/.test(s) && !isNaN(Date.parse(s))
 }

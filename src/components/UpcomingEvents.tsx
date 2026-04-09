@@ -1,19 +1,66 @@
-import { useMemo } from 'react'
-import { format, parseISO, addDays, isBefore, isSameDay, startOfDay, differenceInDays } from 'date-fns'
-import { CalendarDays, Gift, Clock, TrendingUp } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import {
+  format,
+  parseISO,
+  addDays,
+  isBefore,
+  isSameDay,
+  startOfDay,
+  differenceInDays,
+  getDay,
+} from 'date-fns'
+import {
+  CalendarDays,
+  Gift,
+  TrendingUp,
+  Lock,
+  Unlock,
+  Trash2,
+  CheckCircle,
+  XCircle,
+  Palmtree,
+} from 'lucide-react'
 import { useAppState } from '../context'
-import { getNextPayday } from '../lib/projection'
+import { projectBalance, countWorkDays, getNextPayday } from '../lib/projection'
+
+function fmt(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2)
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  any: '',
+  vacation: 'Vacation',
+  sick: 'Sick',
+  bank: 'Bank',
+}
+
+const EMOJI_OPTIONS = [
+  '🌴', '✨', '🎉', '😎', '⏰', '🏖️', '🎄', '🏥', '✈️', '🎓',
+  '💼', '🏠', '🎮', '🧘', '🏕️', '🎵', '🚗', '👶', '🐾', '💤',
+]
 
 export function UpcomingEvents() {
   const { state } = useAppState()
   const today = startOfDay(new Date())
 
-  const events = useMemo(() => {
+  // Sorted planned vacations (future + current)
+  const sortedVacations = useMemo(
+    () =>
+      [...state.plannedVacations]
+        .filter((v) => !isBefore(parseISO(v.endDate), today))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate)),
+    [state.plannedVacations, today],
+  )
+
+  // Info events (holidays, paydays) — non-interactive
+  const infoEvents = useMemo(() => {
     const items: Array<{
+      key: string
       icon: React.ElementType
       label: string
       detail: string
       accent: string
+      sortDate: Date
     }> = []
 
     // Next payday
@@ -24,10 +71,12 @@ export function UpcomingEvents() {
     const daysToPayday = differenceInDays(nextPayday, today)
     if (daysToPayday >= 0 && daysToPayday <= 30) {
       items.push({
+        key: `payday-${format(nextPayday, 'yyyy-MM-dd')}`,
         icon: TrendingUp,
-        label: `Payday in ${daysToPayday === 0 ? 'today' : daysToPayday === 1 ? '1 day' : `${daysToPayday} days`}`,
-        detail: format(nextPayday, 'EEE, MMM d'),
+        label: `Payday${daysToPayday === 0 ? ' today' : ''}`,
+        detail: `${format(nextPayday, 'EEE, MMM d')}${daysToPayday > 0 ? ` — ${daysToPayday}d away` : ''}`,
         accent: 'text-emerald-500',
+        sortDate: nextPayday,
       })
     }
 
@@ -37,7 +86,6 @@ export function UpcomingEvents() {
       for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
         let holidayDate: Date
         try {
-          // Compute the holiday date (simplified — reuse the rule logic)
           if (rule.type === 'fixed') {
             holidayDate = new Date(year, rule.month - 1, rule.day)
           } else if (rule.type === 'nth_weekday') {
@@ -56,75 +104,195 @@ export function UpcomingEvents() {
         if (!isBefore(holidayDate, today) && isBefore(holidayDate, lookAhead) && !isSameDay(holidayDate, today)) {
           const daysUntil = differenceInDays(holidayDate, today)
           items.push({
+            key: `holiday-${rule.name}-${year}`,
             icon: Gift,
             label: rule.name,
-            detail: `${format(holidayDate, 'EEE, MMM d')} — ${daysUntil} day${daysUntil !== 1 ? 's' : ''} away`,
+            detail: `${format(holidayDate, 'EEE, MMM d')} — ${daysUntil}d away`,
             accent: 'text-amber-500',
+            sortDate: holidayDate,
           })
         }
       }
     }
 
-    // Upcoming planned time off
-    const upcomingVacations = state.plannedVacations
-      .filter((v) => !isBefore(parseISO(v.endDate), today))
-      .sort((a, b) => a.startDate.localeCompare(b.startDate))
-      .slice(0, 3)
-
-    for (const v of upcomingVacations) {
-      const start = parseISO(v.startDate)
-      const daysUntil = differenceInDays(start, today)
-      if (daysUntil > 0) {
-        items.push({
-          icon: CalendarDays,
-          label: v.note || 'Planned time off',
-          detail: `${format(start, 'EEE, MMM d')} — ${daysUntil} day${daysUntil !== 1 ? 's' : ''} away`,
-          accent: 'text-blue-500',
-        })
-      }
-    }
-
-    // Hours used this year
-    const totalPlannedHours = state.plannedVacations
-      .filter((v) => {
-        const s = parseISO(v.startDate)
-        return s.getFullYear() === today.getFullYear()
-      })
-      .reduce((sum, v) => {
-        const days = Math.max(1, differenceInDays(parseISO(v.endDate), parseISO(v.startDate)) + 1)
-        const hrsPerDay = v.hoursPerDay ?? state.policy.hoursPerWorkDay
-        return sum + days * hrsPerDay
-      }, 0)
-
-    if (totalPlannedHours > 0) {
-      items.push({
-        icon: Clock,
-        label: `${totalPlannedHours.toFixed(0)} hrs planned this year`,
-        detail: `${state.plannedVacations.filter((v) => parseISO(v.startDate).getFullYear() === today.getFullYear()).length} time-off entries`,
-        accent: 'text-cyan-500',
-      })
-    }
-
-    return items
+    return items.sort((a, b) => a.sortDate.getTime() - b.sortDate.getTime())
   }, [state, today])
 
-  if (events.length === 0) return null
+  const hasContent = sortedVacations.length > 0 || infoEvents.length > 0
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40">
         <h3 className="text-sm font-semibold">Upcoming</h3>
       </div>
-      <div className="divide-y divide-gray-100 dark:divide-gray-800/60">
-        {events.map((event, i) => (
-          <div key={i} className="px-5 py-3 flex items-start gap-3">
-            <event.icon className={`w-4 h-4 mt-0.5 shrink-0 ${event.accent}`} />
-            <div className="min-w-0">
-              <div className="text-sm font-medium truncate">{event.label}</div>
-              <div className="text-xs text-gray-400 dark:text-gray-500">{event.detail}</div>
+
+      {!hasContent ? (
+        <div className="px-5 py-8 text-center">
+          <Palmtree className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+          <p className="text-sm text-gray-400 dark:text-gray-500">
+            No upcoming events
+          </p>
+        </div>
+      ) : (
+        <div className="divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[400px] overflow-y-auto scroll-panel">
+          {/* Planned vacations — with full controls */}
+          {sortedVacations.map((vacation) => (
+            <VacationRow key={vacation.id} vacation={vacation} />
+          ))}
+
+          {/* Info events — holidays, paydays */}
+          {infoEvents.map((event) => (
+            <div key={event.key} className="px-5 py-3 flex items-start gap-3">
+              <event.icon className={`w-4 h-4 mt-0.5 shrink-0 ${event.accent}`} />
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{event.label}</div>
+                <div className="text-xs text-gray-400 dark:text-gray-500">{event.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VacationRow({ vacation }: { vacation: {
+  id: string
+  startDate: string
+  endDate: string
+  hoursPerDay?: number
+  hourSource: 'vacation' | 'sick' | 'bank' | 'any'
+  note?: string
+  locked: boolean
+  customEmoji?: string
+}}) {
+  const { state, removeVacation, updateVacation } = useAppState()
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const today = startOfDay(new Date())
+  const start = parseISO(vacation.startDate)
+  const end = parseISO(vacation.endDate)
+  const isPast = isBefore(end, today)
+
+  const workDays = countWorkDays(start, end, state.policy)
+  const hrsPerDay = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
+  const hoursNeeded = workDays * hrsPerDay
+  const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
+  const projection = projectBalance(state, start)
+  const affordable = projection.totalAvailable >= hoursNeeded
+
+  const sourceLabel = SOURCE_LABELS[vacation.hourSource] || ''
+
+  let defaultEmoji = ''
+  if (workDays >= 5) defaultEmoji = '🌴'
+  else if (workDays >= 3) defaultEmoji = '✨'
+  else if (workDays === 1 && (getDay(start) === 5 || getDay(start) === 1)) defaultEmoji = '🎉'
+  else if (isPartial) defaultEmoji = '⏰'
+  const displayEmoji = vacation.customEmoji || defaultEmoji
+
+  const metaParts: string[] = []
+  metaParts.push(`${workDays} day${workDays !== 1 ? 's' : ''}`)
+  if (isPartial) {
+    metaParts.push(`${fmt(hoursNeeded)} hrs (${fmt(hrsPerDay)}h/day)`)
+  } else {
+    metaParts.push(`${fmt(hoursNeeded)} hrs`)
+  }
+  if (sourceLabel) metaParts.push(sourceLabel)
+
+  return (
+    <div className={`px-5 py-3 ${isPast ? 'opacity-40' : ''}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <CalendarDays className="w-4 h-4 mt-0.5 shrink-0 text-blue-500" />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold flex items-center gap-1">
+              {displayEmoji && (
+                <span className="relative">
+                  <button
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className="hover:scale-125 transition-transform cursor-pointer"
+                    title="Click to change emoji"
+                  >
+                    {displayEmoji}
+                  </button>
+                  {showEmojiPicker && (
+                    <div className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48">
+                      {EMOJI_OPTIONS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => {
+                            updateVacation(vacation.id, { customEmoji: emoji })
+                            setShowEmojiPicker(false)
+                          }}
+                          className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700/60 rounded-lg p-1 transition-colors"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                      {vacation.customEmoji && (
+                        <button
+                          onClick={() => {
+                            updateVacation(vacation.id, { customEmoji: undefined })
+                            setShowEmojiPicker(false)
+                          }}
+                          className="col-span-5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mt-1 py-1"
+                        >
+                          Reset to default
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </span>
+              )}
+              <span>
+                {format(start, 'MMM d')}
+                {vacation.startDate !== vacation.endDate && ` — ${format(end, 'MMM d')}`}
+                {start.getFullYear() !== new Date().getFullYear() && `, ${start.getFullYear()}`}
+              </span>
+            </div>
+            {vacation.note && (
+              <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                {vacation.note}
+              </div>
+            )}
+            <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+              {metaParts.join(' · ')}
             </div>
           </div>
-        ))}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {!isPast && (
+            <span
+              className="cursor-help"
+              title={
+                affordable
+                  ? `Affordable — ${fmt(projection.totalAvailable)} hrs available`
+                  : `Short ${fmt(hoursNeeded - projection.totalAvailable)} hrs`
+              }
+            >
+              {affordable ? (
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+              ) : (
+                <XCircle className="w-4 h-4 text-red-500" />
+              )}
+            </span>
+          )}
+          <button
+            onClick={() => updateVacation(vacation.id, { locked: !vacation.locked })}
+            className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all"
+            title={vacation.locked ? 'Unlock' : 'Lock'}
+          >
+            {vacation.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+          </button>
+          {!vacation.locked && (
+            <button
+              onClick={() => removeVacation(vacation.id)}
+              className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+              title="Delete"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -9,13 +9,9 @@ import {
 } from 'date-fns'
 import {
   Plus,
-  Trash2,
-  Lock,
-  Unlock,
   CheckCircle,
   XCircle,
   CalendarSearch,
-  Palmtree,
 } from 'lucide-react'
 import { useAppState } from '../context'
 import {
@@ -28,18 +24,6 @@ function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  any: '',
-  vacation: 'Vacation',
-  sick: 'Sick',
-  bank: 'Bank',
-}
-
-const EMOJI_OPTIONS = [
-  '🌴', '✨', '🎉', '😎', '⏰', '🏖️', '🎄', '🏥', '✈️', '🎓',
-  '💼', '🏠', '🎮', '🧘', '🏕️', '🎵', '🚗', '👶', '🐾', '💤',
-]
-
 export function VacationPlanner() {
   const { state, addVacation } = useAppState()
   const today = startOfDay(new Date())
@@ -50,14 +34,6 @@ export function VacationPlanner() {
   const [whatIfSource, setWhatIfSource] = useState<'vacation' | 'sick' | 'bank' | 'any'>('any')
   const [whatIfHours, setWhatIfHours] = useState('') // empty = full day
   const [whatIfError, setWhatIfError] = useState('')
-
-  const sortedVacations = useMemo(
-    () =>
-      [...state.plannedVacations].sort((a, b) =>
-        a.startDate.localeCompare(b.startDate),
-      ),
-    [state.plannedVacations],
-  )
 
   const whatIfResult = useMemo(() => {
     if (!whatIfStart || !whatIfEnd) return null
@@ -259,181 +235,7 @@ export function VacationPlanner() {
         </button>
       </div>
 
-      {/* Planned list — capped height with scroll */}
-      <div className="divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[280px] overflow-y-auto scroll-panel">
-        {sortedVacations.length === 0 ? (
-          <div className="px-6 py-10 text-center">
-            <Palmtree className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p className="text-sm font-medium text-gray-400 dark:text-gray-500">
-              No planned time off yet
-            </p>
-            <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-              Use the planner above or click days on the calendar
-            </p>
-          </div>
-        ) : (
-          sortedVacations.map((vacation) => (
-            <VacationItem key={vacation.id} vacation={vacation} />
-          ))
-        )}
-      </div>
     </div>
   )
 }
 
-function VacationItem({
-  vacation,
-}: {
-  vacation: {
-    id: string
-    startDate: string
-    endDate: string
-    hoursPerDay?: number
-    hourSource: 'vacation' | 'sick' | 'bank' | 'any'
-    note?: string
-    locked: boolean
-    customEmoji?: string
-  }
-}) {
-  const { state, removeVacation, updateVacation } = useAppState()
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const today = startOfDay(new Date())
-  const start = parseISO(vacation.startDate)
-  const end = parseISO(vacation.endDate)
-  const isPast = isBefore(end, today)
-
-  const workDays = countWorkDays(start, end, state.policy)
-  const hrsPerDay = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
-  const hoursNeeded = workDays * hrsPerDay
-  const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
-  const projection = projectBalance(state, start)
-  const affordable = projection.totalAvailable >= hoursNeeded
-
-  const sourceLabel = SOURCE_LABELS[vacation.hourSource] || ''
-
-  // Default emoji based on context
-  let defaultEmoji = ''
-  if (workDays >= 5) defaultEmoji = '🌴'
-  else if (workDays >= 3) defaultEmoji = '✨'
-  else if (workDays === 1 && (getDay(start) === 5 || getDay(start) === 1)) defaultEmoji = '🎉'
-  else if (isPartial) defaultEmoji = '⏰'
-
-  const displayEmoji = vacation.customEmoji || defaultEmoji
-
-  // Build concise metadata: "3 days · 24 hrs" or "1 day · 3 hrs (3h/day)"
-  const metaParts: string[] = []
-  metaParts.push(`${workDays} day${workDays !== 1 ? 's' : ''}`)
-  if (isPartial) {
-    metaParts.push(`${fmt(hoursNeeded)} hrs (${fmt(hrsPerDay)}h/day)`)
-  } else {
-    metaParts.push(`${fmt(hoursNeeded)} hrs`)
-  }
-  if (sourceLabel) {
-    metaParts.push(sourceLabel)
-  }
-
-  return (
-    <div className={`px-6 py-4 ${isPast ? 'opacity-40' : ''}`}>
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold flex items-center gap-1">
-            {displayEmoji && (
-              <span className="relative">
-                <button
-                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  className="hover:scale-125 transition-transform cursor-pointer"
-                  title="Click to change emoji"
-                >
-                  {displayEmoji}
-                </button>
-                {showEmojiPicker && (
-                  <div className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48">
-                    {EMOJI_OPTIONS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => {
-                          updateVacation(vacation.id, { customEmoji: emoji })
-                          setShowEmojiPicker(false)
-                        }}
-                        className="text-lg hover:bg-gray-100 dark:hover:bg-gray-700/60 rounded-lg p-1 transition-colors"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                    {vacation.customEmoji && (
-                      <button
-                        onClick={() => {
-                          updateVacation(vacation.id, { customEmoji: undefined })
-                          setShowEmojiPicker(false)
-                        }}
-                        className="col-span-5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mt-1 py-1"
-                      >
-                        Reset to default
-                      </button>
-                    )}
-                  </div>
-                )}
-              </span>
-            )}
-            <span>
-              {format(start, 'MMM d')}
-              {vacation.startDate !== vacation.endDate && ` — ${format(end, 'MMM d')}`}
-              {start.getFullYear() !== new Date().getFullYear() &&
-                `, ${start.getFullYear()}`}
-            </span>
-          </div>
-          {vacation.note && (
-            <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-              {vacation.note}
-            </div>
-          )}
-          <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-            {metaParts.join(' · ')}
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 ml-3 shrink-0">
-          {!isPast && (
-            <span
-              className="mr-1 cursor-help"
-              title={
-                affordable
-                  ? `Affordable — you'll have ${fmt(projection.totalAvailable)} hrs available (need ${fmt(hoursNeeded)} hrs for ${workDays} day${workDays !== 1 ? 's' : ''})`
-                  : `Not enough hours — you'll only have ${fmt(projection.totalAvailable)} hrs available but need ${fmt(hoursNeeded)} hrs (${fmt(hoursNeeded - projection.totalAvailable)} hrs short)`
-              }
-            >
-              {affordable ? (
-                <CheckCircle className="w-5 h-5 text-emerald-500" />
-              ) : (
-                <XCircle className="w-5 h-5 text-red-500" />
-              )}
-            </span>
-          )}
-          <button
-            onClick={() =>
-              updateVacation(vacation.id, { locked: !vacation.locked })
-            }
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
-            aria-label={vacation.locked ? 'Unlock this time off' : 'Lock this time off'}
-            title={vacation.locked ? 'Unlock — allow editing' : 'Lock — prevent changes'}
-          >
-            {vacation.locked ? (
-              <Lock className="w-4 h-4" />
-            ) : (
-              <Unlock className="w-4 h-4" />
-            )}
-          </button>
-          {!vacation.locked && (
-            <button
-              onClick={() => removeVacation(vacation.id)}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all duration-150"
-              aria-label="Delete this time off"
-              title="Delete this time off"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}

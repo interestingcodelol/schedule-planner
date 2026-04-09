@@ -4,8 +4,6 @@ const CURRENT_BUILD = __BUILD_TIME__
 const CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
 const VERSION_URL = `${import.meta.env.BASE_URL}version.json`
 
-let knownVersion: string | null = null
-
 async function fetchVersion(): Promise<string | null> {
   try {
     const res = await fetch(VERSION_URL, { cache: 'no-store' })
@@ -17,9 +15,8 @@ async function fetchVersion(): Promise<string | null> {
   }
 }
 
-export function startUpdateChecker() {
-  // Store our build time as the known version on first load
-  knownVersion = CURRENT_BUILD
+export function startUpdateChecker(): () => void {
+  const knownVersion = CURRENT_BUILD
 
   const check = async () => {
     const latest = await fetchVersion()
@@ -30,13 +27,18 @@ export function startUpdateChecker() {
     }
   }
 
-  // Check periodically
-  setInterval(check, CHECK_INTERVAL)
+  const intervalId = setInterval(check, CHECK_INTERVAL)
 
-  // Also check when tab becomes visible (user returns to tab)
-  document.addEventListener('visibilitychange', () => {
+  const onVisibilityChange = () => {
     if (document.visibilityState === 'visible') {
       check()
     }
-  })
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
+  // Return cleanup function
+  return () => {
+    clearInterval(intervalId)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+  }
 }
