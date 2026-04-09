@@ -14,7 +14,7 @@ import { ChatAssistant } from './ChatAssistant'
 import { UpcomingEvents } from './UpcomingEvents'
 
 export function Dashboard() {
-  const { state, setShowTour } = useAppState()
+  const { state, setShowTour, isDemo, resetToSetup } = useAppState()
   const [showSettings, setShowSettings] = useState(false)
   const today = startOfDay(new Date())
 
@@ -38,10 +38,19 @@ export function Dashboard() {
             <h1 className="text-xl font-bold tracking-tight">
               <span className="gradient-text">Schedule Planner</span>
             </h1>
-            {state.profile.displayName && state.profile.displayName !== 'User' && (
+            {state.profile.displayName && state.profile.displayName !== 'User' && !isDemo && (
               <span className="text-sm text-gray-400 dark:text-gray-500 font-medium">
                 {state.profile.displayName}
               </span>
+            )}
+            {isDemo && (
+              <button
+                onClick={resetToSetup}
+                className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-400 transition-colors font-medium"
+                title="You're viewing demo data — click to set up with your info"
+              >
+                Demo Mode
+              </button>
             )}
           </div>
           {/* Upcoming time off badge */}

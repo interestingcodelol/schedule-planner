@@ -58,6 +58,7 @@ export function GuidedTour() {
   const active = state.showTour
   const TOOLTIP_W = 400
   const TOOLTIP_H = 260
+  const BORDER_R = 16
 
   const updatePosition = useCallback(() => {
     if (!active) return
@@ -68,7 +69,6 @@ export function GuidedTour() {
     const rect = el.getBoundingClientRect()
     const pad = 12
 
-    // Spotlight rect (viewport-relative)
     setSpotlightRect({
       top: rect.top - pad,
       left: rect.left - pad,
@@ -76,7 +76,6 @@ export function GuidedTour() {
       height: rect.height + pad * 2,
     })
 
-    // Compute tooltip position
     let top = 0
     let left = 0
     const gap = 20
@@ -100,7 +99,6 @@ export function GuidedTour() {
         break
     }
 
-    // Clamp to viewport
     const vw = window.innerWidth
     const vh = window.innerHeight
     left = Math.max(12, Math.min(left, vw - TOOLTIP_W - 12))
@@ -143,62 +141,59 @@ export function GuidedTour() {
   const step = steps[currentStep]
   const isLast = currentStep === steps.length - 1
 
+  // SVG mask approach: dark overlay with a rounded-rect hole for the spotlight
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+
   return (
     <>
-      {/* Blurred backdrop — covers everything */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{
-          backgroundColor: 'rgba(0, 0, 0, 0.35)',
-          backdropFilter: 'blur(3px)',
-          WebkitBackdropFilter: 'blur(3px)',
-        }}
+      {/* Dark overlay with cutout — no blur, so spotlight is perfectly clear */}
+      <svg
+        className="fixed inset-0 z-40 w-full h-full"
+        style={{ pointerEvents: 'auto' }}
         onClick={dismiss}
-      />
+      >
+        <defs>
+          <mask id="tour-mask">
+            <rect x="0" y="0" width="100%" height="100%" fill="white" />
+            {spotlightRect && (
+              <rect
+                x={spotlightRect.left}
+                y={spotlightRect.top}
+                width={spotlightRect.width}
+                height={spotlightRect.height}
+                rx={BORDER_R}
+                ry={BORDER_R}
+                fill="black"
+              />
+            )}
+          </mask>
+        </defs>
+        <rect
+          x="0"
+          y="0"
+          width={vw}
+          height={vh}
+          fill="rgba(0,0,0,0.55)"
+          mask="url(#tour-mask)"
+        />
+      </svg>
 
-      {/* Spotlight cutout — bright, clear window over the target */}
+      {/* Glowing border around spotlight */}
       {spotlightRect && (
-        <>
-          {/* Clear window (removes blur/darken over target) */}
-          <div
-            className="fixed z-40 pointer-events-none"
-            style={{
-              top: spotlightRect.top,
-              left: spotlightRect.left,
-              width: spotlightRect.width,
-              height: spotlightRect.height,
-              borderRadius: 16,
-              boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.35)',
-              backdropFilter: 'blur(0px)',
-            }}
-          />
-          {/* Glowing border ring */}
-          <div
-            className="fixed z-40 pointer-events-none"
-            style={{
-              top: spotlightRect.top - 2,
-              left: spotlightRect.left - 2,
-              width: spotlightRect.width + 4,
-              height: spotlightRect.height + 4,
-              borderRadius: 18,
-              border: '2px solid rgba(59, 130, 246, 0.6)',
-              boxShadow:
-                '0 0 20px rgba(59, 130, 246, 0.4), 0 0 60px rgba(59, 130, 246, 0.15), inset 0 0 20px rgba(59, 130, 246, 0.1)',
-            }}
-          />
-          {/* Bright highlight overlay on target */}
-          <div
-            className="fixed z-40 pointer-events-none"
-            style={{
-              top: spotlightRect.top,
-              left: spotlightRect.left,
-              width: spotlightRect.width,
-              height: spotlightRect.height,
-              borderRadius: 16,
-              background: 'rgba(59, 130, 246, 0.04)',
-            }}
-          />
-        </>
+        <div
+          className="fixed z-40 pointer-events-none"
+          style={{
+            top: spotlightRect.top - 2,
+            left: spotlightRect.left - 2,
+            width: spotlightRect.width + 4,
+            height: spotlightRect.height + 4,
+            borderRadius: BORDER_R + 2,
+            border: '2px solid rgba(59, 130, 246, 0.5)',
+            boxShadow:
+              '0 0 24px rgba(59, 130, 246, 0.35), 0 0 60px rgba(59, 130, 246, 0.12)',
+          }}
+        />
       )}
 
       {/* Tooltip */}
@@ -209,7 +204,7 @@ export function GuidedTour() {
           left: tooltipPos.left,
           width: TOOLTIP_W,
           backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          border: '1px solid rgba(59, 130, 246, 0.3)',
+          border: '1px solid rgba(59, 130, 246, 0.25)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
         }}
