@@ -146,17 +146,15 @@ export function StatusCards() {
         accent="bg-gradient-to-r from-green-500 to-emerald-500"
       />
 
-      {/* Year-End Projection */}
+      {/* Year-End Projection — total across all pools, after all planned deductions */}
       <Card
         icon={TrendingUp}
         label="Year-End"
-        value={`${fmt(yearEndProjection.vacationBalance)} hrs`}
+        value={`${fmt(yearEndProjection.totalAvailable)} hrs`}
         sub={
           exceedsCap
-            ? `Cap: ${fmt(carryoverCap!)} hrs — ${fmt(yearEndProjection.vacationBalance - carryoverCap!)} at risk`
-            : carryoverCap !== null
-              ? `Cap: ${fmt(carryoverCap)} hrs`
-              : 'No carryover cap'
+            ? `Vac: ${fmt(yearEndProjection.vacationBalance)} (cap ${fmt(carryoverCap!)} — ${fmt(yearEndProjection.vacationBalance - carryoverCap!)} at risk)`
+            : `Vac: ${fmt(yearEndProjection.vacationBalance)} · Sick: ${fmt(yearEndProjection.sickBalance)} · Bank: ${fmt(yearEndProjection.bankBalance)}`
         }
         accent={
           exceedsCap
@@ -166,7 +164,7 @@ export function StatusCards() {
         glow={exceedsCap ? 'glow-amber' : undefined}
         badge={
           exceedsCap ? (
-            <span className="text-amber-500" title="Exceeds carryover cap">
+            <span className="text-amber-500" title={`Vacation exceeds ${fmt(carryoverCap!)} hr carryover cap — ${fmt(yearEndProjection.vacationBalance - carryoverCap!)} hrs at risk of forfeiture`}>
               <AlertTriangle className="w-4 h-4" />
             </span>
           ) : undefined

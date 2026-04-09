@@ -292,8 +292,8 @@ function VacationRow({ vacation }: { vacation: {
               className="cursor-help"
               title={
                 affordable
-                  ? `Affordable — ${fmt(projection.totalAvailable)} hrs available`
-                  : `Short ${fmt(hoursNeeded - projection.totalAvailable)} hrs`
+                  ? `Affordable — you'll have ${fmt(projection.totalAvailable)} hrs by ${format(start, 'MMM d')} (need ${fmt(hoursNeeded)})`
+                  : `Not enough — you'll have ${fmt(projection.totalAvailable)} hrs by ${format(start, 'MMM d')} but need ${fmt(hoursNeeded)} (${fmt(hoursNeeded - projection.totalAvailable)} short)`
               }
             >
               {affordable ? (

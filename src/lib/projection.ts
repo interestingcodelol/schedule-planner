@@ -307,7 +307,7 @@ export function projectBalance(
       const hours = Math.abs(pe.process()) // deductHours from the vacation (respects partial days)
       const source = pe.hourSource || 'any'
 
-      // Deduct from the appropriate pool
+      // Deduct from the appropriate pool (allow negative to show unaffordable, but track it)
       if (source === 'vacation') {
         vacationBalance -= hours
       } else if (source === 'sick') {
