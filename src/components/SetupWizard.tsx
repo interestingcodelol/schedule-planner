@@ -264,9 +264,8 @@ export function SetupWizard({ onComplete }: Props) {
             <div className="space-y-3">
               <h2 className="text-xl font-semibold">You're all set</h2>
               <p className="text-gray-400 leading-relaxed">
-                We've loaded a generic US employer accrual policy as a default. You can
-                customize accrual rates, tiers, holidays, and all other policy details
-                anytime in Settings.
+                You can customize accrual rates, tiers, holidays, and all other
+                policy details anytime in Settings.
               </p>
             </div>
 
