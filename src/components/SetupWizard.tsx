@@ -86,12 +86,29 @@ export function SetupWizard({ onComplete }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg">
+    <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* GIS-themed background */}
+      <div className="absolute inset-0 opacity-[0.07]" style={{
+        backgroundImage: `
+          linear-gradient(rgba(59,130,246,0.3) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(59,130,246,0.3) 1px, transparent 1px),
+          linear-gradient(rgba(59,130,246,0.15) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(59,130,246,0.15) 1px, transparent 1px)
+        `,
+        backgroundSize: '100px 100px, 100px 100px, 20px 20px, 20px 20px',
+      }} />
+      {/* Radial glow */}
+      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-blue-500/[0.04] blur-3xl" />
+      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-gray-950 to-transparent" />
+
+      <div className="w-full max-w-lg relative z-10">
         {step === 0 && (
           <div className="text-center space-y-8">
             <div className="space-y-3">
-              <h1 className="text-3xl font-semibold tracking-tight">Schedule Planner</h1>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-2">
+                Browser-based PTO Planner
+              </div>
+              <h1 className="text-4xl font-bold tracking-tight gradient-text">Schedule Planner</h1>
               <p className="text-gray-400 text-lg leading-relaxed max-w-md mx-auto">
                 Project your vacation accrual forward in time and plan time off against
                 that projection. All data stays in your browser.
