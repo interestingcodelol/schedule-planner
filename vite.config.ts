@@ -5,15 +5,17 @@ import tailwindcss from '@tailwindcss/vite'
 import { writeFileSync } from 'fs'
 import { resolve } from 'path'
 
+// Single build ID shared between the JS bundle and version.json
+const BUILD_ID = Date.now().toString(36)
+
 function versionPlugin(): Plugin {
-  const buildId = Date.now().toString(36)
   return {
     name: 'version-json',
     writeBundle(options) {
       const outDir = options.dir || 'dist'
       writeFileSync(
         resolve(outDir, 'version.json'),
-        JSON.stringify({ v: buildId, t: new Date().toISOString() }),
+        JSON.stringify({ v: BUILD_ID }),
       )
     },
   }
@@ -22,7 +24,7 @@ function versionPlugin(): Plugin {
 export default defineConfig({
   base: process.env.VITE_BASE_PATH || '/',
   define: {
-    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
   },
   plugins: [react(), tailwindcss(), versionPlugin()],
   test: {
