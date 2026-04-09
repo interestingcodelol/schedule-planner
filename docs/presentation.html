@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leave Lens — Feature Presentation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0b0f;
+    --card: rgba(17, 24, 39, 0.6);
+    --border: rgba(55, 65, 81, 0.4);
+    --text: #e5e7eb;
+    --text-dim: #9ca3af;
+    --text-muted: #6b7280;
+    --indigo: #6366f1;
+    --indigo-light: #818cf8;
+    --purple: #a78bfa;
+    --emerald: #10b981;
+    --sky: #38bdf8;
+    --amber: #f59e0b;
+    --red: #ef4444;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* Slide system */
+  .slide {
+    display: none;
+    height: 100vh;
+    padding: 60px 80px;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    animation: fadeIn 0.4s ease;
+  }
+  .slide.active { display: flex; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    z-index: 100;
+    background: rgba(17, 24, 39, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    padding: 10px 20px;
+    border-radius: 16px;
+  }
+  .nav button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .nav button:hover { background: rgba(99, 102, 241, 0.15); color: #fff; border-color: var(--indigo); }
+  .nav .counter { color: var(--text-muted); font-size: 13px; font-weight: 500; min-width: 60px; text-align: center; }
+
+  /* Progress bar */
+  .progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--indigo), var(--purple));
+    transition: width 0.3s ease;
+    z-index: 100;
+  }
+
+  /* Typography */
+  h1 { font-size: 56px; font-weight: 800; line-height: 1.1; letter-spacing: -2px; }
+  h2 { font-size: 40px; font-weight: 700; line-height: 1.2; letter-spacing: -1px; margin-bottom: 16px; }
+  h3 { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+  .subtitle { font-size: 20px; color: var(--text-dim); line-height: 1.6; max-width: 700px; }
+  .gradient-text { background: linear-gradient(135deg, var(--indigo-light), var(--purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .small-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: var(--indigo-light); margin-bottom: 12px; }
+
+  /* Mock UI components */
+  .mock-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .mock-card .accent {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+  }
+  .accent-indigo { background: linear-gradient(90deg, var(--indigo), var(--purple)); }
+  .accent-emerald { background: linear-gradient(90deg, var(--emerald), #059669); }
+  .accent-sky { background: linear-gradient(90deg, var(--sky), #0ea5e9); }
+  .accent-amber { background: linear-gradient(90deg, var(--amber), #d97706); }
+
+  .mock-card .card-label { font-size: 12px; color: var(--text-muted); font-weight: 500; margin-bottom: 6px; }
+  .mock-card .card-value { font-size: 28px; font-weight: 700; }
+  .mock-card .card-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  .status-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+
+  /* Mock calendar */
+  .mock-calendar {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .cal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .cal-header h3 { margin: 0; font-size: 16px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .cal-day-header { text-align: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); padding: 8px; border-bottom: 1px solid rgba(55,65,81,0.3); }
+  .cal-day {
+    aspect-ratio: 1.4;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    border-right: 1px solid rgba(55,65,81,0.25);
+    border-bottom: 1px solid rgba(55,65,81,0.25);
+    position: relative;
+  }
+  .cal-day.dim { opacity: 0.15; }
+  .cal-day.weekend { background: rgba(255,255,255,0.01); color: var(--text-muted); }
+  .cal-day.planned { background: rgba(99, 102, 241, 0.12); border-color: rgba(99, 102, 241, 0.3); }
+  .cal-day.partial { background: rgba(56, 189, 248, 0.08); }
+  .cal-day.holiday { background: rgba(245, 158, 11, 0.08); }
+  .cal-day.unaffordable { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.3); }
+  .cal-day.today .day-num { background: var(--indigo); color: #fff; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; }
+  .cal-day .balance { position: absolute; bottom: 4px; right: 6px; font-size: 10px; font-weight: 600; color: var(--text-muted); background: rgba(31,41,55,0.6); padding: 1px 5px; border-radius: 4px; }
+  .cal-day .balance.neg { background: rgba(239,68,68,0.2); color: var(--red); }
+  .cal-day .time-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 11px; font-weight: 700; color: var(--sky); }
+  .cal-day .holiday-name { position: absolute; bottom: 4px; left: 6px; font-size: 9px; font-weight: 700; color: var(--amber); }
+  .cal-day .emoji { position: absolute; top: 6px; right: 6px; font-size: 14px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .dot-indigo { background: var(--indigo); }
+  .dot-emerald { background: var(--emerald); }
+  .dot-amber { background: var(--amber); }
+
+  /* Feature grid */
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 32px; }
+  .feature-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+  }
+  .feature-item .icon { font-size: 28px; margin-bottom: 12px; }
+  .feature-item h3 { font-size: 18px; margin-bottom: 8px; }
+  .feature-item p { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+
+  /* Layout helpers */
+  .flex { display: flex; }
+  .gap-4 { gap: 16px; }
+  .gap-8 { gap: 32px; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+  .flex-1 { flex: 1; }
+  .mt-4 { margin-top: 16px; }
+  .mt-8 { margin-top: 32px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+
+  /* Chat mock */
+  .mock-chat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 360px;
+    overflow: hidden;
+  }
+  .chat-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .chat-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .chat-msg { padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; max-width: 85%; }
+  .chat-msg.user { background: var(--indigo); color: #fff; align-self: flex-end; }
+  .chat-msg.bot { background: rgba(31, 41, 55, 0.6); color: var(--text); }
+  .chat-msg strong { font-weight: 700; color: #fff; }
+  .chat-action { margin-top: 8px; background: var(--indigo); color: #fff; border: none; padding: 5px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; }
+
+  /* Modal mock */
+  .mock-modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    width: 340px;
+    padding: 24px;
+  }
+  .time-bar { display: flex; gap: 3px; height: 36px; border-radius: 8px; overflow: hidden; margin: 12px 0; }
+  .time-bar .seg { flex: 1; border-radius: 3px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; font-size: 8px; font-weight: 700; }
+  .time-bar .seg.off { background: var(--sky); color: rgba(255,255,255,0.7); }
+  .time-bar .seg.work { background: rgba(55,65,81,0.4); color: rgba(255,255,255,0.2); }
+
+  /* Insight bar */
+  .mock-insight {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  /* Keyboard hint */
+  kbd {
+    background: rgba(55,65,81,0.5);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .tag-indigo { background: rgba(99,102,241,0.15); color: var(--indigo-light); }
+  .tag-emerald { background: rgba(16,185,129,0.15); color: var(--emerald); }
+  .tag-sky { background: rgba(56,189,248,0.15); color: var(--sky); }
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+
+<!-- Slide 1: Title -->
+<div class="slide active" id="s1">
+  <div class="small-label">Introducing</div>
+  <h1><span class="gradient-text">Leave Lens</span></h1>
+  <p class="subtitle" style="margin-top: 20px;">
+    A personal PTO and vacation planning tool that projects your vacation accrual forward in time
+    and helps you plan time off with confidence.
+  </p>
+  <div class="flex gap-4 mt-8">
+    <span class="tag tag-indigo">Client-side only</span>
+    <span class="tag tag-emerald">Privacy-first</span>
+    <span class="tag tag-sky">Zero setup</span>
+  </div>
+  <p style="margin-top: 48px; font-size: 14px; color: var(--text-muted);">
+    Press <kbd>&rarr;</kbd> or click Next to continue
+  </p>
+</div>
+
+<!-- Slide 2: The Problem -->
+<div class="slide" id="s2">
+  <div class="small-label">The Problem</div>
+  <h2>You know your balance.<br>But can you <span class="gradient-text">plan ahead?</span></h2>
+  <div class="two-col mt-8">
+    <div>
+      <p class="subtitle" style="font-size: 16px;">
+        Most timecard systems tell you: <strong style="color: #fff;">"You have 47.3 hours today."</strong>
+      </p>
+      <p class="subtitle" style="font-size: 16px; margin-top: 16px;">But they can't answer:</p>
+      <ul style="margin-top: 16px; list-style: none; font-size: 15px; color: var(--text-dim); line-height: 2;">
+        <li>❓ "If I take a week off in September, will I have enough hours?"</li>
+        <li>❓ "What will my balance be on December 31?"</li>
+        <li>❓ "Am I going to lose hours to the carryover cap?"</li>
+        <li>❓ "Can I afford a sick day without ruining my vacation plans?"</li>
+      </ul>
+    </div>
+    <div class="mock-card" style="text-align: center; padding: 40px;">
+      <div style="font-size: 64px; font-weight: 800;">47.3</div>
+      <div style="font-size: 16px; color: var(--text-muted); margin-top: 8px;">hours available today</div>
+      <div style="margin-top: 24px; font-size: 14px; color: var(--text-muted);">
+        ...but what about <span style="color: var(--indigo-light);">next month?</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 3: Dashboard Overview -->
+<div class="slide" id="s3">
+  <div class="small-label">Dashboard</div>
+  <h2>Everything at a <span class="gradient-text">glance</span></h2>
+  <p class="subtitle" style="font-size: 15px; margin-bottom: 24px;">Six status cards show your complete time-off picture — current balances, accrual rate, next payday, and year-end projection.</p>
+  <div class="status-row">
+    <div class="mock-card"><div class="accent accent-emerald"></div><div class="card-label">Total Available</div><div class="card-value">22.22 hrs</div><div class="card-sub">Vac: 3.22 · Sick: 17.75 · Bank: 1.25</div></div>
+    <div class="mock-card"><div class="accent accent-indigo"></div><div class="card-label">Vacation</div><div class="card-value">3.22 hrs</div><div class="card-sub">Accruing 3.08 hrs/period</div></div>
+    <div class="mock-card"><div class="accent" style="background: linear-gradient(90deg, #8b5cf6, #a78bfa);"></div><div class="card-label">Bank Hours</div><div class="card-value">1.25 hrs</div><div class="card-sub">Extra hours worked</div></div>
+    <div class="mock-card"><div class="accent accent-sky"></div><div class="card-label">Accrual Rate</div><div class="card-value">80.08 hrs/yr</div><div class="card-sub">3.08 hrs/period · Years 1–5</div></div>
+    <div class="mock-card"><div class="accent accent-emerald"></div><div class="card-label">Next Payday</div><div class="card-value">Apr 10</div><div class="card-sub">+3.08 hrs vacation</div></div>
+    <div class="mock-card"><div class="accent accent-indigo"></div><div class="card-label">Year-End</div><div class="card-value">61.74 hrs</div><div class="card-sub">Cap: 80.08 hrs</div></div>
+  </div>
+  <div class="mock-insight mt-4">
+    <span style="font-size: 16px;">💡</span>
+    <span style="color: var(--emerald);">●</span> <span>You can take up to 2 sick days and still cover all your planned time off</span>
+    <span style="color: var(--indigo-light); margin-left: 12px;">●</span> <span>You're on track — projected year-end balance is 61.74 hrs (cap: 80.08 hrs)</span>
+  </div>
+</div>
+
+<!-- Slide 4: Interactive Calendar -->
+<div class="slide" id="s4">
+  <div class="small-label">Interactive Calendar</div>
+  <h2>Click to plan. <span class="gradient-text">Hover to project.</span></h2>
+  <div class="two-col" style="gap: 40px;">
+    <div class="mock-calendar">
+      <div class="cal-header"><h3>April 2026</h3><div style="color: var(--text-muted); font-size: 12px;">3 planned work days (24 hours)</div></div>
+      <div class="cal-grid">
+        <div class="cal-day-header">SUN</div><div class="cal-day-header">MON</div><div class="cal-day-header">TUE</div><div class="cal-day-header">WED</div><div class="cal-day-header">THU</div><div class="cal-day-header">FRI</div><div class="cal-day-header">SAT</div>
+        <div class="cal-day dim weekend">29</div><div class="cal-day dim">30</div><div class="cal-day dim">31</div>
+        <div class="cal-day">1</div><div class="cal-day">2</div><div class="cal-day">3</div><div class="cal-day weekend">4</div>
+        <div class="cal-day weekend">5</div><div class="cal-day">6</div><div class="cal-day today"><span class="day-num">7</span></div>
+        <div class="cal-day">8</div><div class="cal-day">9</div><div class="cal-day">10<span class="emoji">💰</span><span class="balance">22.2h</span></div><div class="cal-day weekend">11</div>
+        <div class="cal-day weekend">12</div><div class="cal-day">13<span class="balance">25.3h</span></div><div class="cal-day">14<span class="balance">25.3h</span></div>
+        <div class="cal-day planned">15<span class="dot dot-indigo" style="position:absolute;top:6px;right:6px"></span><span class="balance">25.3h</span></div>
+        <div class="cal-day planned">16<span class="dot dot-indigo" style="position:absolute;top:6px;right:6px"></span><span class="balance">17.3h</span></div>
+        <div class="cal-day planned">17<span class="dot dot-indigo" style="position:absolute;top:6px;right:6px"></span><span class="balance neg">9.3h</span></div>
+        <div class="cal-day weekend">18</div>
+        <div class="cal-day weekend">19</div><div class="cal-day">20</div>
+        <div class="cal-day partial">21<span class="time-label">11a – 2p</span><span class="balance">9.3h</span></div>
+        <div class="cal-day">22<span class="emoji">💰</span></div><div class="cal-day">23</div><div class="cal-day">24<span class="emoji">💰</span></div><div class="cal-day weekend">25</div>
+      </div>
+    </div>
+    <div>
+      <h3 style="font-size: 20px;">Calendar Features</h3>
+      <ul style="list-style: none; font-size: 14px; color: var(--text-dim); line-height: 2.2;">
+        <li><span class="dot dot-indigo"></span>&ensp;Click any work day to plan time off</li>
+        <li><span class="dot dot-amber"></span>&ensp;Holidays shown with themed emoji</li>
+        <li><span class="dot dot-emerald"></span>&ensp;Paydays marked with 💰</li>
+        <li>📊&ensp;Projected balance on every future day</li>
+        <li style="color: var(--sky);">⏰&ensp;Partial days show time range (e.g. 11a – 2p)</li>
+        <li style="color: var(--red);">🔴&ensp;Unaffordable days highlighted in red</li>
+        <li>🎉&ensp;Fun tooltips — "Long weekend!" on Fridays</li>
+        <li>⌨️&ensp;Arrow keys to navigate months</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 5: Day Planner Modal -->
+<div class="slide" id="s5">
+  <div class="small-label">Day Planner</div>
+  <h2>Full day or <span class="gradient-text">partial — you choose</span></h2>
+  <div class="two-col">
+    <div>
+      <p class="subtitle" style="font-size: 15px;">
+        Click any day to open the planner modal. Choose a full day off or a partial day for appointments.
+      </p>
+      <ul style="list-style: none; font-size: 14px; color: var(--text-dim); line-height: 2.2; margin-top: 20px;">
+        <li>📅&ensp;Full day or partial day toggle</li>
+        <li>🕐&ensp;Pick exact hours: "Off from 11 AM until 2 PM"</li>
+        <li>📊&ensp;Visual time bar shows your day at a glance</li>
+        <li>💰&ensp;Choose hour source: bank, vacation, sick, or any</li>
+        <li>📝&ensp;Add notes like "Dentist appointment"</li>
+        <li>✏️&ensp;Edit past days to adjust actual hours used</li>
+      </ul>
+    </div>
+    <div class="mock-modal">
+      <div style="font-size: 16px; font-weight: 700;">Monday, Apr 21</div>
+      <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">3h off · 5h working</div>
+      <div class="flex gap-4 mt-4">
+        <div style="flex:1; text-align:center; padding: 10px; border-radius: 12px; border: 2px solid var(--border); font-size: 13px; font-weight: 600; color: var(--text-dim);">Full Day</div>
+        <div style="flex:1; text-align:center; padding: 10px; border-radius: 12px; background: var(--sky); color: #fff; font-size: 13px; font-weight: 700; border: 2px solid var(--sky);">Partial Day</div>
+      </div>
+      <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-top: 16px;">Your day (8 AM – 4 PM)</div>
+      <div class="time-bar">
+        <div class="seg work">8a</div><div class="seg work"></div><div class="seg work">10a</div>
+        <div class="seg off">11a</div><div class="seg off">12p</div><div class="seg off">1p</div>
+        <div class="seg work">2p</div><div class="seg work">3p</div>
+      </div>
+      <div style="text-align: center; font-size: 13px; font-weight: 700; color: var(--sky);">3h off</div>
+      <div style="margin-top: 16px; padding: 10px 14px; background: rgba(31,41,55,0.5); border: 1px solid var(--border); border-radius: 12px; font-size: 13px; color: var(--text-muted);">Immigration Appointment</div>
+      <div style="margin-top: 12px; padding: 12px; background: var(--indigo); color: #fff; text-align: center; border-radius: 12px; font-size: 13px; font-weight: 700;">Add to plan</div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 6: Chat Assistant -->
+<div class="slide" id="s6">
+  <div class="small-label">Plan Assistant</div>
+  <h2>Plan with <span class="gradient-text">natural language</span></h2>
+  <div class="two-col">
+    <div>
+      <p class="subtitle" style="font-size: 15px;">
+        Just tell the assistant what you want. It understands dates, checks affordability, and adds to your plan with one click.
+      </p>
+      <div class="three-col mt-8">
+        <div class="feature-item" style="padding: 20px;">
+          <div class="icon">📅</div>
+          <p style="font-size: 13px; color: var(--text-dim);">"Take off the second week of December"</p>
+        </div>
+        <div class="feature-item" style="padding: 20px;">
+          <div class="icon">💰</div>
+          <p style="font-size: 13px; color: var(--text-dim);">"Can I afford a week in September?"</p>
+        </div>
+        <div class="feature-item" style="padding: 20px;">
+          <div class="icon">🤒</div>
+          <p style="font-size: 13px; color: var(--text-dim);">"What if I get sick 3 days?"</p>
+        </div>
+      </div>
+    </div>
+    <div class="mock-chat">
+      <div class="chat-header"><span style="color: var(--indigo-light);">●</span> Plan Assistant</div>
+      <div class="chat-body">
+        <div class="chat-msg user">Can I take off the second week of December?</div>
+        <div class="chat-msg bot"><strong>Yes, you can!</strong> Dec 7 – 11 is 5 work days (40 hrs). You'll have <strong>74.6 hrs</strong> available, leaving <strong>34.6 hrs</strong> after.<br><br>Want me to add it to your plan?<br><button class="chat-action">📅 Add to plan</button></div>
+        <div class="chat-msg user">What about July 4-6?</div>
+        <div class="chat-msg bot"><strong>Jul 4 – 6</strong> — 1 work day (Jul 4 is Independence Day 🎇). You'll have <strong>43.7 hrs</strong> available. Looks good!<br><button class="chat-action">📅 Add to plan</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 7: Smart Features -->
+<div class="slide" id="s7">
+  <div class="small-label">Smart Features</div>
+  <h2>Built to think <span class="gradient-text">ahead for you</span></h2>
+  <div class="feature-grid">
+    <div class="feature-item">
+      <div class="icon">🏦</div>
+      <h3>Bank Hours</h3>
+      <p>Log extra hours worked beyond your regular day. Bank hours are used first for time off and get paid out during the Dec-Feb window.</p>
+    </div>
+    <div class="feature-item">
+      <div class="icon">💡</div>
+      <h3>Smart Insights</h3>
+      <p>"You can take 2 sick days and still cover your plans." Data-driven insights that help you make confident decisions about time off.</p>
+    </div>
+    <div class="feature-item">
+      <div class="icon">📊</div>
+      <h3>Projection Engine</h3>
+      <p>Day-by-day balance projection accounting for accruals, tier transitions, planned time off, holidays, and carryover caps.</p>
+    </div>
+    <div class="feature-item">
+      <div class="icon">⚙️</div>
+      <h3>Fully Customizable</h3>
+      <p>Accrual tiers, pay periods, holidays, work schedule, carryover policies, bank hours payout windows — match any employer's rules.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 8: Setup & Privacy -->
+<div class="slide" id="s8">
+  <div class="small-label">Getting Started</div>
+  <h2>Setup in <span class="gradient-text">30 seconds</span></h2>
+  <div class="two-col">
+    <div>
+      <div class="three-col" style="grid-template-columns: 1fr;">
+        <div class="feature-item" style="padding: 20px;">
+          <div class="flex items-center gap-4">
+            <div style="width: 36px; height: 36px; background: var(--indigo); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px;">1</div>
+            <div><h3 style="margin: 0; font-size: 15px;">Enter your info</h3><p style="font-size: 13px; color: var(--text-dim);">Hire date, current balances, last payday</p></div>
+          </div>
+        </div>
+        <div class="feature-item" style="padding: 20px;">
+          <div class="flex items-center gap-4">
+            <div style="width: 36px; height: 36px; background: var(--indigo); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px;">2</div>
+            <div><h3 style="margin: 0; font-size: 15px;">Guided tour</h3><p style="font-size: 13px; color: var(--text-dim);">Interactive walkthrough of every feature with spotlight highlighting</p></div>
+          </div>
+        </div>
+        <div class="feature-item" style="padding: 20px;">
+          <div class="flex items-center gap-4">
+            <div style="width: 36px; height: 36px; background: var(--indigo); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px;">3</div>
+            <div><h3 style="margin: 0; font-size: 15px;">Start planning</h3><p style="font-size: 13px; color: var(--text-dim);">Click calendar days or chat with the assistant</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="mock-card" style="text-align: center; padding: 40px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">🔒</div>
+        <h3 style="font-size: 20px;">100% Private</h3>
+        <p style="font-size: 14px; color: var(--text-dim); line-height: 1.8; margin-top: 12px;">
+          All data stays in your browser's localStorage.<br>
+          No server. No accounts. No tracking.<br>
+          No data ever leaves your machine.<br><br>
+          Export/import JSON backups anytime.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 9: Tech Stack -->
+<div class="slide" id="s9">
+  <div class="small-label">Under the Hood</div>
+  <h2>Modern, <span class="gradient-text">lightweight, fast</span></h2>
+  <div class="three-col mt-8">
+    <div class="feature-item">
+      <h3 style="font-size: 15px;">⚡ Frontend</h3>
+      <p>Vite + React + TypeScript<br>Tailwind CSS<br>lucide-react icons</p>
+    </div>
+    <div class="feature-item">
+      <h3 style="font-size: 15px;">📅 Date Math</h3>
+      <p>date-fns for all calculations<br>Holiday engine with weekend observance<br>Accrual tier transitions</p>
+    </div>
+    <div class="feature-item">
+      <h3 style="font-size: 15px;">🧪 Tested</h3>
+      <p>Vitest + React Testing Library<br>12 unit tests covering projections,<br>tier changes, holidays, carryover</p>
+    </div>
+    <div class="feature-item">
+      <h3 style="font-size: 15px;">📦 Tiny Bundle</h3>
+      <p>~95 KB gzipped JS<br>~9 KB gzipped CSS<br>No backend dependencies</p>
+    </div>
+    <div class="feature-item">
+      <h3 style="font-size: 15px;">♿ Accessible</h3>
+      <p>Keyboard navigation<br>ARIA labels on all controls<br>Focus management in modals</p>
+    </div>
+    <div class="feature-item">
+      <h3 style="font-size: 15px;">📄 Open Source</h3>
+      <p>MIT License<br>Public-repo ready<br>No proprietary data</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 10: Thank You -->
+<div class="slide" id="s10">
+  <div style="text-align: center;">
+    <h1><span class="gradient-text">Leave Lens</span></h1>
+    <p class="subtitle" style="margin: 20px auto 0; text-align: center; max-width: 600px; font-size: 18px;">
+      Stop guessing. Start planning.<br>
+      Your vacation balance, projected forward — right in your browser.
+    </p>
+    <div class="flex gap-4 items-center" style="justify-content: center; margin-top: 40px;">
+      <span class="tag tag-indigo">npm run dev</span>
+      <span style="color: var(--text-muted);">→</span>
+      <span class="tag tag-emerald">localhost:5173</span>
+    </div>
+    <p style="margin-top: 48px; font-size: 14px; color: var(--text-muted);">
+      Thank you! Questions?
+    </p>
+  </div>
+</div>
+
+<!-- Navigation -->
+<div class="nav">
+  <button onclick="prev()">← Prev</button>
+  <div class="counter" id="counter">1 / 10</div>
+  <button onclick="next()">Next →</button>
+</div>
+
+<script>
+  const total = 10;
+  let current = 1;
+
+  function show(n) {
+    document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
+    const slide = document.getElementById('s' + n);
+    if (slide) {
+      slide.classList.add('active');
+      // Re-trigger animation
+      slide.style.animation = 'none';
+      slide.offsetHeight;
+      slide.style.animation = '';
+    }
+    document.getElementById('counter').textContent = n + ' / ' + total;
+    document.getElementById('progress').style.width = (n / total * 100) + '%';
+  }
+
+  function next() { if (current < total) show(++current); }
+  function prev() { if (current > 1) show(--current); }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  });
+
+  show(1);
+</script>
+</body>
+</html>

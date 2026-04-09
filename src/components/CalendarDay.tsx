@@ -1,0 +1,293 @@
+import { useMemo } from 'react'
+import {
+  format,
+  isSameDay,
+  isSameMonth,
+  isBefore,
+  startOfDay,
+  getDay,
+  parseISO,
+  addDays,
+  getWeek,
+} from 'date-fns'
+import { useAppState } from '../context'
+import { projectBalance } from '../lib/projection'
+import { getHolidayName } from '../lib/holidays'
+
+type Props = {
+  date: Date
+  currentMonth: Date
+  onDayClick: (date: Date) => void
+}
+
+// Holiday emoji map
+const HOLIDAY_EMOJI: Record<string, string> = {
+  "New Year's Day": '🎆',
+  'Martin Luther King Jr. Day': '✊',
+  "Presidents' Day": '🏛️',
+  'Memorial Day': '⭐',
+  'Juneteenth': '✊',
+  'Independence Day': '🎇',
+  'Labor Day': '⚒️',
+  'Veterans Day': '🎖️',
+  'Thanksgiving Day': '🦃',
+  'Day after Thanksgiving': '🥧',
+  'Christmas Eve': '🎄',
+  'Christmas Day': '🎁',
+}
+
+function getHolidayEmoji(name: string): string {
+  return HOLIDAY_EMOJI[name] || '🏖️'
+}
+
+export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
+  const { state } = useAppState()
+  const today = startOfDay(new Date())
+  const isToday = isSameDay(date, today)
+  const isCurrentMonth = isSameMonth(date, currentMonth)
+  // Today counts as "past" once the work day is over (e.g. after 4 PM for an 8AM+8hr day)
+  const workDayEndHour = 8 + state.policy.hoursPerWorkDay // e.g. 16 (4 PM)
+  const isTodayWorkDayOver = isToday && new Date().getHours() >= workDayEndHour
+  const isPast = isBefore(date, today) || isTodayWorkDayOver
+  const dow = getDay(date)
+  const isWeekend = !state.policy.workDaysPerWeek.includes(dow)
+  const weekNum = getWeek(date)
+  const isEvenWeek = weekNum % 2 === 0
+
+  const holidayName = useMemo(
+    () => getHolidayName(state.policy, date),
+    [state.policy, date],
+  )
+  const isHolidayDay = !!holidayName
+
+  const plannedVacation = useMemo(() => {
+    const dateStr = format(date, 'yyyy-MM-dd')
+    return state.plannedVacations.find(
+      (v) => dateStr >= v.startDate && dateStr <= v.endDate,
+    )
+  }, [date, state.plannedVacations])
+  const isPlannedVacation = !!plannedVacation
+
+  const isPartialDay = plannedVacation?.hoursPerDay !== undefined && plannedVacation.hoursPerDay < state.policy.hoursPerWorkDay
+
+  const isPayday = useMemo(() => {
+    const lastPayday = parseISO(state.profile.lastPaydayDate)
+    const periodDays = state.policy.payPeriodLengthDays
+    let payday = addDays(lastPayday, periodDays)
+    while (isBefore(payday, date)) {
+      payday = addDays(payday, periodDays)
+    }
+    return isSameDay(payday, date)
+  }, [date, state.profile.lastPaydayDate, state.policy.payPeriodLengthDays])
+
+  const projectedBalance = useMemo(() => {
+    if (isPast && !isToday) return null
+    const result = projectBalance(state, date)
+    return result.totalAvailable
+  }, [state, date, isPast, isToday])
+
+  const deductHours = plannedVacation?.hoursPerDay ?? state.policy.hoursPerWorkDay
+  const isUnaffordable =
+    isPlannedVacation && !isWeekend && !isHolidayDay &&
+    projectedBalance !== null && projectedBalance < deductHours
+
+  // Can plan new time off on future work days; can edit existing planned days even if past
+  const canPlanNew = !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
+  const canEdit = isPlannedVacation && isCurrentMonth && !isWeekend && !isHolidayDay
+  const canClick = canPlanNew || canEdit
+
+  const handleClick = () => {
+    if (canClick) onDayClick(date)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault()
+      if (canClick) onDayClick(date)
+    }
+  }
+
+  // Build tooltip text with fun messages
+  const buildTooltip = (): string => {
+    const parts: string[] = []
+    parts.push(format(date, 'EEEE, MMMM d'))
+
+    if (isHolidayDay) {
+      parts.push(`${getHolidayEmoji(holidayName!)} ${holidayName} — enjoy the day off!`)
+    }
+
+    if (isPayday && !isPast) {
+      parts.push(`💰 Payday! +${fmt(state.policy.hoursPerWorkDay > 0 ? (() => {
+        const hd = parseISO(state.profile.hireDate)
+        const yos = Math.floor((date.getTime() - hd.getTime()) / (365.25 * 86400000))
+        const tier = state.policy.accrualTiers.find(t => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears))
+        return tier?.hoursPerPayPeriod ?? 0
+      })() : 0)} hrs vacation`)
+    }
+
+    if (isPlannedVacation && !isPast) {
+      if (isPartialDay) {
+        parts.push(`⏰ Partial day off (${fmt(deductHours)} hrs) — ${plannedVacation?.note || 'appointment'}`)
+      } else if (dow === 5) {
+        parts.push('🎉 Friday off — long weekend!')
+      } else if (dow === 1) {
+        parts.push('😎 Monday off — extended weekend!')
+      } else {
+        parts.push(`🏖️ Planned time off${plannedVacation?.note ? ` — ${plannedVacation.note}` : ''}`)
+      }
+      // Multi-day streak context
+      if (plannedVacation && plannedVacation.startDate !== plannedVacation.endDate) {
+        const days = Math.round((parseISO(plannedVacation.endDate).getTime() - parseISO(plannedVacation.startDate).getTime()) / 86400000) + 1
+        if (days >= 7) parts.push('🌴 A full week+ vacation!')
+        else if (days >= 4) parts.push('✨ Mini vacation!')
+      }
+      if (isUnaffordable) {
+        parts.push(`⚠️ Not enough hours — only ${fmt(projectedBalance ?? 0)} hrs available, need ${fmt(deductHours)}`)
+      }
+    }
+
+    if (projectedBalance !== null && !isPast) {
+      parts.push(`Available: ${fmt(projectedBalance)} hrs`)
+    }
+
+    return parts.join('\n')
+  }
+
+  // Cell background
+  let bgClass = ''
+  if (isHolidayDay && isCurrentMonth) {
+    bgClass = 'bg-gradient-to-br from-amber-50/60 to-orange-50/40 dark:from-amber-950/25 dark:to-orange-950/15'
+  } else if (isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth) {
+    if (isPast) {
+      bgClass = 'bg-blue-100/30 dark:bg-blue-900/10'
+    } else if (isUnaffordable) {
+      bgClass = 'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
+    } else if (isPartialDay) {
+      bgClass = 'bg-gradient-to-br from-blue-50/50 to-sky-50/30 dark:from-blue-950/20 dark:to-sky-950/10'
+    } else {
+      bgClass = 'bg-blue-50 dark:bg-blue-950/30'
+    }
+  } else if (isPayday && isCurrentMonth && !isPast) {
+    bgClass = 'bg-gradient-to-br from-emerald-50/30 to-green-50/20 dark:from-emerald-950/15 dark:to-green-950/10'
+  } else if (isWeekend && isCurrentMonth) {
+    bgClass = 'bg-gray-100/50 dark:bg-white/[0.02]'
+  } else if (isEvenWeek && isCurrentMonth) {
+    bgClass = 'bg-gray-50/30 dark:bg-white/[0.01]'
+  }
+
+  // Border
+  const borderClass =
+    isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
+      ? isUnaffordable
+        ? 'border-red-300/60 dark:border-red-700/40'
+        : 'border-blue-300/60 dark:border-blue-700/40'
+      : isHolidayDay && isCurrentMonth
+        ? 'border-amber-200/60 dark:border-amber-800/30'
+        : isPayday && isCurrentMonth && !isPast
+          ? 'border-emerald-200/40 dark:border-emerald-800/20'
+          : 'border-gray-300/60 dark:border-gray-600/40'
+
+  return (
+    <div
+      role="button"
+      tabIndex={isCurrentMonth ? 0 : -1}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      className={`
+        relative p-1.5 min-h-0 border-r border-b
+        ${borderClass}
+        ${bgClass}
+        ${!isCurrentMonth ? 'opacity-[0.08]' : ''}
+        ${isPast && isCurrentMonth ? 'opacity-50' : ''}
+        ${canClick ? 'cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-900/15' : 'cursor-default'}
+        transition-colors duration-75
+      `}
+      title={buildTooltip()}
+      aria-label={`${format(date, 'MMMM d, yyyy')}${isToday ? ', today' : ''}${isHolidayDay ? `, ${holidayName}` : ''}${isPlannedVacation ? ', planned time off' : ''}${isPayday ? ', payday' : ''}`}
+    >
+      {/* Day number row */}
+      <div className="flex items-center justify-between">
+        <span
+          className={`
+            inline-flex items-center justify-center w-8 h-8 text-base font-bold rounded-full
+            ${isToday ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/40' : ''}
+            ${isWeekend && !isToday && isCurrentMonth ? 'text-gray-400 dark:text-gray-500' : ''}
+          `}
+        >
+          {format(date, 'd')}
+        </span>
+        {/* Indicator icons */}
+        <div className="flex items-center gap-0.5">
+          {isHolidayDay && isCurrentMonth && (
+            <span className="text-sm leading-none">{getHolidayEmoji(holidayName!)}</span>
+          )}
+          {isPayday && isCurrentMonth && !isPast && (
+            <span className="text-sm leading-none">💰</span>
+          )}
+          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
+            <span
+              className={`w-2 h-2 rounded-full ${isUnaffordable ? 'bg-red-500' : isPartialDay ? 'bg-sky-500' : 'bg-blue-500'}`}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Time-off indicator — centered in cell */}
+      {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
+        <div className="absolute inset-x-2 top-9 bottom-7 flex flex-col items-center justify-center">
+          {isPartialDay ? (
+            <>
+              <div className={`text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
+                {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
+                  ? `${fmtTime(plannedVacation.timeOffStart)} – ${fmtTime(plannedVacation.timeOffEnd)}`
+                  : `${fmt(deductHours)}h`}
+              </div>
+              <div className={`w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`} />
+              <div className={`text-xs mt-0.5 font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-300'}`}>
+                {fmt(deductHours)}h off
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={`w-6 h-[3px] rounded-full ${isUnaffordable ? 'bg-red-400' : 'bg-blue-400'}`} />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Balance badge — bottom right, always */}
+      {isCurrentMonth && projectedBalance !== null && !isPast && !isWeekend && (
+        <div className="absolute bottom-1 right-1">
+          <span
+            className={`text-sm tabular-nums font-bold px-1.5 py-0.5 rounded ${
+              isUnaffordable
+                ? 'bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400'
+                : 'bg-gray-100/80 dark:bg-gray-800/60 text-gray-500 dark:text-gray-400'
+            }`}
+          >
+            {projectedBalance.toFixed(1)}h
+          </span>
+        </div>
+      )}
+
+      {/* Holiday name — bottom left */}
+      {isHolidayDay && isCurrentMonth && (
+        <div className="absolute bottom-0.5 left-1 right-8 text-[11px] text-amber-600 dark:text-amber-300 truncate font-bold drop-shadow-sm">
+          {holidayName}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function fmt(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2)
+}
+
+function fmtTime(t: string): string {
+  const h = parseInt(t.split(':')[0])
+  if (h === 0) return '12a'
+  if (h < 12) return `${h}a`
+  if (h === 12) return '12p'
+  return `${h - 12}p`
+}
