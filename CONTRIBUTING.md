@@ -1,12 +1,12 @@
-# Contributing to Leave Lens
+# Contributing to Schedule Planner
 
 Thanks for your interest in contributing! Here's how to get started.
 
 ## Development
 
 ```bash
-git clone <repo-url>
-cd leave-lens
+git clone https://github.com/interestingcodelol/schedule-planner.git
+cd schedule-planner
 npm install
 npm run dev
 ```
@@ -33,7 +33,7 @@ npm run test:watch # watch mode
 
 ## Privacy
 
-Leave Lens is a client-side-only tool. Please do not introduce:
+Schedule Planner is a client-side-only tool. Please do not introduce:
 - External API calls or telemetry
 - Server-side dependencies
 - Hardcoded personal data or employer-specific information

@@ -1,6 +1,8 @@
 # Schedule Planner
 
-A personal PTO and vacation planning tool that projects your vacation accrual forward in time and lets you plan time off against that projection.
+A browser-based PTO and vacation accrual planner. Track vacation, sick, and bank hours, project balances forward, and plan time off with an interactive calendar. All data stays in your browser.
+
+**Live demo:** [interestingcodelol.github.io/schedule-planner](https://interestingcodelol.github.io/schedule-planner/)
 
 ## Why this exists
 
@@ -10,28 +12,33 @@ Many employers use timecard systems that track vacation accrual balances but off
 - "What will my balance be on December 31?"
 - "Am I going to lose hours to the carryover cap?"
 
-Schedule Planner solves this by letting you input your current balance, hire date, and accrual rules, then projects balances forward day-by-day across a calendar view where you can plan time off interactively.
+Schedule Planner solves this by projecting your balances forward day-by-day — accounting for accruals, planned time off, bank hours payouts, sick leave grants, and carryover caps — so you can plan with confidence.
 
 ## Features
 
-- **Forward projection** — see your projected balance on any future date
-- **Interactive calendar** — click days to plan time off, hover for balance tooltips
+- **Forward projection** — see your projected balance on any future date across all pools (vacation, sick, bank)
+- **Interactive calendar** — click days to plan time off, each day shows projected total balance
+- **Month picker** — click the month title to jump to any month/year instantly
 - **What-if planner** — check trip affordability before committing
+- **Upcoming events** — unified view of planned time off (with lock/delete/emoji), holidays, and paydays
 - **Accrual tier tracking** — handles tier transitions based on years of service
-- **Carryover cap warnings** — alerts when you might lose hours
-- **Holiday awareness** — deducts only actual work days from planned vacations
-- **Bank hours** — track extra hours worked and use them for time off
+- **Carryover cap warnings** — alerts when vacation might exceed cap at year-end
+- **Holiday awareness** — 12 US federal holidays computed by formula, correct for any year
+- **Bank hours** — track extra hours worked, with history view and undo on delete
+- **Sick leave** — annual grant with max balance cap, properly projected across years
+- **Bank hours payout** — dual payout dates (e.g. Dec and Feb), balance zeros and resets
 - **Chat assistant** — plan time off with natural language
 - **Fully customizable** — accrual tiers, rates, holidays, pay periods, work schedule
-- **Dark mode** — refined dark-first aesthetic
+- **Dark mode** — refined dark-first aesthetic with blue/teal GIS-inspired theme
 - **Import/Export** — backup and restore your data as JSON
-- **Guided tour** — first-run walkthrough of all features
-- **Privacy-first** — all data stays in your browser, nothing is sent anywhere
+- **Guided tour** — spotlight walkthrough of all features
+- **Auto-update** — gentle banner when a new version is deployed, no data loss
+- **Privacy-first** — all data stays in your browser (localStorage + IndexedDB), nothing is sent anywhere
 
 ## Tech stack
 
-- Vite + React + TypeScript
-- Tailwind CSS
+- Vite + React 19 + TypeScript (strict mode)
+- Tailwind CSS v4
 - date-fns for date math
 - lucide-react for icons
 - Vitest + React Testing Library for tests
@@ -49,15 +56,40 @@ npm run build     # production build
 
 ## How the projection works
 
-The projection engine (`src/lib/projection.ts`) is a pure function with no side effects:
+The projection engine (`src/lib/projection.ts`) is a pure function that processes events chronologically:
 
-1. **Start** from your current vacation balance as of today
-2. **Generate pay period boundaries** from your last payday forward to the target date
-3. **Accrue hours** on each payday based on your current tier (determined by years since hire date)
-4. **Deduct hours** for each planned vacation day that falls on a work day (excluding weekends and holidays)
-5. **Apply carryover cap** on the payout date (e.g., Feb 1) — hours above the cap are forfeited
+1. **Start** from current balances (vacation, sick, bank) as of today
+2. **Generate events** — paydays (accruals), planned vacation deductions, carryover adjustments, bank hour payouts, annual sick leave grants
+3. **Sort chronologically** with deterministic ordering for same-day events: sick grants first, then accruals, then deductions, then carryover caps, then bank payouts
+4. **Process each event** updating the appropriate balance pool
+5. **Return** final balances, event trail, and totals
 
-Tier transitions take effect on the first payday that falls on or after your service anniversary date.
+Key behaviors:
+- **Tier transitions** take effect on the first payday on or after your service anniversary
+- **Bank hours payout** zeros the bank balance at both payout window start and end dates
+- **Sick leave grant** adds the annual grant on January 1, capped at the max balance
+- **Vacation carryover** caps vacation hours on the payout date; excess is forfeited
+- **"Any" pool deduction** uses bank first (use-it-or-lose-it), then vacation, then sick
+- **Partial days** deduct the custom hours per day, not the full work day
+
+## Data persistence
+
+Data is stored in two independent locations for resilience:
+- **IndexedDB** — primary store, survives browser cache clears
+- **localStorage** — fallback, read on initial load
+
+On every state change, data is written to both. On load, IndexedDB is tried first. Export/Import provides an additional backup mechanism.
+
+## Deployment
+
+The app deploys to GitHub Pages via a GitHub Actions workflow (`.github/workflows/pages.yml`). On push to `main`:
+
+1. Vite builds with `VITE_BASE_PATH=/schedule-planner/`
+2. A `version.json` is generated with the build timestamp
+3. `index.html` is copied to `404.html` for SPA routing
+4. The build artifact is deployed to GitHub Pages
+
+A built-in update checker polls `version.json` every 5 minutes and on tab focus. When a new version is detected, a gentle banner offers to refresh — user data is never lost.
 
 ## Customizing for your employer
 
@@ -69,12 +101,14 @@ Open **Settings > Policy** to customize:
 - **Work schedule** — select which days of the week are work days
 - **Holidays** — add/remove holidays with fixed-date, nth-weekday, or last-weekday rules
 - **Hours per day** — default is 8, adjust for your schedule
+- **Sick leave** — annual grant amount and max balance
+- **Bank hours payout** — start and end dates for the payout window
 
 The defaults represent a common US employer policy pattern and are not specific to any company.
 
 ## Privacy
 
-All data is stored in your browser's localStorage and IndexedDB. Nothing is sent to any server, API, or third-party service. There is no analytics, tracking, or telemetry of any kind.
+All data is stored locally in your browser's IndexedDB and localStorage. Nothing is sent to any server, API, or third-party service. There is no analytics, tracking, or telemetry of any kind. No account is needed.
 
 To move your data between browsers, use the Export/Import feature in Settings.
 
