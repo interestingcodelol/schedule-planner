@@ -116,26 +116,45 @@ export function DayPopover({
   const workStartHHMM = `${String(workStart).padStart(2, '0')}:00`
   const workEndHHMM = `${String(workEnd).padStart(2, '0')}:00`
 
+  /** Snap a new time to the 15-minute grid in the direction of change, so a
+   *  browser that steps minutes by 1 still lands on quarter-hour boundaries. */
+  const snapDirectional = (nextHours: number, prevHours: number): number => {
+    if (nextHours > prevHours) return Math.ceil(nextHours * 4) / 4
+    if (nextHours < prevHours) return Math.floor(nextHours * 4) / 4
+    return Math.round(nextHours * 4) / 4
+  }
+
+  const clampToDay = (h: number) => Math.max(0, Math.min(23.75, h))
+
   const onStartChange = (v: string) => {
-    const newStart = hhmmToHours(v)
-    if (newStart < workStart || newStart > workEnd) return
-    setStartTime(hoursToHHMM(roundToQuarter(newStart)))
-    if (newStart >= hhmmToHours(endTime)) {
-      setEndTime(hoursToHHMM(Math.min(workEnd, roundToQuarter(newStart + 0.25))))
+    const snapped = clampToDay(snapDirectional(hhmmToHours(v), hhmmToHours(startTime)))
+    setStartTime(hoursToHHMM(snapped))
+    if (snapped >= hhmmToHours(endTime)) {
+      setEndTime(hoursToHHMM(Math.min(23.75, snapped + 0.25)))
     }
   }
 
   const onEndChange = (v: string) => {
-    const newEnd = hhmmToHours(v)
-    if (newEnd < workStart || newEnd > workEnd) return
-    if (newEnd <= hhmmToHours(startTime)) return
-    setEndTime(hoursToHHMM(roundToQuarter(newEnd)))
+    const snapped = clampToDay(snapDirectional(hhmmToHours(v), hhmmToHours(endTime)))
+    setEndTime(hoursToHHMM(snapped))
+    if (snapped <= hhmmToHours(startTime)) {
+      setStartTime(hoursToHHMM(Math.max(0, snapped - 0.25)))
+    }
+  }
+
+  /** Keep arrow keys inside the modal so they can't leak into the calendar's
+   *  month navigation (CalendarView listens for ArrowLeft/Right). */
+  const stopArrowPropagation = (e: React.KeyboardEvent) => {
+    if (e.key.startsWith('Arrow')) e.stopPropagation()
   }
 
   if (mode === 'adjust_past' && existing) {
     const diff = roundToQuarter(actualHours) - plannedHrs
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+        onKeyDown={stopArrowPropagation}
+      >
         <div
           ref={modalRef}
           tabIndex={-1}
@@ -242,7 +261,10 @@ export function DayPopover({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      onKeyDown={stopArrowPropagation}
+    >
       <div
         ref={modalRef}
         tabIndex={-1}
@@ -363,8 +385,6 @@ export function DayPopover({
                 <input
                   type="time"
                   step={900}
-                  min={workStartHHMM}
-                  max={workEndHHMM}
                   value={startTime}
                   onChange={(e) => onStartChange(e.target.value)}
                   className="w-full px-3 py-2.5 text-base bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 tabular-nums [color-scheme:dark]"
@@ -377,8 +397,6 @@ export function DayPopover({
                 <input
                   type="time"
                   step={900}
-                  min={workStartHHMM}
-                  max={workEndHHMM}
                   value={endTime}
                   onChange={(e) => onEndChange(e.target.value)}
                   className="w-full px-3 py-2.5 text-base bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 tabular-nums [color-scheme:dark]"
