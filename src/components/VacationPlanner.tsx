@@ -6,6 +6,7 @@ import {
   startOfDay,
   differenceInDays,
   getDay,
+  subDays,
 } from 'date-fns'
 import {
   Plus,
@@ -49,7 +50,10 @@ export function VacationPlanner() {
     const workDays = countWorkDays(start, end, state.policy)
     const hrsPerDay = whatIfHours ? Number(whatIfHours) : state.policy.hoursPerWorkDay
     const hoursNeeded = workDays * hrsPerDay
-    const projection = projectBalance(state, start)
+    // Project to the day before the trip so the result reflects the balance
+    // the user will have when the trip BEGINS, before any of its days have
+    // been deducted.
+    const projection = projectBalance(state, subDays(start, 1))
     const balanceOnStart = projection.totalAvailable
     const affordable = balanceOnStart >= hoursNeeded
     const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
@@ -229,7 +233,7 @@ export function VacationPlanner() {
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
-                    You'll have
+                    On start
                   </div>
                   <div className="font-semibold tabular-nums">
                     {fmt(whatIfResult.balanceOnStart)} hrs

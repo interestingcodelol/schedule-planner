@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { parseISO, startOfDay } from 'date-fns'
+import { parseISO, startOfDay, subDays } from 'date-fns'
 import { CalendarDays, Palmtree } from 'lucide-react'
 import { useAppState } from '../context'
 import { projectBalance, countWorkDays } from '../lib/projection'
@@ -46,7 +46,10 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
       const workDays = countWorkDays(start, end, state.policy)
       const hrsPerDay = v.hoursPerDay ?? state.policy.hoursPerWorkDay
       const hoursNeeded = workDays * hrsPerDay
-      const projection = projectBalance(state, start)
+      // Project to the day before the trip starts so the affordability check
+      // compares hours-needed against the balance the user will actually
+      // have when the trip begins.
+      const projection = projectBalance(state, subDays(start, 1))
       return projection.totalAvailable < hoursNeeded
     })
   }, [sortedVacations, state, today])

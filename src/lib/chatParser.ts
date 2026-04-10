@@ -370,7 +370,8 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
   const hoursPerDay = state.policy.hoursPerWorkDay
   const workDays = countWorkDays(start, end, state.policy)
   const needed = workDays * hoursPerDay
-  const projection = projectBalance(state, start)
+  // Balance the moment the trip begins, before any of its days are deducted.
+  const projection = projectBalance(state, subDays(start, 1))
   const affordable = projection.totalAvailable >= needed
   const remaining = projection.totalAvailable - needed
   const earliest = !affordable ? earliestAffordableDate(state, needed, start) : null

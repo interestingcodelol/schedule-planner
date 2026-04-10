@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { differenceInDays, format, getDay, isBefore, parseISO, startOfDay } from 'date-fns'
+import { differenceInDays, format, getDay, isBefore, parseISO, startOfDay, subDays } from 'date-fns'
 import {
   CalendarDays,
   CheckCircle,
@@ -65,7 +65,10 @@ export function UpcomingVacationRow({ vacation }: Props) {
   const hrsPerDay = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
   const hoursNeeded = workDays * hrsPerDay
   const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
-  const projection = projectBalance(state, start)
+  // Project to the day before the trip so the affordability number reflects
+  // the balance available when the trip begins, not after its first day has
+  // already been deducted.
+  const projection = projectBalance(state, subDays(start, 1))
   const affordable = projection.totalAvailable >= hoursNeeded
 
   const sourceLabel = SOURCE_LABELS[vacation.hourSource] || ''
@@ -162,8 +165,8 @@ export function UpcomingVacationRow({ vacation }: Props) {
               className="cursor-help"
               title={
                 affordable
-                  ? `Affordable — you'll have ${fmt(projection.totalAvailable)} hrs by ${format(start, 'MMM d')} (need ${fmt(hoursNeeded)})`
-                  : `Not enough — you'll have ${fmt(projection.totalAvailable)} hrs by ${format(start, 'MMM d')} but need ${fmt(hoursNeeded)} (${fmt(hoursNeeded - projection.totalAvailable)} short)`
+                  ? `Affordable — you'll have ${fmt(projection.totalAvailable)} hrs when this starts on ${format(start, 'MMM d')} (need ${fmt(hoursNeeded)})`
+                  : `Not enough — you'll only have ${fmt(projection.totalAvailable)} hrs when this starts on ${format(start, 'MMM d')} but need ${fmt(hoursNeeded)} (${fmt(hoursNeeded - projection.totalAvailable)} short)`
               }
             >
               {affordable ? (
