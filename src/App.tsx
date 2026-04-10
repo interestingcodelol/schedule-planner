@@ -126,6 +126,13 @@ export default function App() {
     setAppData((prev) => ({ ...prev, state: newState }))
   }, [])
 
+  const importState = useCallback((incoming: AppState) => {
+    const migrated = migrateState(incoming)
+    const isDemoData = migrated.profile.displayName === 'Demo User'
+    setAppData({ state: migrated, isDemo: isDemoData })
+    saveState(migrated)
+  }, [])
+
   const updateProfile = useCallback(
     (updates: Partial<AppState['profile']>) => {
       setAppData((prev) => {
@@ -361,6 +368,7 @@ export default function App() {
       value={{
         state,
         setState,
+        importState,
         updateProfile,
         updatePolicy,
         addVacation,

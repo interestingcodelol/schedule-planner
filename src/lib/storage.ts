@@ -86,12 +86,22 @@ export function validateImportedState(data: unknown): data is AppState {
   if (typeof obj.theme !== 'string') return false
   if (!Array.isArray(obj.plannedVacations)) return false
 
+  // bankHoursLog is optional in older exports, but if present must be an array.
+  if (obj.bankHoursLog !== undefined && !Array.isArray(obj.bankHoursLog)) return false
+
   const profile = obj.profile as Record<string, unknown> | undefined
   if (!profile) return false
   if (typeof profile.hireDate !== 'string' || !isValidIsoDate(profile.hireDate)) return false
   if (typeof profile.currentVacationHours !== 'number' || !isFinite(profile.currentVacationHours)) return false
   if (typeof profile.currentSickHours !== 'number' || !isFinite(profile.currentSickHours)) return false
   if (typeof profile.lastPaydayDate !== 'string' || !isValidIsoDate(profile.lastPaydayDate)) return false
+  // currentBankHours is optional in older exports; migration backfills to 0.
+  if (
+    profile.currentBankHours !== undefined &&
+    (typeof profile.currentBankHours !== 'number' || !isFinite(profile.currentBankHours))
+  ) {
+    return false
+  }
 
   const policy = obj.policy as Record<string, unknown> | undefined
   if (!policy) return false

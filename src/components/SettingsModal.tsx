@@ -12,7 +12,7 @@ type Props = {
 }
 
 export function SettingsModal({ onClose }: Props) {
-  const { state, setState, updateProfile, updatePolicy, resetToSetup } = useAppState()
+  const { state, importState, updateProfile, updatePolicy, resetToSetup } = useAppState()
   const [activeTab, setActiveTab] = useState<'profile' | 'policy' | 'data'>('profile')
   const [confirmReset, setConfirmReset] = useState(false)
   const [confirmClear, setConfirmClear] = useState(0)
@@ -42,7 +42,7 @@ export function SettingsModal({ onClose }: Props) {
         const data = JSON.parse(ev.target?.result as string)
         if (validateImportedState(data)) {
           if (window.confirm('This will replace all your current data. Continue?')) {
-            setState(data)
+            importState(data)
             setImportError('')
           }
         } else {
@@ -58,7 +58,7 @@ export function SettingsModal({ onClose }: Props) {
 
   const handleResetDemo = () => {
     if (confirmReset) {
-      setState(generateDemoState())
+      importState(generateDemoState())
       setConfirmReset(false)
     } else {
       setConfirmReset(true)

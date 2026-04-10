@@ -9,7 +9,7 @@ function fmt(n: number): string {
 }
 
 export function BankHoursWidget() {
-  const { state, addBankHours, removeBankHours } = useAppState()
+  const { state, addBankHours, removeBankHours, updateProfile } = useAppState()
   const [hours, setHours] = useState('')
   const [note, setNote] = useState('')
   const [showHistory, setShowHistory] = useState(false)
@@ -32,6 +32,20 @@ export function BankHoursWidget() {
   const allEntries = [...(state.bankHoursLog || [])]
     .sort((a, b) => b.date.localeCompare(a.date))
 
+  const hasBalance = state.profile.currentBankHours > 0
+  const showHistoryButton = allEntries.length > 0 || hasBalance
+
+  const handleResetBalance = () => {
+    if (
+      window.confirm(
+        `Reset bank balance from ${fmt(state.profile.currentBankHours)} hrs to 0?`,
+      )
+    ) {
+      updateProfile({ currentBankHours: 0 })
+      showToast({ message: 'Bank balance reset to 0' })
+    }
+  }
+
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3.5">
@@ -44,7 +58,7 @@ export function BankHoursWidget() {
             {fmt(state.profile.currentBankHours)} hrs
           </span>
         </div>
-        {allEntries.length > 0 && (
+        {showHistoryButton && (
           <button
             onClick={() => setShowHistory(!showHistory)}
             className={`p-1.5 rounded-lg transition-all ${
@@ -90,6 +104,20 @@ export function BankHoursWidget() {
           </button>
         </div>
       </div>
+
+      {showHistory && allEntries.length === 0 && hasBalance && (
+        <div className="border-t border-gray-200/60 dark:border-gray-700/40 px-5 py-3.5 text-center">
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            No log entries — this balance was set directly or restored from a backup.
+          </p>
+          <button
+            onClick={handleResetBalance}
+            className="mt-2 text-xs font-semibold text-red-500 hover:text-red-400 transition-colors"
+          >
+            Reset balance to 0
+          </button>
+        </div>
+      )}
 
       {showHistory && allEntries.length > 0 && (
         <div className="border-t border-gray-200/60 dark:border-gray-700/40 divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[200px] overflow-y-auto scroll-panel">

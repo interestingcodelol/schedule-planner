@@ -4,6 +4,10 @@ import type { AppState, BankHoursEntry, PlannedVacation } from './lib/types'
 export type AppContextType = {
   state: AppState
   setState: (state: AppState) => void
+  /** Replace the entire state from an external source (import / reset to demo).
+   *  Runs the migration to backfill any missing fields and recomputes the
+   *  demo-mode flag from the new profile, so the app's surface stays in sync. */
+  importState: (state: AppState) => void
   updateProfile: (updates: Partial<AppState['profile']>) => void
   updatePolicy: (updates: Partial<AppState['policy']>) => void
   addVacation: (vacation: PlannedVacation) => void
