@@ -10,6 +10,7 @@ import {
   addDays,
   getWeek,
 } from 'date-fns'
+import { Lock } from 'lucide-react'
 import { useAppState } from '../context'
 import { projectBalance } from '../lib/projection'
 import { getHolidayName } from '../lib/holidays'
@@ -42,7 +43,7 @@ function getHolidayEmoji(name: string): string {
 }
 
 export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
-  const { state } = useAppState()
+  const { state, updateVacation } = useAppState()
   const today = startOfDay(new Date())
   const isToday = isSameDay(date, today)
   const isCurrentMonth = isSameMonth(date, currentMonth)
@@ -96,10 +97,11 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     isPlannedVacation && !isWeekend && !isHolidayDay &&
     projectedBalance !== null && projectedBalance < deductHours
 
+  const isLocked = !!plannedVacation?.locked
   const canPlanNew = !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
   const canEdit = isPlannedVacation && isCurrentMonth && !isWeekend && !isHolidayDay
   const canLogPast = !isWeekend && !isHolidayDay && isCurrentMonth && isPast && !isPlannedVacation
-  const canClick = canPlanNew || canEdit || canLogPast
+  const canClick = !isLocked && (canPlanNew || canEdit || canLogPast)
 
   const handleClick = () => {
     if (canClick) onDayClick(date)
@@ -173,6 +175,10 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
           ? `Balance after this day's time off: ${fmt(projectedBalance)} hrs`
           : `Balance: ${fmt(projectedBalance)} hrs`,
       )
+    }
+
+    if (isLocked) {
+      parts.push('🔒 Locked — click the lock icon to unlock')
     }
 
     return parts.join('\n')
@@ -251,12 +257,25 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
           {isPayday && isCurrentMonth && !isPast && (
             <span className="text-sm leading-none">💰</span>
           )}
-          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
+          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && isLocked && plannedVacation && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                updateVacation(plannedVacation.id, { locked: false })
+              }}
+              className="p-0.5 -m-0.5 rounded text-amber-500 hover:text-amber-400 hover:bg-amber-500/15 transition-colors"
+              title="Locked — click to unlock"
+              aria-label="Unlock this time off"
+            >
+              <Lock className="w-3 h-3" />
+            </button>
+          )}
+          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && !isLocked && (
             <span
               className={`w-2 h-2 rounded-full ${isUnaffordable ? 'bg-red-500' : isPartialDay ? 'bg-sky-500' : 'bg-blue-500'}`}
             />
           )}
-          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && isPast && (
+          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && isPast && !isLocked && (
             <span className="text-xs leading-none" title={isLoggedPast ? 'Logged absence' : 'Past time off'}>
               {isLoggedPast ? '🤒' : '✓'}
             </span>
