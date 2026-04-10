@@ -18,10 +18,16 @@ import { CalendarDay } from './CalendarDay'
 import { DayPopover } from './DayPopover'
 import type { PlannedVacation } from '../lib/types'
 import { isHoliday } from '../lib/holidays'
+import { subscribeToCalendarNav } from '../lib/calendarNav'
 
 export function CalendarView() {
   const { state, addVacation, removeVacation, addPastAbsence, adjustActualHours } = useAppState()
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
+
+  useEffect(
+    () => subscribeToCalendarNav((date) => setCurrentMonth(startOfMonth(date))),
+    [],
+  )
 
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentMonth)

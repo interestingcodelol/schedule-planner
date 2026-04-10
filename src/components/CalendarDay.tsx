@@ -267,25 +267,27 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
               {isLoggedPast ? '🤒' : '✓'}
             </span>
           )}
-          {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && plannedVacation && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                updateVacation(plannedVacation.id, { locked: !isLocked })
-              }}
-              className={`p-0.5 -m-0.5 rounded transition-all ${
-                isLocked
-                  ? 'text-amber-500 hover:text-amber-400 hover:bg-amber-500/15'
-                  : 'text-gray-400/70 dark:text-gray-500/70 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-500/10 opacity-0 group-hover:opacity-100'
-              }`}
-              title={isLocked ? 'Locked — click to unlock' : 'Click to lock this time off'}
-              aria-label={isLocked ? 'Unlock this time off' : 'Lock this time off'}
-            >
-              {isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-            </button>
-          )}
         </div>
       </div>
+
+      {/* Lock toggle — bottom-left corner */}
+      {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && plannedVacation && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            updateVacation(plannedVacation.id, { locked: !isLocked })
+          }}
+          className={`absolute bottom-1 left-1 p-0.5 rounded transition-all ${
+            isLocked
+              ? 'text-amber-500 hover:text-amber-400 hover:bg-amber-500/15'
+              : 'text-gray-400/70 dark:text-gray-500/70 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-500/10 opacity-0 group-hover:opacity-100'
+          }`}
+          title={isLocked ? 'Locked — click to unlock' : 'Click to lock this time off'}
+          aria-label={isLocked ? 'Unlock this time off' : 'Lock this time off'}
+        >
+          {isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+        </button>
+      )}
 
       {/* Time-off indicator — centered in cell */}
       {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (

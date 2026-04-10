@@ -31,9 +31,11 @@ function fmt(n: number): string {
 
 type Props = {
   vacation: PlannedVacation
+  /** Called when the user clicks the row body (not an action button). */
+  onJump?: (date: Date) => void
 }
 
-export function UpcomingVacationRow({ vacation }: Props) {
+export function UpcomingVacationRow({ vacation, onJump }: Props) {
   const { state, addVacation, removeVacation, updateVacation } = useAppState()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiRef = useRef<HTMLSpanElement>(null)
@@ -94,11 +96,27 @@ export function UpcomingVacationRow({ vacation }: Props) {
     metaParts.push('today')
   }
 
+  const handleRowClick = () => onJump?.(start)
+
   return (
     <div
-      className={`px-5 py-3 group hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors ${
+      role={onJump ? 'button' : undefined}
+      tabIndex={onJump ? 0 : undefined}
+      onClick={onJump ? handleRowClick : undefined}
+      onKeyDown={
+        onJump
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleRowClick()
+              }
+            }
+          : undefined
+      }
+      className={`px-5 py-3 group transition-colors ${
         isPast ? 'opacity-40' : ''
-      }`}
+      } ${onJump ? 'cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-800/20' : ''}`}
+      title={onJump ? `Jump to ${format(start, 'MMM d')} on the calendar` : undefined}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2 min-w-0">
@@ -108,18 +126,25 @@ export function UpcomingVacationRow({ vacation }: Props) {
               {displayEmoji && (
                 <span className="relative" ref={emojiRef}>
                   <button
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowEmojiPicker(!showEmojiPicker)
+                    }}
                     className="hover:scale-125 active:scale-95 transition-transform cursor-pointer"
                     title="Click to change emoji"
                   >
                     {displayEmoji}
                   </button>
                   {showEmojiPicker && (
-                    <div className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48 animate-in fade-in zoom-in-95 duration-150">
+                    <div
+                      className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48 animate-in fade-in zoom-in-95 duration-150"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {EMOJI_OPTIONS.map((emoji) => (
                         <button
                           key={emoji}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
                             updateVacation(vacation.id, { customEmoji: emoji })
                             setShowEmojiPicker(false)
                           }}
@@ -130,7 +155,8 @@ export function UpcomingVacationRow({ vacation }: Props) {
                       ))}
                       {vacation.customEmoji && (
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
                             updateVacation(vacation.id, { customEmoji: undefined })
                             setShowEmojiPicker(false)
                           }}
@@ -177,7 +203,10 @@ export function UpcomingVacationRow({ vacation }: Props) {
             </span>
           )}
           <button
-            onClick={() => updateVacation(vacation.id, { locked: !vacation.locked })}
+            onClick={(e) => {
+              e.stopPropagation()
+              updateVacation(vacation.id, { locked: !vacation.locked })
+            }}
             className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 active:scale-90 transition-all"
             title={vacation.locked ? 'Unlock' : 'Lock'}
           >
@@ -185,7 +214,8 @@ export function UpcomingVacationRow({ vacation }: Props) {
           </button>
           {!vacation.locked && (
             <button
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation()
                 const deleted = { ...vacation }
                 removeVacation(vacation.id)
                 showToast({

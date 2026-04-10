@@ -12,6 +12,7 @@ import { CalendarDays, Palmtree } from 'lucide-react'
 import { useAppState } from '../context'
 import { projectBalance, countWorkDays } from '../lib/projection'
 import { useUpcomingItems } from '../lib/upcomingItems'
+import { navigateCalendarToDate } from '../lib/calendarNav'
 import { UpcomingVacationRow } from './UpcomingVacationRow'
 
 type TriggerRenderArgs = {
@@ -165,16 +166,31 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-gray-800/60">
                 {sortedVacations.map((vacation) => (
-                  <UpcomingVacationRow key={vacation.id} vacation={vacation} />
+                  <UpcomingVacationRow
+                    key={vacation.id}
+                    vacation={vacation}
+                    onJump={(date) => {
+                      navigateCalendarToDate(date)
+                      setOpen(false)
+                    }}
+                  />
                 ))}
                 {infoEvents.map((event) => (
-                  <div key={event.key} className="px-5 py-3.5 flex items-start gap-3">
+                  <button
+                    key={event.key}
+                    onClick={() => {
+                      navigateCalendarToDate(event.sortDate)
+                      setOpen(false)
+                    }}
+                    className="w-full text-left px-5 py-3.5 flex items-start gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
+                    title={`Jump to ${event.label}`}
+                  >
                     <event.icon className={`w-4 h-4 mt-0.5 shrink-0 ${event.accent}`} />
                     <div className="min-w-0">
                       <div className="text-sm font-semibold truncate">{event.label}</div>
                       <div className="text-sm text-gray-400 dark:text-gray-500">{event.detail}</div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
