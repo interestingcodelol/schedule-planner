@@ -208,16 +208,16 @@ export function ChatAssistant() {
                     <div className="mt-2">
                       {msg.actionTaken ? (
                         <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                          Added to plan
+                          Added to calendar
                         </span>
                       ) : (
                         <button
                           onClick={() => handleAddToPlan(msg)}
                           className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-                          title="Add this time off to your plan"
+                          title="Add this time off to your calendar"
                         >
                           <CalendarPlus className="w-3 h-3" />
-                          Add to plan
+                          Add to calendar
                         </button>
                       )}
                     </div>

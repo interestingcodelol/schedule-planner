@@ -465,13 +465,13 @@ export function DayPopover({
                   ? 'Log this past absence'
                   : existing
                     ? 'Update this time off'
-                    : 'Add to plan'
+                    : 'Add to calendar'
               }
             >
               {mode === 'log_past' ? (
                 <><History className="w-4 h-4" />Log absence</>
               ) : (
-                <><CalendarCheck className="w-4 h-4" />{existing ? 'Update' : 'Add to plan'}</>
+                <><CalendarCheck className="w-4 h-4" />{existing ? 'Update' : 'Add to calendar'}</>
               )}
             </button>
           </div>

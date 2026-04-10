@@ -132,7 +132,7 @@ export function VacationPlanner() {
             Try a trip
           </div>
           <p className="text-xs text-gray-400 dark:text-gray-500 leading-snug">
-            Pick dates to preview affordability. Nothing is added to your plan until you click <span className="font-semibold">Add to plan</span>.
+            Pick dates to preview affordability. Nothing is added to your calendar until you click <span className="font-semibold">Add to calendar</span>.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -302,7 +302,7 @@ export function VacationPlanner() {
             title="Add this time off to your plan"
           >
             <Plus className="w-4 h-4" />
-            Add to plan
+            Add to calendar
           </button>
         )}
       </div>
