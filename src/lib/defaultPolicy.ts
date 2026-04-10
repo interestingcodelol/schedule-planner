@@ -2,13 +2,12 @@ import type { PolicyConfig } from './types'
 
 /**
  * Default policy:
- *   year 1 → 8 days/yr, years 2–5 → 10 days/yr,
- *   years 6–10 → 15 days/yr, years 11+ → 20 days/yr
+ *   years 1–5 → 10 days/yr, years 6–10 → 15 days/yr, years 11+ → 20 days/yr
  * Customize via Settings → Policy.
  */
 export const defaultPolicy: PolicyConfig = {
   accrualTiers: [
-    { minYears: 0, maxYears: 1, hoursPerPayPeriod: 2.461, label: 'Year 1' },
+    { minYears: 0, maxYears: 1, hoursPerPayPeriod: 3.076, label: 'Year 1' },
     { minYears: 1, maxYears: 5, hoursPerPayPeriod: 3.076, label: 'Years 2–5' },
     { minYears: 5, maxYears: 10, hoursPerPayPeriod: 4.615, label: 'Years 6–10' },
     { minYears: 10, maxYears: null, hoursPerPayPeriod: 6.153, label: 'Years 11+' },

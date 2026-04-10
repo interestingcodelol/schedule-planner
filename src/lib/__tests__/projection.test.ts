@@ -67,29 +67,24 @@ describe('projectBalance', () => {
     const targetDate = new Date('2025-12-15')
     const result = projectBalance(state, targetDate)
 
-    // From Jun 13 to Dec 15 is about 185 days, which is ~13 pay periods (185/14 = 13.2)
-    // Year-1 tier: 2.46 hrs/pp
-    // But the employee anniversary is Jan 1, 2026 — still in Year 1 for this whole range
-    // Actually hire date is 2025-01-01, so on 2026-01-01 they'd be 1 year.
-    // Until then (Dec 15, 2025), less than 1 year => 2.46 hrs/pp
+    // From Jun 13 to Dec 15 is ~185 days, ~13 pay periods.
+    // Default Year-1 rate is 3.076 hrs/pp.
     const accrualEvents = result.events.filter((e) => e.type === 'accrual')
-    // Each accrual should be 2.46
     expect(accrualEvents.length).toBeGreaterThan(0)
     accrualEvents.forEach((e) => {
-      expect(e.delta).toBeCloseTo(2.46, 1)
+      expect(e.delta).toBeCloseTo(3.076, 2)
     })
 
-    // Final balance should be initial + accruals
-    const expectedBalance = 10 + accrualEvents.length * 2.46
+    const expectedBalance = 10 + accrualEvents.length * 3.076
     expect(result.vacationBalance).toBeCloseTo(expectedBalance, 1)
   })
 
   it('Test 2: Employee crossing a tier boundary mid-projection — verify tier change happens on the right payday', () => {
-    // Hire date: Jun 15, 2024 — crosses 1-year mark on Jun 15, 2025 (which is "today")
+    // Hire date: Jun 15, 2020 — crosses the 5-year mark on Jun 15, 2025 (which is "today")
     const state = makeState({
       profile: {
         displayName: 'Test User',
-        hireDate: '2024-06-15',
+        hireDate: '2020-06-15',
         currentVacationHours: 20,
         currentSickHours: 0,
         currentBankHours: 0,
@@ -102,13 +97,11 @@ describe('projectBalance', () => {
 
     const accrualEvents = result.events.filter((e) => e.type === 'accrual')
 
-    // Before anniversary (Jun 15, 2025): tier 0-1yr = 2.46
-    // "Today" is Jun 15, so the hire date is exactly 1 year ago.
-    // First payday after today: Jun 27 (Jun 13 + 14)
-    // On Jun 27, years of service = differenceInYears(Jun 27, Jun 15 2024) = 1
-    // So all paydays from Jun 27 onward should be at the 1-5yr tier (3.08)
+    // First payday after today (Jun 15) is Jun 27. By then yos = 5, so all
+    // accruals should be at the 5–10 year tier (4.615 hrs/pp).
+    expect(accrualEvents.length).toBeGreaterThan(0)
     accrualEvents.forEach((e) => {
-      expect(e.delta).toBeCloseTo(3.08, 1)
+      expect(e.delta).toBeCloseTo(4.615, 2)
     })
   })
 
@@ -444,8 +437,8 @@ describe('sick leave carryover cap', () => {
 
 describe('computeAccrualTier', () => {
   it('returns correct tier for each range', () => {
-    expect(computeAccrualTier(defaultPolicy, 0).hoursPerPayPeriod).toBe(2.461)
-    expect(computeAccrualTier(defaultPolicy, 0.5).hoursPerPayPeriod).toBe(2.461)
+    expect(computeAccrualTier(defaultPolicy, 0).hoursPerPayPeriod).toBe(3.076)
+    expect(computeAccrualTier(defaultPolicy, 0.5).hoursPerPayPeriod).toBe(3.076)
     expect(computeAccrualTier(defaultPolicy, 1).hoursPerPayPeriod).toBe(3.076)
     expect(computeAccrualTier(defaultPolicy, 3).hoursPerPayPeriod).toBe(3.076)
     expect(computeAccrualTier(defaultPolicy, 5).hoursPerPayPeriod).toBe(4.615)
