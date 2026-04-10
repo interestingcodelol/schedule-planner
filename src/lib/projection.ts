@@ -213,6 +213,7 @@ export function projectBalance(
   let bankBalance = state.profile.currentBankHours
   let totalCarryoverAdjustment = 0
   let totalBankPayout = 0
+  let totalShortfall = 0
 
   const tz = state.profile.timezone || DEFAULT_TZ
   const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
@@ -236,6 +237,7 @@ export function projectBalance(
       totalAvailable: eff.total,
       carryoverAdjustment: 0,
       bankPayout: 0,
+      shortfall: 0,
       events: [],
     }
   }
@@ -413,8 +415,25 @@ export function projectBalance(
       }
     } else if (pe.type === 'vacation_deduction') {
       const hours = Math.abs(pe.process())
+      const source = pe.hourSource || 'any'
+
+      // Compute the pool capacity available to cover this deduction. Pools are
+      // floored at 0 so a previously over-drawn explicit source doesn't subsidize
+      // a later draw.
+      const available =
+        source === 'vacation'
+          ? Math.max(0, vacationBalance)
+          : source === 'sick'
+            ? Math.max(0, sickBalance)
+            : source === 'bank'
+              ? Math.max(0, bankBalance)
+              : Math.max(0, vacationBalance) + Math.max(0, sickBalance) + Math.max(0, bankBalance)
+      if (hours > available) {
+        totalShortfall += hours - available
+      }
+
       const pools = { vacation: vacationBalance, sick: sickBalance, bank: bankBalance }
-      applyDeduction(hours, pe.hourSource || 'any', pools)
+      applyDeduction(hours, source, pools)
       vacationBalance = pools.vacation
       sickBalance = pools.sick
       bankBalance = pools.bank
@@ -446,6 +465,7 @@ export function projectBalance(
     totalAvailable: vacationBalance + sickBalance + bankBalance,
     carryoverAdjustment: totalCarryoverAdjustment,
     bankPayout: totalBankPayout,
+    shortfall: totalShortfall,
     events,
   }
 }

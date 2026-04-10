@@ -5,11 +5,13 @@ import {
   isBefore,
   startOfDay,
   differenceInDays,
+  endOfYear,
   getDay,
   subDays,
 } from 'date-fns'
 import {
   Plus,
+  AlertTriangle,
   CheckCircle,
   XCircle,
   CalendarSearch,
@@ -21,6 +23,7 @@ import {
   countWorkDays,
   earliestAffordableDate,
 } from '../lib/projection'
+import type { AppState, PlannedVacation } from '../lib/types'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
@@ -50,20 +53,53 @@ export function VacationPlanner() {
     const workDays = countWorkDays(start, end, state.policy)
     const hrsPerDay = whatIfHours ? Number(whatIfHours) : state.policy.hoursPerWorkDay
     const hoursNeeded = workDays * hrsPerDay
-    // Project to the day before the trip so the result reflects the balance
-    // the user will have when the trip BEGINS, before any of its days have
-    // been deducted.
-    const projection = projectBalance(state, subDays(start, 1))
-    const balanceOnStart = projection.totalAvailable
-    const affordable = balanceOnStart >= hoursNeeded
     const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
 
+    // Build a hypothetical state with this trip merged in. The cumulative
+    // shortfall check below uses this so the preview can see whether the
+    // proposed trip would push existing planned time off into a deficit.
+    const hypotheticalTrip: PlannedVacation = {
+      id: '__preview__',
+      startDate: whatIfStart,
+      endDate: whatIfEnd,
+      hoursPerDay: isPartial ? hrsPerDay : undefined,
+      hourSource: whatIfSource,
+      locked: false,
+      kind: 'planned',
+    }
+    const hypotheticalState: AppState = {
+      ...state,
+      plannedVacations: [...state.plannedVacations, hypotheticalTrip],
+    }
+
+    // Balance the moment this trip begins, with the trip itself in the state
+    // (the trip's own deductions only start on/after `start`, so projecting
+    // to start − 1 returns the pre-trip balance after every other planned
+    // entry through that date).
+    const startProjection = projectBalance(hypotheticalState, subDays(start, 1))
+    const balanceOnStart = startProjection.totalAvailable
+    const fitsAtStart = balanceOnStart >= hoursNeeded
+
+    // Cumulative check: project the hypothetical state out to a date that
+    // covers every known planned entry (and at least the end of the year).
+    // If the engine reports any shortfall, this trip would break a later
+    // commitment even though it fits at its own start.
+    const latestPlannedEnd = state.plannedVacations.reduce<Date>((latest, v) => {
+      const e = parseISO(v.endDate)
+      return e > latest ? e : latest
+    }, end)
+    const horizon = endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
+    const fullProjection = projectBalance(hypotheticalState, horizon)
+    const cumulativeShortfall = fullProjection.shortfall
+
+    const affordable = fitsAtStart && cumulativeShortfall === 0
+    const conflictsLater = fitsAtStart && cumulativeShortfall > 0
+
     let suggestion: Date | null = null
-    if (!affordable) {
+    if (!fitsAtStart) {
       suggestion = earliestAffordableDate(state, hoursNeeded, start)
     }
 
-    // Contextual note for the result panel
     let funNote = ''
     if (workDays >= 5) funNote = '🌴 A full week — nice!'
     else if (workDays >= 3) funNote = '✨ Mini vacation!'
@@ -78,12 +114,26 @@ export function VacationPlanner() {
       balanceOnStart,
       balanceAfterTrip,
       affordable,
+      conflictsLater,
+      cumulativeShortfall,
       suggestion,
       funNote,
       isPartial,
       hrsPerDay,
     }
-  }, [whatIfStart, whatIfEnd, whatIfHours, state])
+  }, [whatIfStart, whatIfEnd, whatIfHours, whatIfSource, state])
+
+  const hasAnyInput =
+    !!whatIfStart || !!whatIfEnd || !!whatIfNote || !!whatIfHours || whatIfSource !== 'any'
+
+  const handleClear = () => {
+    setWhatIfStart('')
+    setWhatIfEnd('')
+    setWhatIfNote('')
+    setWhatIfHours('')
+    setWhatIfSource('any')
+    setWhatIfError('')
+  }
 
   const handleCommit = () => {
     if (!whatIfStart || !whatIfEnd) return
@@ -220,24 +270,37 @@ export function VacationPlanner() {
             className={`relative overflow-hidden rounded-xl border-l-4 ${
               whatIfResult.affordable
                 ? 'bg-emerald-50 dark:bg-emerald-900/15 text-emerald-700 dark:text-emerald-300 border-emerald-500'
-                : 'bg-red-50 dark:bg-red-900/15 text-red-700 dark:text-red-300 border-red-500'
+                : whatIfResult.conflictsLater
+                  ? 'bg-amber-50 dark:bg-amber-900/15 text-amber-700 dark:text-amber-300 border-amber-500'
+                  : 'bg-red-50 dark:bg-red-900/15 text-red-700 dark:text-red-300 border-red-500'
             }`}
           >
             <div className="px-4 py-3.5">
-              {/* Big yes/no headline */}
               <div className="flex items-center gap-2.5">
                 {whatIfResult.affordable ? (
                   <CheckCircle className="w-6 h-6 shrink-0" />
+                ) : whatIfResult.conflictsLater ? (
+                  <AlertTriangle className="w-6 h-6 shrink-0" />
                 ) : (
                   <XCircle className="w-6 h-6 shrink-0" />
                 )}
                 <div className="min-w-0">
                   <div className="text-base font-bold leading-tight">
-                    {whatIfResult.affordable ? 'Yes — affordable' : 'Not yet affordable'}
+                    {whatIfResult.affordable
+                      ? 'Yes — affordable'
+                      : whatIfResult.conflictsLater
+                        ? 'Conflicts with later plans'
+                        : 'Not yet affordable'}
                   </div>
-                  {whatIfResult.funNote && (
+                  {whatIfResult.affordable && whatIfResult.funNote && (
                     <div className="text-xs font-normal opacity-80 mt-0.5">
                       {whatIfResult.funNote}
+                    </div>
+                  )}
+                  {whatIfResult.conflictsLater && (
+                    <div className="text-xs font-normal opacity-80 mt-0.5">
+                      Adding this would leave {fmt(whatIfResult.cumulativeShortfall)} hrs short
+                      across your other planned time off.
                     </div>
                   )}
                 </div>
@@ -279,7 +342,7 @@ export function VacationPlanner() {
                 </div>
               </div>
 
-              {!whatIfResult.affordable && whatIfResult.suggestion && (
+              {!whatIfResult.affordable && !whatIfResult.conflictsLater && whatIfResult.suggestion && (
                 <div className="mt-3 pt-2.5 border-t border-current/15 text-xs">
                   <span className="opacity-70">Earliest affordable: </span>
                   <span className="font-bold">
@@ -295,15 +358,28 @@ export function VacationPlanner() {
           <p className="text-red-400 text-sm">{whatIfResult.error}</p>
         )}
 
-        {whatIfResult && !('error' in whatIfResult) && (
-          <button
-            onClick={handleCommit}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-500/30"
-            title="Add this time off to your plan"
-          >
-            <Plus className="w-4 h-4" />
-            Add to calendar
-          </button>
+        {(hasAnyInput || whatIfResult) && (
+          <div className="flex gap-2">
+            <button
+              onClick={handleClear}
+              className={`px-4 py-2.5 text-sm font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl transition-colors ${
+                whatIfResult && !('error' in whatIfResult) ? '' : 'flex-1'
+              }`}
+              title="Clear all fields"
+            >
+              Clear
+            </button>
+            {whatIfResult && !('error' in whatIfResult) && (
+              <button
+                onClick={handleCommit}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-500/30"
+                title="Add this time off to your calendar"
+              >
+                <Plus className="w-4 h-4" />
+                Add to calendar
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

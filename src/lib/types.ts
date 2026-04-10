@@ -117,5 +117,8 @@ export type ProjectionResult = {
   totalAvailable: number // vacation + sick + bank combined
   carryoverAdjustment: number
   bankPayout: number // hours paid out during payout period
+  /** Total hours from planned vacation deductions that could not be covered
+   *  by any pool at the moment the deduction would have been taken. */
+  shortfall: number
   events: ProjectionEvent[]
 }

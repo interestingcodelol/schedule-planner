@@ -370,12 +370,52 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
   const hoursPerDay = state.policy.hoursPerWorkDay
   const workDays = countWorkDays(start, end, state.policy)
   const needed = workDays * hoursPerDay
-  // Balance the moment the trip begins, before any of its days are deducted.
-  const projection = projectBalance(state, subDays(start, 1))
-  const affordable = projection.totalAvailable >= needed
+
+  // Build a hypothetical state that includes this proposed trip so the
+  // shortfall check can see whether it would push other planned time off
+  // into a deficit.
+  const hypotheticalState: AppState = {
+    ...state,
+    plannedVacations: [
+      ...state.plannedVacations,
+      {
+        id: '__chat_preview__',
+        startDate: format(start, 'yyyy-MM-dd'),
+        endDate: format(end, 'yyyy-MM-dd'),
+        hourSource: 'any',
+        locked: false,
+        kind: 'planned',
+      },
+    ],
+  }
+
+  const projection = projectBalance(hypotheticalState, subDays(start, 1))
+  const fitsAtStart = projection.totalAvailable >= needed
+
+  const latestPlannedEnd = state.plannedVacations.reduce<Date>((latest, v) => {
+    const e = parseISO(v.endDate)
+    return e > latest ? e : latest
+  }, end)
+  const horizon =
+    endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
+  const fullProjection = projectBalance(hypotheticalState, horizon)
+  const cumulativeShortfall = fullProjection.shortfall
+
+  const affordable = fitsAtStart && cumulativeShortfall === 0
+  const conflictsLater = fitsAtStart && cumulativeShortfall > 0
   const remaining = projection.totalAvailable - needed
-  const earliest = !affordable ? earliestAffordableDate(state, needed, start) : null
-  return { workDays, needed, projection, affordable, remaining, earliest }
+  const earliest = !fitsAtStart ? earliestAffordableDate(state, needed, start) : null
+
+  return {
+    workDays,
+    needed,
+    projection,
+    affordable,
+    conflictsLater,
+    cumulativeShortfall,
+    remaining,
+    earliest,
+  }
 }
 
 export function processChat(input: string, state: AppState): ChatResponse {
@@ -490,31 +530,39 @@ export function processChat(input: string, state: AppState): ChatResponse {
     if (isQuestion && !isRequest) {
       if (a.affordable) {
         return {
-          text: `**Yes, you can!** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.\n\nWant me to add it to your plan?`,
+          text: `**Yes.** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.`,
           action,
         }
-      } else {
-        let text = `**Not yet.** ${label} needs **${fmt(a.needed)} hrs** (${a.workDays} days) but you'll only have **${fmt(a.projection.totalAvailable)} hrs** — **${fmt(Math.abs(a.remaining))} hrs short**.`
-        if (a.earliest) {
-          text += `\n\nYou'd have enough by **${format(a.earliest, 'MMM d, yyyy')}** (${differenceInDays(a.earliest, range.start)} days later).`
-        }
-        return { text }
       }
-    } else {
-      if (a.affordable) {
+      if (a.conflictsLater) {
         return {
-          text: `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after). Looks good!`,
-          action,
+          text: `**Conflicts with later plans.** ${label} fits at the start (you'd have **${fmt(a.projection.totalAvailable)} hrs**, need **${fmt(a.needed)} hrs**) but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** across your other planned time off.`,
         }
-      } else {
-        let text = `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'd be **${fmt(Math.abs(a.remaining))} hrs short** (only ${fmt(a.projection.totalAvailable)} hrs available).`
-        if (a.earliest) {
-          text += ` You could afford it by **${format(a.earliest, 'MMM d')}**.`
-        }
-        text += `\n\nYou can still add it to track it — your balance will grow with accruals.`
-        return { text, action }
+      }
+      let text = `**Not enough hours.** ${label} needs **${fmt(a.needed)} hrs** (${a.workDays} days) but you'll only have **${fmt(a.projection.totalAvailable)} hrs** — **${fmt(Math.abs(a.remaining))} hrs short**.`
+      if (a.earliest) {
+        text += `\n\nYou'd have enough by **${format(a.earliest, 'MMM d, yyyy')}** (${differenceInDays(a.earliest, range.start)} days later).`
+      }
+      return { text }
+    }
+
+    if (a.affordable) {
+      return {
+        text: `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after).`,
+        action,
       }
     }
+    if (a.conflictsLater) {
+      return {
+        text: `**${label}** — fits at the start (**${fmt(a.projection.totalAvailable)} hrs** available, **${fmt(a.needed)} hrs** needed), but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** for your other planned time off.`,
+        action,
+      }
+    }
+    let text = `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'd be **${fmt(Math.abs(a.remaining))} hrs short** (only ${fmt(a.projection.totalAvailable)} hrs available).`
+    if (a.earliest) {
+      text += ` You could afford it by **${format(a.earliest, 'MMM d')}**.`
+    }
+    return { text, action }
   }
 
   if (isRequest || isQuestion) {
