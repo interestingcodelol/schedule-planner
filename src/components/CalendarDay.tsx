@@ -167,7 +167,12 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     }
 
     if (projectedBalance !== null && !isPast) {
-      parts.push(`Available: ${fmt(projectedBalance)} hrs`)
+      const isWorkVacationDay = isPlannedVacation && !isWeekend && !isHolidayDay
+      parts.push(
+        isWorkVacationDay
+          ? `Balance after this day's time off: ${fmt(projectedBalance)} hrs`
+          : `Balance: ${fmt(projectedBalance)} hrs`,
+      )
     }
 
     return parts.join('\n')

@@ -165,8 +165,8 @@ export function UpcomingVacationRow({ vacation }: Props) {
               className="cursor-help"
               title={
                 affordable
-                  ? `Affordable — you'll have ${fmt(projection.totalAvailable)} hrs when this starts on ${format(start, 'MMM d')} (need ${fmt(hoursNeeded)})`
-                  : `Not enough — you'll only have ${fmt(projection.totalAvailable)} hrs when this starts on ${format(start, 'MMM d')} but need ${fmt(hoursNeeded)} (${fmt(hoursNeeded - projection.totalAvailable)} short)`
+                  ? `Affordable\n${fmt(projection.totalAvailable)} hrs at start of ${format(start, 'MMM d')}\n${fmt(projection.totalAvailable - hoursNeeded)} hrs left after ${format(end, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed`
+                  : `Not enough\n${fmt(projection.totalAvailable)} hrs at start of ${format(start, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed (${fmt(hoursNeeded - projection.totalAvailable)} short)`
               }
             >
               {affordable ? (

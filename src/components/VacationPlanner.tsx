@@ -71,7 +71,18 @@ export function VacationPlanner() {
       funNote = getDay(start) === 5 ? '🎉 Long weekend ahead!' : '😎 Extended weekend!'
     else if (isPartial) funNote = '⏰ Partial day — appointment time!'
 
-    return { workDays, hoursNeeded, balanceOnStart, affordable, suggestion, funNote, isPartial, hrsPerDay }
+    const balanceAfterTrip = balanceOnStart - hoursNeeded
+    return {
+      workDays,
+      hoursNeeded,
+      balanceOnStart,
+      balanceAfterTrip,
+      affordable,
+      suggestion,
+      funNote,
+      isPartial,
+      hrsPerDay,
+    }
   }, [whatIfStart, whatIfEnd, whatIfHours, state])
 
   const handleCommit = () => {
@@ -220,23 +231,38 @@ export function VacationPlanner() {
                 </div>
               </div>
 
-              {/* Detail rows */}
-              <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs opacity-90">
+              <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs opacity-90">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
                     Needed
                   </div>
                   <div className="font-semibold tabular-nums">
                     {fmt(whatIfResult.hoursNeeded)} hrs
-                    <span className="font-normal opacity-70"> · {whatIfResult.workDays} day{whatIfResult.workDays === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="text-[10px] font-normal opacity-70">
+                    {whatIfResult.workDays} day{whatIfResult.workDays === 1 ? '' : 's'}
                   </div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
-                    On start
+                    At start
                   </div>
                   <div className="font-semibold tabular-nums">
                     {fmt(whatIfResult.balanceOnStart)} hrs
+                  </div>
+                  <div className="text-[10px] font-normal opacity-70">
+                    of trip
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
+                    After trip
+                  </div>
+                  <div className="font-semibold tabular-nums">
+                    {fmt(whatIfResult.balanceAfterTrip)} hrs
+                  </div>
+                  <div className="text-[10px] font-normal opacity-70">
+                    remaining
                   </div>
                 </div>
               </div>
