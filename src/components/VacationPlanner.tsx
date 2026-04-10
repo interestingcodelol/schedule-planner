@@ -125,11 +125,15 @@ export function VacationPlanner() {
         <h2 className="text-lg font-semibold">Time Off Planner</h2>
       </div>
 
-      {/* What-if planner */}
       <div className="px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
-        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 font-medium">
-          <CalendarSearch className="w-4 h-4" />
-          What-if planner
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 font-semibold">
+            <CalendarSearch className="w-4 h-4" />
+            Try a trip
+          </div>
+          <p className="text-xs text-gray-400 dark:text-gray-500 leading-snug">
+            Pick dates to preview affordability. Nothing is added to your plan until you click <span className="font-semibold">Add to plan</span>.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -202,6 +206,14 @@ export function VacationPlanner() {
         />
 
         {whatIfError && <p className="text-red-400 text-sm">{whatIfError}</p>}
+
+        {!whatIfResult && !whatIfError && (
+          <div className="rounded-xl border border-dashed border-gray-300/60 dark:border-gray-700/60 px-4 py-3.5 text-center">
+            <div className="text-xs text-gray-400 dark:text-gray-500">
+              Preview appears here once you pick a start and end date.
+            </div>
+          </div>
+        )}
 
         {whatIfResult && !('error' in whatIfResult) && (
           <div
@@ -283,17 +295,17 @@ export function VacationPlanner() {
           <p className="text-red-400 text-sm">{whatIfResult.error}</p>
         )}
 
-        <button
-          onClick={handleCommit}
-          disabled={!whatIfStart || !whatIfEnd}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-500/30"
-          title="Add this time off to your plan"
-        >
-          <Plus className="w-4 h-4" />
-          Commit to plan
-        </button>
+        {whatIfResult && !('error' in whatIfResult) && (
+          <button
+            onClick={handleCommit}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-500/30"
+            title="Add this time off to your plan"
+          >
+            <Plus className="w-4 h-4" />
+            Add to plan
+          </button>
+        )}
       </div>
-
     </div>
   )
 }
