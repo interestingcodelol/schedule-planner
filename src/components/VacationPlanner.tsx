@@ -129,10 +129,10 @@ export function VacationPlanner() {
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 font-semibold">
             <CalendarSearch className="w-4 h-4" />
-            Try a trip
+            Preview time off
           </div>
           <p className="text-xs text-gray-400 dark:text-gray-500 leading-snug">
-            Pick dates to preview affordability. Nothing is added to your calendar until you click <span className="font-semibold">Add to calendar</span>.
+            Pick a date range to see if you have enough hours — nothing is added to your calendar until you click <span className="font-semibold">Add to calendar</span>.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
