@@ -95,6 +95,50 @@ export function VacationPlanner() {
     const affordable = fitsAtStart && cumulativeShortfall === 0
     const conflictsLater = fitsAtStart && cumulativeShortfall > 0
 
+    // If the proposed trip would push other planned time off into a deficit,
+    // walk the existing entries chronologically and find the FIRST one that
+    // becomes unaffordable in the hypothetical state. Surface its details so
+    // the user knows exactly which trip is being affected.
+    let firstConflict: {
+      label: string
+      shortBy: number
+      neededHrs: number
+      availableHrs: number
+    } | null = null
+    let conflictCount = 0
+    if (conflictsLater) {
+      const futureExisting = state.plannedVacations
+        .filter(
+          (v) =>
+            v.kind !== 'logged_past' &&
+            !isBefore(parseISO(v.endDate), today),
+        )
+        .sort((a, b) => a.startDate.localeCompare(b.startDate))
+      for (const v of futureExisting) {
+        const tripStart = parseISO(v.startDate)
+        const tripEnd = parseISO(v.endDate)
+        const tripWorkDays = countWorkDays(tripStart, tripEnd, state.policy)
+        const tripHrs =
+          (v.actualHoursUsed ?? v.hoursPerDay ?? state.policy.hoursPerWorkDay) * tripWorkDays
+        const proj = projectBalance(hypotheticalState, subDays(tripStart, 1))
+        if (proj.totalAvailable < tripHrs) {
+          conflictCount++
+          if (!firstConflict) {
+            const datePart =
+              v.startDate === v.endDate
+                ? format(tripStart, 'MMM d')
+                : `${format(tripStart, 'MMM d')} – ${format(tripEnd, 'MMM d')}`
+            firstConflict = {
+              label: v.note ? `${datePart} (${v.note})` : datePart,
+              shortBy: tripHrs - proj.totalAvailable,
+              neededHrs: tripHrs,
+              availableHrs: proj.totalAvailable,
+            }
+          }
+        }
+      }
+    }
+
     let suggestion: Date | null = null
     if (!fitsAtStart) {
       suggestion = earliestAffordableDate(state, hoursNeeded, start)
@@ -116,12 +160,14 @@ export function VacationPlanner() {
       affordable,
       conflictsLater,
       cumulativeShortfall,
+      firstConflict,
+      conflictCount,
       suggestion,
       funNote,
       isPartial,
       hrsPerDay,
     }
-  }, [whatIfStart, whatIfEnd, whatIfHours, whatIfSource, state])
+  }, [whatIfStart, whatIfEnd, whatIfHours, whatIfSource, state, today])
 
   const hasAnyInput =
     !!whatIfStart || !!whatIfEnd || !!whatIfNote || !!whatIfHours || whatIfSource !== 'any'
@@ -289,18 +335,35 @@ export function VacationPlanner() {
                     {whatIfResult.affordable
                       ? 'Yes — affordable'
                       : whatIfResult.conflictsLater
-                        ? 'Conflicts with later plans'
-                        : 'Not yet affordable'}
+                        ? 'Not enough hours overall'
+                        : 'Not enough hours yet'}
                   </div>
                   {whatIfResult.affordable && whatIfResult.funNote && (
                     <div className="text-xs font-normal opacity-80 mt-0.5">
                       {whatIfResult.funNote}
                     </div>
                   )}
-                  {whatIfResult.conflictsLater && (
-                    <div className="text-xs font-normal opacity-80 mt-0.5">
-                      Adding this would leave {fmt(whatIfResult.cumulativeShortfall)} hrs short
-                      across your other planned time off.
+                  {whatIfResult.conflictsLater && whatIfResult.firstConflict && (
+                    <div className="text-xs font-normal opacity-90 mt-1 leading-snug">
+                      Adding this would leave your{' '}
+                      <span className="font-semibold">{whatIfResult.firstConflict.label}</span>{' '}
+                      time off{' '}
+                      <span className="font-semibold">
+                        {fmt(whatIfResult.firstConflict.shortBy)} hr
+                        {whatIfResult.firstConflict.shortBy === 1 ? '' : 's'} short
+                      </span>{' '}
+                      — it needs {fmt(whatIfResult.firstConflict.neededHrs)} hrs but you'd only
+                      have {fmt(whatIfResult.firstConflict.availableHrs)} hrs left by then.
+                      {whatIfResult.conflictCount > 1 && (
+                        <>
+                          {' '}
+                          <span className="opacity-80">
+                            ({whatIfResult.conflictCount - 1} other planned trip
+                            {whatIfResult.conflictCount - 1 === 1 ? '' : 's'} would also be
+                            affected.)
+                          </span>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
