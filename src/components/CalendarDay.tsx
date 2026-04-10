@@ -266,7 +266,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 
       {/* Time-off indicator — centered in cell */}
       {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
-        <div className="absolute inset-x-2 top-9 bottom-7 flex flex-col items-center justify-center">
+        <div className="absolute inset-x-2 top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
           {isPartialDay ? (
             <>
               <div className={`text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
