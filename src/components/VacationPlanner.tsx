@@ -19,9 +19,10 @@ import {
 import { useAppState } from '../context'
 import { showToast } from '../lib/toastBus'
 import {
-  projectBalance,
+  analyzeTripImpact,
   countWorkDays,
-  earliestAffordableDate,
+  earliestAffordableTripStart,
+  projectBalance,
 } from '../lib/projection'
 import type { AppState, PlannedVacation } from '../lib/types'
 
@@ -55,9 +56,6 @@ export function VacationPlanner() {
     const hoursNeeded = workDays * hrsPerDay
     const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
 
-    // Build a hypothetical state with this trip merged in. The cumulative
-    // shortfall check below uses this so the preview can see whether the
-    // proposed trip would push existing planned time off into a deficit.
     const hypotheticalTrip: PlannedVacation = {
       id: '__preview__',
       startDate: whatIfStart,
@@ -67,38 +65,28 @@ export function VacationPlanner() {
       locked: false,
       kind: 'planned',
     }
-    const hypotheticalState: AppState = {
-      ...state,
-      plannedVacations: [...state.plannedVacations, hypotheticalTrip],
-    }
 
-    // Balance the moment this trip begins, with the trip itself in the state
-    // (the trip's own deductions only start on/after `start`, so projecting
-    // to start − 1 returns the pre-trip balance after every other planned
-    // entry through that date).
-    const startProjection = projectBalance(hypotheticalState, subDays(start, 1))
-    const balanceOnStart = startProjection.totalAvailable
-    const fitsAtStart = balanceOnStart >= hoursNeeded
-
-    // Cumulative check: project the hypothetical state out to a date that
-    // covers every known planned entry (and at least the end of the year).
-    // If the engine reports any shortfall, this trip would break a later
-    // commitment even though it fits at its own start.
+    // Project across the trip AND every subsequent planned entry so we can
+    // tell three states apart:
+    //   1. trip itself fits (mid-trip accruals / Jan 1 sick grant included)
+    //   2. trip itself fits but pushes a later trip into deficit
+    //   3. trip itself does not fit
     const latestPlannedEnd = state.plannedVacations.reduce<Date>((latest, v) => {
       const e = parseISO(v.endDate)
       return e > latest ? e : latest
     }, end)
     const horizon = endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
-    const fullProjection = projectBalance(hypotheticalState, horizon)
-    const cumulativeShortfall = fullProjection.shortfall
+    const impact = analyzeTripImpact(state, hypotheticalTrip, horizon)
 
-    const affordable = fitsAtStart && cumulativeShortfall === 0
-    const conflictsLater = fitsAtStart && cumulativeShortfall > 0
+    const affordable = impact.tripItselfShortfall === 0 && impact.downstreamShortfall === 0
+    const conflictsLater =
+      impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
 
-    // If the proposed trip would push other planned time off into a deficit,
-    // walk the existing entries chronologically and find the FIRST one that
-    // becomes unaffordable in the hypothetical state. Surface its details so
-    // the user knows exactly which trip is being affected.
+    // Walk existing entries chronologically and find the FIRST one whose
+    // own affordability goes from OK → short once the proposed trip is
+    // added. Each entry is evaluated through end-of-itself so mid-entry
+    // accruals/grants are honoured (same fix as the main affordability
+    // check above).
     let firstConflict: {
       label: string
       shortBy: number
@@ -107,6 +95,10 @@ export function VacationPlanner() {
     } | null = null
     let conflictCount = 0
     if (conflictsLater) {
+      const hypotheticalState: AppState = {
+        ...state,
+        plannedVacations: [...state.plannedVacations, hypotheticalTrip],
+      }
       const futureExisting = state.plannedVacations
         .filter(
           (v) =>
@@ -115,24 +107,37 @@ export function VacationPlanner() {
         )
         .sort((a, b) => a.startDate.localeCompare(b.startDate))
       for (const v of futureExisting) {
-        const tripStart = parseISO(v.startDate)
-        const tripEnd = parseISO(v.endDate)
-        const tripWorkDays = countWorkDays(tripStart, tripEnd, state.policy)
+        const vStart = parseISO(v.startDate)
+        const vEnd = parseISO(v.endDate)
+        const tripWorkDays = countWorkDays(vStart, vEnd, state.policy)
         const tripHrs =
           (v.actualHoursUsed ?? v.hoursPerDay ?? state.policy.hoursPerWorkDay) * tripWorkDays
-        const proj = projectBalance(hypotheticalState, subDays(tripStart, 1))
-        if (proj.totalAvailable < tripHrs) {
+
+        const baselineEnd = projectBalance(state, vEnd)
+        const stateMinusV: AppState = {
+          ...hypotheticalState,
+          plannedVacations: hypotheticalState.plannedVacations.filter((p) => p.id !== v.id),
+        }
+        const beforeAdd = projectBalance(stateMinusV, vEnd)
+        const afterAdd = projectBalance(hypotheticalState, vEnd)
+        const newShortfallOnV = Math.max(
+          0,
+          afterAdd.shortfall - beforeAdd.shortfall - baselineEnd.shortfall,
+        )
+
+        if (newShortfallOnV > 0) {
           conflictCount++
           if (!firstConflict) {
             const datePart =
               v.startDate === v.endDate
-                ? format(tripStart, 'MMM d')
-                : `${format(tripStart, 'MMM d')} – ${format(tripEnd, 'MMM d')}`
+                ? format(vStart, 'MMM d')
+                : `${format(vStart, 'MMM d')} – ${format(vEnd, 'MMM d')}`
+            const availBeforeV = projectBalance(hypotheticalState, subDays(vStart, 1))
             firstConflict = {
               label: v.note ? `${datePart} (${v.note})` : datePart,
-              shortBy: tripHrs - proj.totalAvailable,
+              shortBy: newShortfallOnV,
               neededHrs: tripHrs,
-              availableHrs: proj.totalAvailable,
+              availableHrs: availBeforeV.totalAvailable,
             }
           }
         }
@@ -140,8 +145,8 @@ export function VacationPlanner() {
     }
 
     let suggestion: Date | null = null
-    if (!fitsAtStart) {
-      suggestion = earliestAffordableDate(state, hoursNeeded, start)
+    if (impact.tripItselfShortfall > 0) {
+      suggestion = earliestAffordableTripStart(state, hypotheticalTrip, start)
     }
 
     let funNote = ''
@@ -151,15 +156,25 @@ export function VacationPlanner() {
       funNote = getDay(start) === 5 ? '🎉 Long weekend ahead!' : '😎 Extended weekend!'
     else if (isPartial) funNote = '⏰ Partial day — appointment time!'
 
-    const balanceAfterTrip = balanceOnStart - hoursNeeded
+    // Hours added to balances during the trip itself — accruals from
+    // paydays inside the range plus the Jan 1 sick grant if the trip spans
+    // year-end. balanceAfter = balanceBefore + replenishment − hoursNeeded
+    // (clamped at 0 for display purposes).
+    const replenishedDuringTrip = Math.max(
+      0,
+      impact.balanceAfterTrip + hoursNeeded - impact.balanceBeforeTrip,
+    )
+
     return {
       workDays,
       hoursNeeded,
-      balanceOnStart,
-      balanceAfterTrip,
+      balanceOnStart: impact.balanceBeforeTrip,
+      balanceAfterTrip: impact.balanceAfterTrip,
+      tripItselfShortfall: impact.tripItselfShortfall,
+      replenishedDuringTrip,
       affordable,
       conflictsLater,
-      cumulativeShortfall,
+      cumulativeShortfall: impact.tripItselfShortfall + impact.downstreamShortfall,
       firstConflict,
       conflictCount,
       suggestion,
@@ -338,6 +353,14 @@ export function VacationPlanner() {
                         ? 'Not enough hours overall'
                         : 'Not enough hours yet'}
                   </div>
+                  {whatIfResult.affordable &&
+                    whatIfResult.replenishedDuringTrip > 0 &&
+                    whatIfResult.balanceOnStart < whatIfResult.hoursNeeded && (
+                      <div className="text-xs font-normal opacity-90 mt-1 leading-snug">
+                        Includes <span className="font-semibold">+{fmt(whatIfResult.replenishedDuringTrip)} hrs</span>{' '}
+                        added during the trip (e.g. Jan 1 sick grant or a payday).
+                      </div>
+                    )}
                   {whatIfResult.affordable && whatIfResult.funNote && (
                     <div className="text-xs font-normal opacity-80 mt-0.5">
                       {whatIfResult.funNote}

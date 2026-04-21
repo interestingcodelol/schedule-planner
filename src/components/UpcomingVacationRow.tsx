@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { differenceInDays, format, getDay, isBefore, parseISO, startOfDay, subDays } from 'date-fns'
+import { differenceInDays, format, getDay, isBefore, parseISO, startOfDay } from 'date-fns'
 import {
   CalendarDays,
   CheckCircle,
@@ -9,8 +9,8 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useAppState } from '../context'
-import { countWorkDays, projectBalance } from '../lib/projection'
-import type { PlannedVacation } from '../lib/types'
+import { analyzeTripImpact, countWorkDays } from '../lib/projection'
+import type { AppState, PlannedVacation } from '../lib/types'
 import { showToast } from '../lib/toastBus'
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -67,11 +67,22 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
   const hrsPerDay = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
   const hoursNeeded = workDays * hrsPerDay
   const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
-  // Project to the day before the trip so the affordability number reflects
-  // the balance available when the trip begins, not after its first day has
-  // already been deducted.
-  const projection = projectBalance(state, subDays(start, 1))
-  const affordable = projection.totalAvailable >= hoursNeeded
+  // Run the trip through analyzeTripImpact so cross-year trips get credit
+  // for the Jan 1 sick grant, mid-trip paydays, etc. The vacation is
+  // already in `state.plannedVacations`, so we evaluate it against state
+  // sans-itself to avoid double-counting.
+  const stateWithoutThis: AppState = {
+    ...state,
+    plannedVacations: state.plannedVacations.filter((v) => v.id !== vacation.id),
+  }
+  const impact = analyzeTripImpact(stateWithoutThis, vacation, end)
+  const affordable = impact.tripItselfShortfall === 0
+  const balanceOnStart = impact.balanceBeforeTrip
+  const balanceAfterTrip = impact.balanceAfterTrip
+  const replenishedDuringTrip = Math.max(
+    0,
+    balanceAfterTrip + hoursNeeded - balanceOnStart,
+  )
 
   const sourceLabel = SOURCE_LABELS[vacation.hourSource] || ''
 
@@ -191,8 +202,12 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
               className="cursor-help"
               title={
                 affordable
-                  ? `Affordable\n${fmt(projection.totalAvailable)} hrs at start of ${format(start, 'MMM d')}\n${fmt(projection.totalAvailable - hoursNeeded)} hrs left after ${format(end, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed`
-                  : `Not enough\n${fmt(projection.totalAvailable)} hrs at start of ${format(start, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed (${fmt(hoursNeeded - projection.totalAvailable)} short)`
+                  ? `Affordable\n${fmt(balanceOnStart)} hrs at start of ${format(start, 'MMM d')}\n${fmt(balanceAfterTrip)} hrs left after ${format(end, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed${
+                      replenishedDuringTrip > 0 && balanceOnStart < hoursNeeded
+                        ? `\n+${fmt(replenishedDuringTrip)} hrs added during trip (e.g. Jan 1 sick grant)`
+                        : ''
+                    }`
+                  : `Not enough\n${fmt(balanceOnStart)} hrs at start of ${format(start, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed (${fmt(impact.tripItselfShortfall)} short)`
               }
             >
               {affordable ? (

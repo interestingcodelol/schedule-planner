@@ -10,6 +10,7 @@ import {
   isSameDay,
   parseISO,
   startOfDay,
+  subDays,
 } from 'date-fns'
 import type {
   AccrualTier,
@@ -495,6 +496,126 @@ export function earliestAffordableDate(
   while (!isAfter(payday, maxDate)) {
     const result = projectBalance(state, payday)
     if (result.totalAvailable >= hoursNeeded) return payday
+    payday = addDays(payday, state.policy.payPeriodLengthDays)
+  }
+
+  return null
+}
+
+export type TripImpact = {
+  /** Hours during the proposed trip's own range that cannot be covered, even
+   *  after mid-trip accruals, the Jan 1 sick grant, the vacation carryover
+   *  cap haircut, and the bank hours payout are applied in date order. */
+  tripItselfShortfall: number
+  /** Additional shortfall AFTER the trip ends — i.e. other planned time off
+   *  that the proposed trip would push into deficit. */
+  downstreamShortfall: number
+  /** Total balance the moment the trip begins (excludes the trip's own
+   *  deductions). */
+  balanceBeforeTrip: number
+  /** Total balance after the trip ends, with the trip applied AND every
+   *  mid-trip event (sick grant, accruals, etc.) processed. */
+  balanceAfterTrip: number
+  /** Per-pool balances after the trip — useful for tooltips. */
+  vacationAfterTrip: number
+  sickAfterTrip: number
+  bankAfterTrip: number
+}
+
+/**
+ * Compute the additional shortfall a hypothetical trip would add to the
+ * user's plan. Splits the answer into trip-itself vs. downstream so the UI
+ * can distinguish "your trip doesn't fit" from "your trip pushes a later
+ * trip into deficit."
+ *
+ * The diff against a baseline projection is what makes mid-trip events
+ * (Jan 1 sick grant, paydays, Feb 1 carryover cap, bank payouts) flow
+ * through correctly: each side runs the same event engine, so anything
+ * that is NOT caused by adding the trip cancels out.
+ */
+export function analyzeTripImpact(
+  state: AppState,
+  proposedTrip: PlannedVacation,
+  horizon: Date,
+): TripImpact {
+  const tripStart = parseISO(proposedTrip.startDate)
+  const tripEnd = parseISO(proposedTrip.endDate)
+
+  const stateWithTrip: AppState = {
+    ...state,
+    plannedVacations: [...state.plannedVacations, proposedTrip],
+  }
+
+  const baselineThruEnd = projectBalance(state, tripEnd)
+  const withTripThruEnd = projectBalance(stateWithTrip, tripEnd)
+  const tripItselfShortfall = Math.max(
+    0,
+    withTripThruEnd.shortfall - baselineThruEnd.shortfall,
+  )
+
+  const baselineHorizon = projectBalance(state, horizon)
+  const withTripHorizon = projectBalance(stateWithTrip, horizon)
+  const totalAdditional = Math.max(
+    0,
+    withTripHorizon.shortfall - baselineHorizon.shortfall,
+  )
+  const downstreamShortfall = Math.max(0, totalAdditional - tripItselfShortfall)
+
+  const beforeTrip = projectBalance(state, subDays(tripStart, 1))
+
+  return {
+    tripItselfShortfall,
+    downstreamShortfall,
+    balanceBeforeTrip: beforeTrip.totalAvailable,
+    balanceAfterTrip: withTripThruEnd.totalAvailable,
+    vacationAfterTrip: withTripThruEnd.vacationBalance,
+    sickAfterTrip: withTripThruEnd.sickBalance,
+    bankAfterTrip: withTripThruEnd.bankBalance,
+  }
+}
+
+/**
+ * Find the earliest date the proposed trip could START — preserving its
+ * calendar duration and other attributes — such that the trip itself causes
+ * no shortfall. Walks forward by pay periods. Returns null if not reachable
+ * within 3 years.
+ *
+ * Unlike `earliestAffordableDate`, this respects mid-trip replenishments:
+ * a Dec 28 → Jan 5 trip funded by the Jan 1 sick grant is recognised as
+ * affordable on its requested start date.
+ */
+export function earliestAffordableTripStart(
+  state: AppState,
+  proposedTrip: PlannedVacation,
+  notBefore: Date,
+): Date | null {
+  const maxDate = addDays(new Date(), 365 * 3)
+  const tripStart = parseISO(proposedTrip.startDate)
+  const tripEnd = parseISO(proposedTrip.endDate)
+  const durationDays = differenceInCalendarDays(tripEnd, tripStart)
+
+  const tryStart = (candidate: Date): boolean => {
+    const candidateEnd = addDays(candidate, durationDays)
+    const shifted: PlannedVacation = {
+      ...proposedTrip,
+      startDate: format(candidate, 'yyyy-MM-dd'),
+      endDate: format(candidateEnd, 'yyyy-MM-dd'),
+    }
+    const impact = analyzeTripImpact(state, shifted, candidateEnd)
+    return impact.tripItselfShortfall === 0
+  }
+
+  const initial = startOfDay(notBefore)
+  if (tryStart(initial)) return initial
+
+  const lastPayday = parseISO(state.profile.lastPaydayDate)
+  let payday = addDays(lastPayday, state.policy.payPeriodLengthDays)
+  while (!isAfter(payday, initial)) {
+    payday = addDays(payday, state.policy.payPeriodLengthDays)
+  }
+
+  while (!isAfter(payday, maxDate)) {
+    if (tryStart(payday)) return payday
     payday = addDays(payday, state.policy.payPeriodLengthDays)
   }
 

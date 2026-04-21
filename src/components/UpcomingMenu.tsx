@@ -7,10 +7,11 @@ import {
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { parseISO, startOfDay, subDays } from 'date-fns'
+import { parseISO, startOfDay } from 'date-fns'
 import { CalendarDays, Palmtree } from 'lucide-react'
 import { useAppState } from '../context'
-import { projectBalance, countWorkDays } from '../lib/projection'
+import { analyzeTripImpact } from '../lib/projection'
+import type { AppState } from '../lib/types'
 import { useUpcomingItems } from '../lib/upcomingItems'
 import { navigateCalendarToDate } from '../lib/calendarNav'
 import { UpcomingVacationRow } from './UpcomingVacationRow'
@@ -41,17 +42,16 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
 
   const hasUnaffordable = useMemo(() => {
     return sortedVacations.some((v) => {
-      const start = parseISO(v.startDate)
       const end = parseISO(v.endDate)
       if (end < today) return false
-      const workDays = countWorkDays(start, end, state.policy)
-      const hrsPerDay = v.hoursPerDay ?? state.policy.hoursPerWorkDay
-      const hoursNeeded = workDays * hrsPerDay
-      // Project to the day before the trip starts so the affordability check
-      // compares hours-needed against the balance the user will actually
-      // have when the trip begins.
-      const projection = projectBalance(state, subDays(start, 1))
-      return projection.totalAvailable < hoursNeeded
+      // Same trip-aware impact check the row itself uses — gives the trip
+      // credit for mid-trip accruals and the Jan 1 sick grant.
+      const stateWithoutThis: AppState = {
+        ...state,
+        plannedVacations: state.plannedVacations.filter((p) => p.id !== v.id),
+      }
+      const impact = analyzeTripImpact(stateWithoutThis, v, end)
+      return impact.tripItselfShortfall > 0
     })
   }, [sortedVacations, state, today])
 

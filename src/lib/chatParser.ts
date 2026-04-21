@@ -17,12 +17,13 @@ import {
   isBefore,
   subDays,
 } from 'date-fns'
-import type { AppState } from './types'
+import type { AppState, PlannedVacation } from './types'
 import {
-  projectBalance,
-  countWorkDays,
-  earliestAffordableDate,
+  analyzeTripImpact,
   computeAccrualTier,
+  countWorkDays,
+  earliestAffordableTripStart,
+  projectBalance,
 } from './projection'
 
 export type ChatResponse = {
@@ -371,26 +372,14 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
   const workDays = countWorkDays(start, end, state.policy)
   const needed = workDays * hoursPerDay
 
-  // Build a hypothetical state that includes this proposed trip so the
-  // shortfall check can see whether it would push other planned time off
-  // into a deficit.
-  const hypotheticalState: AppState = {
-    ...state,
-    plannedVacations: [
-      ...state.plannedVacations,
-      {
-        id: '__chat_preview__',
-        startDate: format(start, 'yyyy-MM-dd'),
-        endDate: format(end, 'yyyy-MM-dd'),
-        hourSource: 'any',
-        locked: false,
-        kind: 'planned',
-      },
-    ],
+  const proposedTrip: PlannedVacation = {
+    id: '__chat_preview__',
+    startDate: format(start, 'yyyy-MM-dd'),
+    endDate: format(end, 'yyyy-MM-dd'),
+    hourSource: 'any',
+    locked: false,
+    kind: 'planned',
   }
-
-  const projection = projectBalance(hypotheticalState, subDays(start, 1))
-  const fitsAtStart = projection.totalAvailable >= needed
 
   const latestPlannedEnd = state.plannedVacations.reduce<Date>((latest, v) => {
     const e = parseISO(v.endDate)
@@ -398,13 +387,28 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
   }, end)
   const horizon =
     endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
-  const fullProjection = projectBalance(hypotheticalState, horizon)
-  const cumulativeShortfall = fullProjection.shortfall
 
-  const affordable = fitsAtStart && cumulativeShortfall === 0
-  const conflictsLater = fitsAtStart && cumulativeShortfall > 0
-  const remaining = projection.totalAvailable - needed
-  const earliest = !fitsAtStart ? earliestAffordableDate(state, needed, start) : null
+  const impact = analyzeTripImpact(state, proposedTrip, horizon)
+  const affordable =
+    impact.tripItselfShortfall === 0 && impact.downstreamShortfall === 0
+  const conflictsLater =
+    impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
+  const remaining = impact.balanceAfterTrip
+  const earliest =
+    impact.tripItselfShortfall > 0
+      ? earliestAffordableTripStart(state, proposedTrip, start)
+      : null
+
+  // Synthesised projection-shape for chat's existing string templates.
+  // `totalAvailable` here is the post-trip balance (what's left), matching
+  // how the templates use `projection.totalAvailable` in the "you'll have X
+  // available, leaving Y after" phrasing.
+  const projection = {
+    totalAvailable: impact.balanceAfterTrip + needed,
+    vacationBalance: impact.vacationAfterTrip,
+    sickBalance: impact.sickAfterTrip,
+    bankBalance: impact.bankAfterTrip,
+  }
 
   return {
     workDays,
@@ -412,7 +416,7 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
     projection,
     affordable,
     conflictsLater,
-    cumulativeShortfall,
+    cumulativeShortfall: impact.tripItselfShortfall + impact.downstreamShortfall,
     remaining,
     earliest,
   }

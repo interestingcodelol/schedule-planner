@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { addDays, format, subYears, previousFriday } from 'date-fns'
 import {
-  projectBalance,
-  earliestAffordableDate,
+  analyzeTripImpact,
   computeAccrualTier,
+  earliestAffordableDate,
+  earliestAffordableTripStart,
   getEffectiveCurrentBalances,
+  projectBalance,
 } from '../projection'
 import { computeHolidayDates } from '../holidays'
 import { defaultPolicy } from '../defaultPolicy'
-import type { AppState } from '../types'
+import type { AppState, PlannedVacation } from '../types'
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const today = new Date()
@@ -475,5 +477,178 @@ describe('computeHolidayDates', () => {
       (d) => d.getMonth() === 10 && d.getDate() === 27,
     )
     expect(thanksgiving).toBeDefined()
+  })
+})
+
+describe('analyzeTripImpact (cross-year affordability)', () => {
+  function tripFor(start: string, end: string, source: PlannedVacation['hourSource'] = 'any'): PlannedVacation {
+    return { id: 'preview', startDate: start, endDate: end, hourSource: source, locked: false, kind: 'planned' }
+  }
+
+  it('Dec 28 → Jan 5 trip funded by the Jan 1 sick grant is affordable even when At-Start balance < hours needed', () => {
+    // Today: Dec 27, 2025. Trip: Dec 29 (Mon) → Jan 5 (Mon). Work days:
+    // Dec 29, 30, 31, Jan 2, Jan 5 = 5 work days (Jan 1 is a holiday) = 40 hrs.
+    // Pre-Jan-1 balance: 24 vac (3 days × 8) + 0 sick + 0 bank — only enough
+    // for 3 of the 5 days. Jan 1 grants +40 sick → covers Jan 2 and Jan 5.
+    mockToday('2025-12-27')
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 24,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-26',
+      },
+      plannedVacations: [],
+    })
+
+    const trip = tripFor('2025-12-29', '2026-01-05')
+    const impact = analyzeTripImpact(state, trip, new Date('2026-02-15'))
+
+    // No leftover shortfall — Jan 1 sick grant covers the post-NYD portion.
+    expect(impact.tripItselfShortfall).toBe(0)
+    expect(impact.downstreamShortfall).toBe(0)
+    // At-start balance is below the 40 hrs needed, but the trip is still
+    // affordable thanks to the +40 sick grant in the middle.
+    expect(impact.balanceBeforeTrip).toBeLessThan(40)
+  })
+
+  it('Dec 29 → Jan 5 trip is correctly flagged short when grant is too small', () => {
+    // Same dates, but vacation balance is 16 (only 2 days of pre-Jan coverage)
+    // and sick grant is reduced to 8 hrs. 5 work-days × 8 = 40 needed; only
+    // 16 + 8 = 24 covered → 16 hrs short.
+    mockToday('2025-12-27')
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 16,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-26',
+      },
+      policy: { ...defaultPolicy, sickLeaveAnnualGrant: 8 },
+    })
+
+    const trip = tripFor('2025-12-29', '2026-01-05')
+    const impact = analyzeTripImpact(state, trip, new Date('2026-02-15'))
+    expect(impact.tripItselfShortfall).toBeGreaterThan(0)
+  })
+
+  it('Trip itself fits but pushes a later trip into deficit → downstream shortfall reported', () => {
+    mockToday('2025-12-27')
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 80,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-26',
+      },
+      policy: { ...defaultPolicy, sickLeaveAnnualGrant: 0 },
+      plannedVacations: [
+        // Existing 10-work-day trip in March needing 80 hrs of vacation.
+        {
+          id: 'march',
+          startDate: '2026-03-09',
+          endDate: '2026-03-20',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+
+    // New trip Dec 29 → Jan 2 = 4 work days × 8 = 32 hrs from vacation.
+    // Vacation goes 80 → 48; accruals between now and March add ≈ 15 hrs;
+    // March trip needs 80 hrs but only ~63 will be available → ~17 hrs of
+    // downstream shortfall.
+    const newTrip = tripFor('2025-12-29', '2026-01-02', 'vacation')
+    const impact = analyzeTripImpact(state, newTrip, new Date('2026-04-30'))
+    expect(impact.tripItselfShortfall).toBe(0)
+    expect(impact.downstreamShortfall).toBeGreaterThan(0)
+  })
+
+  it('Trip across Feb 1 carryover cap haircut still reports correct shortfall', () => {
+    // Vacation balance 200, no other plans. Trip Jan 30 → Feb 3 needs 24 hrs
+    // (Feb 2 is the only weekday between haircut + Feb 3 inclusive — wait:
+    // Jan 30 (Fri), 31 (Sat), Feb 1 (Sun), Feb 2 (Mon), Feb 3 (Tue) →
+    // 3 work days = 24 hrs. Feb 1 cap is 4.615 × 26 ≈ 120. 200 vac → cap to
+    // 120 on Feb 1, then deduct 8 for Feb 2 and 8 for Feb 3 = 104 left. The
+    // trip itself doesn't shortfall.
+    mockToday('2026-01-15')
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2020-01-01',
+        currentVacationHours: 200,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2026-01-09',
+      },
+    })
+
+    const trip = tripFor('2026-01-30', '2026-02-03', 'vacation')
+    const impact = analyzeTripImpact(state, trip, new Date('2026-03-15'))
+    expect(impact.tripItselfShortfall).toBe(0)
+  })
+
+  it('earliestAffordableTripStart returns the original date for cross-year trip with mid-trip grant', () => {
+    mockToday('2025-12-27')
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 24,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-26',
+      },
+    })
+
+    const trip: PlannedVacation = {
+      id: 'preview',
+      startDate: '2025-12-29',
+      endDate: '2026-01-05',
+      hourSource: 'any',
+      locked: false,
+      kind: 'planned',
+    }
+    // Use a local-midnight date — `new Date('YYYY-MM-DD')` parses as UTC,
+    // which can shift the day by one in non-UTC timezones.
+    const start = new Date(2025, 11, 29)
+    const earliest = earliestAffordableTripStart(state, trip, start)
+    expect(earliest).not.toBeNull()
+    if (earliest) {
+      // Should NOT be pushed out — the requested date is already affordable
+      // because of the Jan 1 sick grant.
+      expect(format(earliest, 'yyyy-MM-dd')).toBe('2025-12-29')
+    }
+  })
+
+  it('Same-year trip with insufficient hours is still flagged short (no false positives)', () => {
+    mockToday('2025-06-15')
+
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 8,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+      },
+    })
+
+    const trip = tripFor('2025-07-07', '2025-07-11')
+    const impact = analyzeTripImpact(state, trip, new Date('2025-12-31'))
+    expect(impact.tripItselfShortfall).toBeGreaterThan(0)
   })
 })
