@@ -391,14 +391,15 @@ export function projectBalance(
 
       if (cap !== null && vacationBalance > cap) {
         const adjustment = cap - vacationBalance
-        totalCarryoverAdjustment += Math.abs(adjustment)
+        const paidOut = Math.abs(adjustment)
+        totalCarryoverAdjustment += paidOut
         vacationBalance = cap
         events.push({
           date: format(pe.date, 'yyyy-MM-dd'),
           type: 'carryover_adjustment',
           delta: adjustment,
           runningBalance: vacationBalance,
-          label: `Carryover cap: ${cap.toFixed(2)} hrs`,
+          label: `Carryover cap ${cap.toFixed(2)} hrs — ${paidOut.toFixed(2)} hrs paid out`,
         })
       }
     } else if (pe.type === 'bank_payout') {

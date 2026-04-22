@@ -33,7 +33,7 @@ const HOLIDAY_EMOJI: Record<string, string> = {
   'Labor Day': '⚒️',
   'Veterans Day': '🎖️',
   'Thanksgiving Day': '🦃',
-  'Day after Thanksgiving': '🥧',
+  'Day after Thanksgiving': '🛍️',
   'Christmas Eve': '🎄',
   'Christmas Day': '🎁',
 }
@@ -82,11 +82,17 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     return isSameDay(payday, date)
   }, [date, state.profile.lastPaydayDate, state.policy.payPeriodLengthDays])
 
-  const projectedBalance = useMemo(() => {
+  const projectedBalances = useMemo(() => {
     if (isPast && !isToday) return null
     const result = projectBalance(state, date)
-    return result.totalAvailable
+    return {
+      total: result.totalAvailable,
+      vacation: result.vacationBalance,
+      sick: result.sickBalance,
+      bank: result.bankBalance,
+    }
   }, [state, date, isPast, isToday])
+  const projectedBalance = projectedBalances?.total ?? null
 
   const isLoggedPast = plannedVacation?.kind === 'logged_past'
   const deductHours =
@@ -168,12 +174,15 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       }
     }
 
-    if (projectedBalance !== null && !isPast) {
+    if (projectedBalances !== null && !isPast) {
       const isWorkVacationDay = isPlannedVacation && !isWeekend && !isHolidayDay
+      const header = isWorkVacationDay
+        ? `Balance after this day's time off: ${fmt(projectedBalances.total)} hrs`
+        : `Balance: ${fmt(projectedBalances.total)} hrs`
       parts.push(
-        isWorkVacationDay
-          ? `Balance after this day's time off: ${fmt(projectedBalance)} hrs`
-          : `Balance: ${fmt(projectedBalance)} hrs`,
+        `${header}\n  • Vacation: ${fmt(projectedBalances.vacation)} hrs` +
+          `\n  • Sick: ${fmt(projectedBalances.sick)} hrs` +
+          `\n  • Bank: ${fmt(projectedBalances.bank)} hrs`,
       )
     }
 
@@ -312,8 +321,10 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         </div>
       )}
 
-      {/* Balance badge — bottom right, always */}
-      {isCurrentMonth && projectedBalance !== null && !isPast && !isWeekend && (
+      {/* Balance badge — bottom right, hidden on holidays to avoid overlap
+          with the holiday-name label (no balance change happens on a holiday
+          anyway, so there's nothing useful to show). */}
+      {isCurrentMonth && projectedBalance !== null && !isPast && !isWeekend && !isHolidayDay && (
         <div className="absolute bottom-1 right-1">
           <span
             className={`text-sm tabular-nums font-bold px-1.5 py-0.5 rounded ${
@@ -327,9 +338,9 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         </div>
       )}
 
-      {/* Holiday name — bottom left */}
+      {/* Holiday name — bottom, full width since the balance badge is hidden */}
       {isHolidayDay && isCurrentMonth && (
-        <div className="absolute bottom-0.5 left-1 right-8 text-[11px] text-amber-600 dark:text-amber-300 truncate font-bold drop-shadow-sm">
+        <div className="absolute bottom-0.5 left-1 right-1 text-[11px] text-amber-600 dark:text-amber-300 truncate font-bold drop-shadow-sm">
           {holidayName}
         </div>
       )}

@@ -154,7 +154,7 @@ export function StatusCards() {
         value={`${fmt(yearEndProjection.totalAvailable)} hrs`}
         sub={
           exceedsCap
-            ? `Vac ${fmt(yearEndProjection.vacationBalance)} · cap ${Math.round(carryoverCap!)} · ${fmt(yearEndProjection.vacationBalance - carryoverCap!)}h at risk`
+            ? `Vac ${fmt(yearEndProjection.vacationBalance)} · cap ${Math.round(carryoverCap!)} · ${fmt(yearEndProjection.vacationBalance - carryoverCap!)}h will be paid out`
             : `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)} · Bank ${fmt(yearEndProjection.bankBalance)}`
         }
         accent={
@@ -165,7 +165,7 @@ export function StatusCards() {
         glow={exceedsCap ? 'glow-amber' : undefined}
         badge={
           exceedsCap ? (
-            <span className="text-amber-500" title={`Vacation exceeds ${fmt(carryoverCap!)} hr carryover cap — ${fmt(yearEndProjection.vacationBalance - carryoverCap!)} hrs at risk of forfeiture`}>
+            <span className="text-amber-500" title={`Vacation exceeds ${fmt(carryoverCap!)} hr carryover cap — ${fmt(yearEndProjection.vacationBalance - carryoverCap!)} hrs will be paid out on the first pay date in February (if not used during January)`}>
               <AlertTriangle className="w-4 h-4" />
             </span>
           ) : undefined

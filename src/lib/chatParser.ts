@@ -367,6 +367,11 @@ function describeDateRange(start: Date, end: Date): string {
   return `${format(start, 'MMM d')} – ${format(end, 'MMM d')}`
 }
 
+// Sub-0.01-hour shortfalls come from tier rates like 3.076 hrs/pp that don't
+// round cleanly; treat them as zero so a precisely-covered trip doesn't read
+// back as "0 hrs short".
+const SHORTFALL_EPSILON = 0.01
+
 function analyzeRange(state: AppState, start: Date, end: Date) {
   const hoursPerDay = state.policy.hoursPerWorkDay
   const workDays = countWorkDays(start, end, state.policy)
@@ -389,20 +394,20 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
     endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
 
   const impact = analyzeTripImpact(state, proposedTrip, horizon)
-  const affordable =
-    impact.tripItselfShortfall === 0 && impact.downstreamShortfall === 0
-  const conflictsLater =
-    impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
-  const remaining = impact.balanceAfterTrip
+  const tripShort = impact.tripItselfShortfall < SHORTFALL_EPSILON ? 0 : impact.tripItselfShortfall
+  const downstreamShort =
+    impact.downstreamShortfall < SHORTFALL_EPSILON ? 0 : impact.downstreamShortfall
+  const affordable = tripShort === 0 && downstreamShort === 0
+  const conflictsLater = tripShort === 0 && downstreamShort > 0
+  const allHolidayOrWeekend = workDays === 0
+  const remaining = Math.max(0, impact.balanceAfterTrip)
   const earliest =
-    impact.tripItselfShortfall > 0
-      ? earliestAffordableTripStart(state, proposedTrip, start)
-      : null
+    tripShort > 0 ? earliestAffordableTripStart(state, proposedTrip, start) : null
 
   // Synthesised projection-shape for chat's existing string templates.
-  // `totalAvailable` here is the post-trip balance (what's left), matching
-  // how the templates use `projection.totalAvailable` in the "you'll have X
-  // available, leaving Y after" phrasing.
+  // `totalAvailable` here is the hours available FOR the trip (start balance
+  // plus any mid-trip replenishment), matching how the templates use it in
+  // the "you'll have X available, leaving Y after" phrasing.
   const projection = {
     totalAvailable: impact.balanceAfterTrip + needed,
     vacationBalance: impact.vacationAfterTrip,
@@ -416,7 +421,10 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
     projection,
     affordable,
     conflictsLater,
-    cumulativeShortfall: impact.tripItselfShortfall + impact.downstreamShortfall,
+    allHolidayOrWeekend,
+    cumulativeShortfall: tripShort + downstreamShort,
+    tripShortfall: tripShort,
+    downstreamShortfall: downstreamShort,
     remaining,
     earliest,
   }
@@ -531,10 +539,17 @@ export function processChat(input: string, state: AppState): ChatResponse {
       endDate: format(range.end, 'yyyy-MM-dd'),
     }
 
+    if (a.allHolidayOrWeekend) {
+      return {
+        text: `**${label}** falls entirely on weekends and/or holidays — **no PTO needed**. You'd have **${fmt(a.projection.totalAvailable)} hrs** available if you needed them.`,
+      }
+    }
+
     if (isQuestion && !isRequest) {
       if (a.affordable) {
+        const tightness = a.remaining < 0.5 ? ' — it\'s a tight fit with nothing to spare.' : ''
         return {
-          text: `**Yes.** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.`,
+          text: `**Yes.** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.${tightness}`,
           action,
         }
       }
@@ -543,16 +558,19 @@ export function processChat(input: string, state: AppState): ChatResponse {
           text: `**Conflicts with later plans.** ${label} fits at the start (you'd have **${fmt(a.projection.totalAvailable)} hrs**, need **${fmt(a.needed)} hrs**) but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** across your other planned time off.`,
         }
       }
-      let text = `**Not enough hours.** ${label} needs **${fmt(a.needed)} hrs** (${a.workDays} days) but you'll only have **${fmt(a.projection.totalAvailable)} hrs** — **${fmt(Math.abs(a.remaining))} hrs short**.`
+      let text = `**Not enough hours.** ${label} needs **${fmt(a.needed)} hrs** (${a.workDays} days) but you'll only have **${fmt(a.projection.totalAvailable)} hrs** — **${fmt(a.tripShortfall)} hrs short**.`
       if (a.earliest) {
         text += `\n\nYou'd have enough by **${format(a.earliest, 'MMM d, yyyy')}** (${differenceInDays(a.earliest, range.start)} days later).`
+      } else {
+        text += `\n\nNot reachable within the next 3 years at your current accrual rate.`
       }
       return { text }
     }
 
     if (a.affordable) {
+      const tightness = a.remaining < 0.5 ? ' — tight fit!' : ''
       return {
-        text: `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after).`,
+        text: `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after).${tightness}`,
         action,
       }
     }
@@ -562,7 +580,7 @@ export function processChat(input: string, state: AppState): ChatResponse {
         action,
       }
     }
-    let text = `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'd be **${fmt(Math.abs(a.remaining))} hrs short** (only ${fmt(a.projection.totalAvailable)} hrs available).`
+    let text = `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'd be **${fmt(a.tripShortfall)} hrs short** (only ${fmt(a.projection.totalAvailable)} hrs available).`
     if (a.earliest) {
       text += ` You could afford it by **${format(a.earliest, 'MMM d')}**.`
     }

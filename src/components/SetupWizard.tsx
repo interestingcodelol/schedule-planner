@@ -15,6 +15,7 @@ export function SetupWizard({ onComplete }: Props) {
   const [hireDate, setHireDate] = useState('')
   const [vacationHours, setVacationHours] = useState('')
   const [sickHours, setSickHours] = useState('')
+  const [bankHours, setBankHours] = useState('')
   const [lastPayday, setLastPayday] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -47,6 +48,10 @@ export function SetupWizard({ onComplete }: Props) {
       newErrors.sickHours = 'Must be a non-negative number'
     }
 
+    if (bankHours && (isNaN(Number(bankHours)) || Number(bankHours) < 0)) {
+      newErrors.bankHours = 'Must be a non-negative number'
+    }
+
     if (!lastPayday) {
       newErrors.lastPayday = 'Last payday date is required'
     } else {
@@ -71,7 +76,7 @@ export function SetupWizard({ onComplete }: Props) {
         hireDate,
         currentVacationHours: Number(vacationHours),
         currentSickHours: Number(sickHours) || 0,
-        currentBankHours: 0,
+        currentBankHours: Number(bankHours) || 0,
         lastPaydayDate: lastPayday,
         timezone: (() => {
           try {
@@ -184,10 +189,10 @@ export function SetupWizard({ onComplete }: Props) {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Current vacation hours <span className="text-red-400">*</span>
+                    Vacation <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="number"
@@ -195,7 +200,8 @@ export function SetupWizard({ onComplete }: Props) {
                     min="0"
                     value={vacationHours}
                     onChange={(e) => setVacationHours(e.target.value)}
-                    placeholder="e.g. 47.30"
+                    placeholder="47.30"
+                    title="Your current vacation hour balance"
                     className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   {errors.vacationHours && (
@@ -204,7 +210,7 @@ export function SetupWizard({ onComplete }: Props) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">
-                    Current sick hours
+                    Sick
                   </label>
                   <input
                     type="number"
@@ -212,14 +218,36 @@ export function SetupWizard({ onComplete }: Props) {
                     min="0"
                     value={sickHours}
                     onChange={(e) => setSickHours(e.target.value)}
-                    placeholder="e.g. 20"
+                    placeholder="40"
+                    title="Your current sick hour balance"
                     className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   {errors.sickHours && (
                     <p className="text-red-400 text-sm mt-1">{errors.sickHours}</p>
                   )}
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    Bank
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={bankHours}
+                    onChange={(e) => setBankHours(e.target.value)}
+                    placeholder="0"
+                    title="Extra hours worked that can be used as PTO — leave blank if none"
+                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  {errors.bankHours && (
+                    <p className="text-red-400 text-sm mt-1">{errors.bankHours}</p>
+                  )}
+                </div>
               </div>
+              <p className="text-xs text-gray-500 -mt-2">
+                Sick and bank hours are optional — enter 0 or leave blank if you don't have any.
+              </p>
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1">
