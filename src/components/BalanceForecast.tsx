@@ -140,8 +140,12 @@ export function BalanceForecast() {
 
   const hoverX = hoverDate ? xForDate(hoverDate) : null
   const hoverY = hoverProjection !== null ? yFor(hoverProjection.vacation) : null
+  // Clamp the tooltip's horizontal center so the whole pill stays inside
+  // the card even when the user hovers at the very start / end of the
+  // chart. The 2-line layout is ~120px wide; card SVG is ~320px, so half
+  // the tooltip is ~19% of the card width — 20/80 keeps a small margin.
   const tooltipLeftPct =
-    hoverX !== null ? Math.max(14, Math.min(86, (hoverX / W) * 100)) : 50
+    hoverX !== null ? Math.max(20, Math.min(80, (hoverX / W) * 100)) : 50
 
   const fmtH = (n: number) =>
     Number.isInteger(n) ? `${n}h` : `${(Math.round(n * 10) / 10).toFixed(1)}h`
@@ -156,7 +160,7 @@ export function BalanceForecast() {
             className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300"
             title="Projected vacation balance through year-end. Sick and bank hours are not shown because they aren't subject to the carryover cap."
           >
-            Vacation Forecast
+            Vacation Hours Forecast
           </h3>
         </div>
         <div className="ml-auto flex items-baseline gap-2 text-sm tabular-nums">
@@ -275,15 +279,20 @@ export function BalanceForecast() {
 
           {hoverDate && hoverProjection !== null && (
             <div
-              className="absolute pointer-events-none -translate-x-1/2 -translate-y-1 bg-gray-900 dark:bg-gray-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap ring-1 ring-white/10"
+              className="absolute pointer-events-none -translate-x-1/2 -translate-y-1 bg-gray-900 dark:bg-gray-800 text-white text-[11px] leading-tight px-2 py-1.5 rounded-lg shadow-lg whitespace-nowrap ring-1 ring-white/10"
               style={{ left: `${tooltipLeftPct}%`, top: 0 }}
             >
-              <span className="font-bold tabular-nums">{fmtH(hoverProjection.vacation)}</span>
-              <span className="text-gray-400 text-[10px] ml-1">vac</span>
-              <span className="text-gray-500 mx-1.5">·</span>
-              <span className="tabular-nums text-gray-300">{fmtH(hoverProjection.total)}</span>
-              <span className="text-gray-400 text-[10px] ml-1">total</span>
-              <span className="text-gray-300 ml-2">{format(hoverDate, 'EEE, MMM d')}</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-bold tabular-nums text-[13px]">
+                  {fmtH(hoverProjection.vacation)}
+                </span>
+                <span className="text-gray-400 text-[10px]">
+                  {format(hoverDate, 'MMM d')}
+                </span>
+              </div>
+              <div className="text-gray-400 text-[10px] tabular-nums mt-0.5">
+                {fmtH(hoverProjection.total)} total available
+              </div>
             </div>
           )}
         </div>
