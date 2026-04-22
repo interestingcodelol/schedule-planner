@@ -5,6 +5,8 @@ import {
   computeAccrualTier,
   earliestAffordableDate,
   earliestAffordableTripStart,
+  firstPaydayOnOrAfter,
+  getCarryoverPayoutDate,
   getEffectiveCurrentBalances,
   projectBalance,
 } from '../projection'
@@ -132,7 +134,9 @@ describe('projectBalance', () => {
       (e) => e.type === 'carryover_adjustment',
     )
     expect(carryoverEvents.length).toBe(1)
-    expect(carryoverEvents[0].date).toBe('2026-02-01')
+    // lastPaydayDate is 2025-06-13 (Friday); biweekly paydays put the first
+    // payday on/after Feb 1, 2026 at Feb 6, 2026.
+    expect(carryoverEvents[0].date).toBe('2026-02-06')
     expect(carryoverEvents[0].delta).toBeLessThan(0) // It's a reduction
     // After the haircut, balance should be at cap
     expect(carryoverEvents[0].runningBalance).toBeCloseTo(120.12, 0)
@@ -379,6 +383,46 @@ describe('getEffectiveCurrentBalances (timezone-aware EOD cutoff)', () => {
     const eff = getEffectiveCurrentBalances(state)
     // Sick should remain at 16, not 12 — the entry already drained it on creation.
     expect(eff.sick).toBe(16)
+  })
+})
+
+describe('carryover payout date snapping', () => {
+  it('firstPaydayOnOrAfter returns the anchor itself when it lines up with a payday', () => {
+    const lastPayday = new Date(2025, 11, 26) // Dec 26, 2025 (Fri)
+    const anchor = new Date(2026, 0, 9) // Jan 9, 2026 — exactly 14 days later
+    const result = firstPaydayOnOrAfter(lastPayday, 14, anchor)
+    expect(format(result, 'yyyy-MM-dd')).toBe('2026-01-09')
+  })
+
+  it('firstPaydayOnOrAfter walks forward to the next payday when the anchor is mid-cycle', () => {
+    const lastPayday = new Date(2025, 5, 13) // Jun 13, 2025 (Fri)
+    const anchor = new Date(2026, 1, 1) // Feb 1, 2026 (Sun)
+    const result = firstPaydayOnOrAfter(lastPayday, 14, anchor)
+    // 2025-06-13 + 17*14 days = 2026-02-06
+    expect(format(result, 'yyyy-MM-dd')).toBe('2026-02-06')
+  })
+
+  it('getCarryoverPayoutDate snaps to the first Feb payday for the given year', () => {
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2020-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+      },
+    })
+    const date = getCarryoverPayoutDate(state, 2026)
+    expect(date).not.toBeNull()
+    expect(format(date!, 'yyyy-MM-dd')).toBe('2026-02-06')
+  })
+
+  it('getCarryoverPayoutDate returns null when policy strategy is unlimited', () => {
+    const state = makeState({
+      policy: { ...defaultPolicy, carryoverCapStrategy: 'unlimited' },
+    })
+    expect(getCarryoverPayoutDate(state, 2026)).toBeNull()
   })
 })
 

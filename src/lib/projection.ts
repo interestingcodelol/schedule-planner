@@ -139,6 +139,44 @@ function generatePaydays(
 }
 
 /**
+ * First payday on or after `anchor`, computed from the stored lastPayday
+ * anchor and the configured pay-period length. Used to snap the carryover
+ * payout event to an actual pay date (e.g., "first pay date in February")
+ * rather than a literal calendar day.
+ */
+export function firstPaydayOnOrAfter(
+  lastPayday: Date,
+  periodDays: number,
+  anchor: Date,
+): Date {
+  let payday = startOfDay(lastPayday)
+  while (isBefore(payday, anchor)) {
+    payday = addDays(payday, periodDays)
+  }
+  return payday
+}
+
+/**
+ * The concrete date on which the vacation carryover cap payout will fire for
+ * a given calendar year: the first payday on or after the
+ * `carryoverPayoutDate` anchor. Returns null if the policy has no carryover
+ * cap (strategy = 'unlimited').
+ */
+export function getCarryoverPayoutDate(
+  state: AppState,
+  year: number,
+): Date | null {
+  if (state.policy.carryoverCapStrategy === 'unlimited') return null
+  const anchor = new Date(
+    year,
+    state.policy.carryoverPayoutDate.month - 1,
+    state.policy.carryoverPayoutDate.day,
+  )
+  const lastPayday = parseISO(state.profile.lastPaydayDate)
+  return firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, anchor)
+}
+
+/**
  * Check if a date is a work day (in workDaysPerWeek and not a holiday).
  */
 function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean {
@@ -303,10 +341,18 @@ export function projectBalance(
   }
 
   for (let y = startYear; y <= endYear; y++) {
-    const payoutDate = new Date(
+    // The policy date is an anchor ("Feb 1" by default); the actual event
+    // fires on the first payday on or after that date so it lands on a real
+    // pay cycle rather than a random calendar day.
+    const anchor = new Date(
       y,
       state.policy.carryoverPayoutDate.month - 1,
       state.policy.carryoverPayoutDate.day,
+    )
+    const payoutDate = firstPaydayOnOrAfter(
+      lastPayday,
+      state.policy.payPeriodLengthDays,
+      anchor,
     )
     if (isAfter(payoutDate, today) && !isAfter(payoutDate, target)) {
       pendingEvents.push({

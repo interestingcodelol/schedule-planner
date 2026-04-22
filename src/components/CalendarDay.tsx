@@ -12,7 +12,7 @@ import {
 } from 'date-fns'
 import { Lock, Unlock } from 'lucide-react'
 import { useAppState } from '../context'
-import { projectBalance } from '../lib/projection'
+import { getCarryoverPayoutDate, projectBalance } from '../lib/projection'
 import { getHolidayName } from '../lib/holidays'
 import { formatTimeCompact, isWorkDayOverInZone } from '../lib/timeUtils'
 
@@ -82,17 +82,33 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     return isSameDay(payday, date)
   }, [date, state.profile.lastPaydayDate, state.policy.payPeriodLengthDays])
 
-  const projectedBalances = useMemo(() => {
+  const projection = useMemo(() => {
     if (isPast && !isToday) return null
-    const result = projectBalance(state, date)
-    return {
-      total: result.totalAvailable,
-      vacation: result.vacationBalance,
-      sick: result.sickBalance,
-      bank: result.bankBalance,
-    }
+    return projectBalance(state, date)
   }, [state, date, isPast, isToday])
+  const projectedBalances = projection
+    ? {
+        total: projection.totalAvailable,
+        vacation: projection.vacationBalance,
+        sick: projection.sickBalance,
+        bank: projection.bankBalance,
+      }
+    : null
   const projectedBalance = projectedBalances?.total ?? null
+
+  // Is this cell the vacation carryover payout day for its year? If so, find
+  // the matching event (may be absent when the projected balance didn't
+  // exceed the cap — in that case the anchor day is still shown, but with
+  // "no payout this year").
+  const carryoverPayout = useMemo(() => {
+    const payoutDate = getCarryoverPayoutDate(state, date.getFullYear())
+    if (!payoutDate || !isSameDay(payoutDate, date)) return null
+    const isoDate = format(date, 'yyyy-MM-dd')
+    const evt = projection?.events.find(
+      (e) => e.type === 'carryover_adjustment' && e.date === isoDate,
+    )
+    return { amount: evt ? Math.abs(evt.delta) : 0 }
+  }, [state, date, projection])
 
   const isLoggedPast = plannedVacation?.kind === 'logged_past'
   const deductHours =
@@ -135,6 +151,18 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         const tier = state.policy.accrualTiers.find(t => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears))
         return tier?.hoursPerPayPeriod ?? 0
       })() : 0)} hrs vacation`)
+    }
+
+    if (carryoverPayout && !isPast) {
+      if (carryoverPayout.amount > 0) {
+        parts.push(
+          `💵 Vacation carryover payout — ${fmt(carryoverPayout.amount)} hrs paid out (first pay date in ${format(date, 'MMMM')})`,
+        )
+      } else {
+        parts.push(
+          `💵 Carryover payout date (first pay date in ${format(date, 'MMMM')}) — no excess to pay out`,
+        )
+      }
     }
 
     if (isPlannedVacation && isPast) {
@@ -209,6 +237,8 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     } else {
       bgClass = 'bg-blue-50 dark:bg-blue-950/30'
     }
+  } else if (carryoverPayout && carryoverPayout.amount > 0 && isCurrentMonth && !isPast) {
+    bgClass = 'bg-gradient-to-br from-amber-50/40 to-yellow-50/30 dark:from-amber-950/20 dark:to-yellow-950/15'
   } else if (isPayday && isCurrentMonth && !isPast) {
     bgClass = 'bg-gradient-to-br from-emerald-50/30 to-green-50/20 dark:from-emerald-950/15 dark:to-green-950/10'
   } else if (isWeekend && isCurrentMonth) {
@@ -245,7 +275,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         transition-colors duration-75
       `}
       title={buildTooltip()}
-      aria-label={`${format(date, 'MMMM d, yyyy')}${isToday ? ', today' : ''}${isHolidayDay ? `, ${holidayName}` : ''}${isPlannedVacation ? ', planned time off' : ''}${isPayday ? ', payday' : ''}`}
+      aria-label={`${format(date, 'MMMM d, yyyy')}${isToday ? ', today' : ''}${isHolidayDay ? `, ${holidayName}` : ''}${isPlannedVacation ? ', planned time off' : ''}${isPayday ? ', payday' : ''}${carryoverPayout && carryoverPayout.amount > 0 ? `, vacation carryover payout of ${fmt(carryoverPayout.amount)} hours` : ''}`}
     >
       {/* Day number row */}
       <div className="flex items-center justify-between">
@@ -265,6 +295,18 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
           )}
           {isPayday && isCurrentMonth && !isPast && (
             <span className="text-sm leading-none">💰</span>
+          )}
+          {carryoverPayout && isCurrentMonth && !isPast && (
+            <span
+              className="text-sm leading-none"
+              title={
+                carryoverPayout.amount > 0
+                  ? `Vacation carryover payout — ${fmt(carryoverPayout.amount)} hrs paid out`
+                  : 'Vacation carryover payout date (no excess this year)'
+              }
+            >
+              💵
+            </span>
           )}
           {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
             <span
