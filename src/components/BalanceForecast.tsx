@@ -26,16 +26,25 @@ export function BalanceForecast() {
     [today, yearEnd],
   )
 
+  // The chart line and cap line must reference the same quantity for the
+  // "projected to exceed" warning to line up visually with what the user
+  // sees on the graph. The carryover cap applies to vacation only (not
+  // sick/bank), so the forecast series here tracks vacation balance —
+  // otherwise a user with lots of sick hours could see the total line above
+  // the cap without their vacation ever reaching it.
   const samples = useMemo(() => {
-    const out: Array<{ date: Date; total: number }> = []
-    out.push({ date: today, total: projectBalance(state, today).totalAvailable })
+    const out: Array<{ date: Date; total: number; vacation: number }> = []
+    const first = projectBalance(state, today)
+    out.push({ date: today, total: first.totalAvailable, vacation: first.vacationBalance })
     let cursor = addDays(today, 7)
     while (cursor <= yearEnd) {
-      out.push({ date: cursor, total: projectBalance(state, cursor).totalAvailable })
+      const p = projectBalance(state, cursor)
+      out.push({ date: cursor, total: p.totalAvailable, vacation: p.vacationBalance })
       cursor = addDays(cursor, 7)
     }
     if (out[out.length - 1].date.getTime() !== yearEnd.getTime()) {
-      out.push({ date: yearEnd, total: projectBalance(state, yearEnd).totalAvailable })
+      const p = projectBalance(state, yearEnd)
+      out.push({ date: yearEnd, total: p.totalAvailable, vacation: p.vacationBalance })
     }
     return out
   }, [state, today, yearEnd])
@@ -60,7 +69,7 @@ export function BalanceForecast() {
   const innerW = W - PAD_L - PAD_R
   const innerH = H - PAD_T - PAD_B
 
-  const dataMax = Math.max(...samples.map((s) => s.total), carryoverCap ?? 0)
+  const dataMax = Math.max(...samples.map((s) => s.vacation), carryoverCap ?? 0)
   const yMin = 0
   const yMax = Math.max(dataMax * 1.12, 1)
   const yRange = yMax - yMin || 1
@@ -76,18 +85,23 @@ export function BalanceForecast() {
   const linePath = samples
     .map(
       (s, i) =>
-        `${i === 0 ? 'M' : 'L'} ${xForIndex(i).toFixed(2)} ${yFor(s.total).toFixed(2)}`,
+        `${i === 0 ? 'M' : 'L'} ${xForIndex(i).toFixed(2)} ${yFor(s.vacation).toFixed(2)}`,
     )
     .join(' ')
   const baselineY = yFor(yMin)
   const areaPath = `${linePath} L ${xForIndex(samples.length - 1).toFixed(2)} ${baselineY.toFixed(2)} L ${xForIndex(0).toFixed(2)} ${baselineY.toFixed(2)} Z`
 
   const capY = carryoverCap !== null ? yFor(carryoverCap) : null
+  const yearEndVacation = samples[samples.length - 1].vacation
+  const todayVacation = samples[0].vacation
+  const yearEndDelta = yearEndVacation - todayVacation
+  // The Feb haircut compares vacation balance at the carryover event
+  // against the cap. Year-end vacation is a tight upper bound for what that
+  // balance will be when the haircut fires (Jan accruals are small and the
+  // event fires early Feb), so use it as the trigger.
   const capExceeded =
-    carryoverCap !== null && samples.some((s) => s.total > carryoverCap)
-  const yearEndHours = samples[samples.length - 1].total
-  const todayHours = samples[0].total
-  const yearEndDelta = yearEndHours - todayHours
+    carryoverCap !== null && yearEndVacation > carryoverCap
+  const capExcess = capExceeded ? yearEndVacation - (carryoverCap as number) : 0
 
   const monthTicks = useMemo(() => {
     const ticks: Array<{ x: number; label: string }> = []
@@ -109,7 +123,8 @@ export function BalanceForecast() {
 
   const hoverProjection = useMemo(() => {
     if (!hoverDate) return null
-    return projectBalance(state, hoverDate).totalAvailable
+    const p = projectBalance(state, hoverDate)
+    return { vacation: p.vacationBalance, total: p.totalAvailable }
   }, [state, hoverDate])
 
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -124,7 +139,7 @@ export function BalanceForecast() {
   const onPointerLeave = () => setHoverDate(null)
 
   const hoverX = hoverDate ? xForDate(hoverDate) : null
-  const hoverY = hoverProjection !== null ? yFor(hoverProjection) : null
+  const hoverY = hoverProjection !== null ? yFor(hoverProjection.vacation) : null
   const tooltipLeftPct =
     hoverX !== null ? Math.max(14, Math.min(86, (hoverX / W) * 100)) : 50
 
@@ -137,17 +152,20 @@ export function BalanceForecast() {
       <div className="px-4 pt-3 pb-2 flex items-baseline gap-3 flex-wrap">
         <div className="flex items-center gap-1.5">
           <TrendingUp className="w-4 h-4 text-blue-500" />
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300">
-            Forecast
+          <h3
+            className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300"
+            title="Projected vacation balance through year-end. Sick and bank hours are not shown because they aren't subject to the carryover cap."
+          >
+            Vacation Forecast
           </h3>
         </div>
         <div className="ml-auto flex items-baseline gap-2 text-sm tabular-nums">
           <span className="font-bold text-gray-700 dark:text-gray-100">
-            {fmtH(todayHours)}
+            {fmtH(todayVacation)}
           </span>
           <span className="text-gray-400 dark:text-gray-500 text-xs">→ Dec 31</span>
           <span className="font-bold text-gray-700 dark:text-gray-100">
-            {fmtH(yearEndHours)}
+            {fmtH(yearEndVacation)}
           </span>
           <span
             className={`text-sm font-bold inline-flex items-center gap-0.5 ${
@@ -177,7 +195,7 @@ export function BalanceForecast() {
             onPointerDown={onPointerMove}
             onPointerLeave={onPointerLeave}
             role="img"
-            aria-label="Projected total hours from today through end of year"
+            aria-label="Projected vacation balance from today through end of year"
           >
             <defs>
               <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
@@ -211,7 +229,7 @@ export function BalanceForecast() {
 
             <circle
               cx={xForIndex(0)}
-              cy={yFor(samples[0].total)}
+              cy={yFor(samples[0].vacation)}
               r="2.25"
               fill="rgb(59, 130, 246)"
               stroke="white"
@@ -260,8 +278,12 @@ export function BalanceForecast() {
               className="absolute pointer-events-none -translate-x-1/2 -translate-y-1 bg-gray-900 dark:bg-gray-800 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap ring-1 ring-white/10"
               style={{ left: `${tooltipLeftPct}%`, top: 0 }}
             >
-              <span className="font-bold tabular-nums">{fmtH(hoverProjection)}</span>
-              <span className="text-gray-300 ml-1.5">{format(hoverDate, 'EEE, MMM d')}</span>
+              <span className="font-bold tabular-nums">{fmtH(hoverProjection.vacation)}</span>
+              <span className="text-gray-400 text-[10px] ml-1">vac</span>
+              <span className="text-gray-500 mx-1.5">·</span>
+              <span className="tabular-nums text-gray-300">{fmtH(hoverProjection.total)}</span>
+              <span className="text-gray-400 text-[10px] ml-1">total</span>
+              <span className="text-gray-300 ml-2">{format(hoverDate, 'EEE, MMM d')}</span>
             </div>
           )}
         </div>
@@ -276,8 +298,16 @@ export function BalanceForecast() {
                 Vacation cap{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtHRound(carryoverCap)}
-                </span>{' '}
-                — projected to exceed; excess is paid out in February.
+                </span>
+                {' '}— projected to reach{' '}
+                <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
+                  {fmtH(yearEndVacation)}
+                </span>
+                ; ~
+                <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
+                  {fmtH(capExcess)}
+                </span>
+                {' '}paid out at first Feb pay date if unused.
               </span>
             </>
           ) : (
