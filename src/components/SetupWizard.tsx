@@ -70,6 +70,13 @@ export function SetupWizard({ onComplete }: Props) {
   }
 
   const handleFinish = () => {
+    const detectedTz = (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
+      } catch {
+        return 'America/New_York'
+      }
+    })()
     const state: AppState = {
       profile: {
         displayName: displayName || 'User',
@@ -78,13 +85,11 @@ export function SetupWizard({ onComplete }: Props) {
         currentSickHours: Number(sickHours) || 0,
         currentBankHours: Number(bankHours) || 0,
         lastPaydayDate: lastPayday,
-        timezone: (() => {
-          try {
-            return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
-          } catch {
-            return 'America/New_York'
-          }
-        })(),
+        timezone: detectedTz,
+        // The user just keyed in their balances, so they're current as of
+        // now — don't let the first catch-up re-apply paydays/grants from
+        // before this moment.
+        lastSyncDate: format(new Date(), 'yyyy-MM-dd'),
       },
       policy: { ...defaultPolicy },
       plannedVacations: [],

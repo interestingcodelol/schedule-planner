@@ -95,6 +95,13 @@ export function validateImportedState(data: unknown): data is AppState {
   if (typeof profile.currentVacationHours !== 'number' || !isFinite(profile.currentVacationHours)) return false
   if (typeof profile.currentSickHours !== 'number' || !isFinite(profile.currentSickHours)) return false
   if (typeof profile.lastPaydayDate !== 'string' || !isValidIsoDate(profile.lastPaydayDate)) return false
+  // lastSyncDate is optional in older exports; migration backfills it.
+  if (
+    profile.lastSyncDate !== undefined &&
+    (typeof profile.lastSyncDate !== 'string' || !isValidIsoDate(profile.lastSyncDate))
+  ) {
+    return false
+  }
   // currentBankHours is optional in older exports; migration backfills to 0.
   if (
     profile.currentBankHours !== undefined &&

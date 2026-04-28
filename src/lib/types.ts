@@ -68,6 +68,13 @@ export type UserProfile = {
   /** IANA timezone. Optional for backward compatibility; migrateState
    *  populates it from Intl.DateTimeFormat() when missing. */
   timezone?: string
+  /** ISO date the catch-up engine last reconciled the stored balances
+   *  through. On every app load, `catchUpState` walks events strictly
+   *  after this date up to "today" and applies any paydays, sick grants,
+   *  carryover payouts, bank payouts, and finished planned-vacation
+   *  deductions that occurred while the tab was closed. Optional for
+   *  backward compatibility; migrateState backfills it. */
+  lastSyncDate?: string
 }
 
 export type PlannedVacation = {

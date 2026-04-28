@@ -5,6 +5,9 @@ import { SetupWizard } from './components/SetupWizard'
 import { Dashboard } from './components/Dashboard'
 import { UpdateBanner } from './components/UpdateBanner'
 import { AppContext } from './context'
+import { catchUpState, summarizeCatchUp } from './lib/catchUp'
+import { showToast } from './lib/toastBus'
+import { getNowInZone } from './lib/timeUtils'
 
 function detectTimezone(): string {
   try {
@@ -15,12 +18,20 @@ function detectTimezone(): string {
 }
 
 function migrateState(loaded: AppState): AppState {
+  const tz = loaded.profile.timezone ?? detectTimezone()
+  // Existing users without a lastSyncDate get one anchored to lastPaydayDate
+  // so the first catch-up after this feature ships fast-forwards every
+  // payday/grant/payout/finished-vacation that happened while the app was
+  // closed. New users land here with the value already set by setup.
+  const lastSyncDate =
+    loaded.profile.lastSyncDate ?? loaded.profile.lastPaydayDate
   return {
     ...loaded,
     profile: {
       ...loaded.profile,
       currentBankHours: loaded.profile.currentBankHours ?? 0,
-      timezone: loaded.profile.timezone ?? detectTimezone(),
+      timezone: tz,
+      lastSyncDate,
     },
     bankHoursLog: loaded.bankHoursLog ?? [],
     showTour: loaded.showTour ?? false,
@@ -35,6 +46,41 @@ function migrateState(loaded: AppState): AppState {
       kind: v.kind ?? ('planned' as const),
     })),
   }
+}
+
+/**
+ * Run the catch-up reconciliation and toast a one-line summary if anything
+ * changed. Used by both the synchronous localStorage hydration path and the
+ * async IndexedDB hydration path so they apply the same fast-forward logic.
+ */
+function reconcile(state: AppState): AppState {
+  const result = catchUpState(state)
+  if (result.applied) {
+    // Defer the toast so subscribers (which mount with the Dashboard) are
+    // listening when it fires.
+    setTimeout(() => {
+      showToast({
+        message: summarizeCatchUp(result.events),
+        duration: 6000,
+      })
+    }, 0)
+  }
+  return result.state
+}
+
+/** Field-level identity check: did any of the user-visible balance fields
+ *  change? Used to know when to bump lastSyncDate on a manual edit. */
+function balancesChanged(
+  prev: AppState['profile'],
+  next: AppState['profile'],
+): boolean {
+  return (
+    prev.currentVacationHours !== next.currentVacationHours ||
+    prev.currentSickHours !== next.currentSickHours ||
+    prev.currentBankHours !== next.currentBankHours ||
+    prev.lastPaydayDate !== next.lastPaydayDate ||
+    prev.hireDate !== next.hireDate
+  )
 }
 
 /** Subtract hours from the matching pool. For 'any', drain bank → vacation → sick. */
@@ -87,7 +133,12 @@ function applyRefund(
 function getInitialState(): { state: AppState | null; isDemo: boolean } {
   const loaded = loadState()
   if (loaded) {
-    return { state: migrateState(loaded), isDemo: loaded.profile.displayName === 'Demo User' }
+    const migrated = migrateState(loaded)
+    const reconciled = reconcile(migrated)
+    return {
+      state: reconciled,
+      isDemo: loaded.profile.displayName === 'Demo User',
+    }
   }
   return { state: null, isDemo: false }
 }
@@ -100,10 +151,47 @@ export default function App() {
       if (idbState) {
         setAppData((prev) => {
           if (prev.state) return prev
-          return { state: migrateState(idbState), isDemo: idbState.profile.displayName === 'Demo User' }
+          return {
+            state: reconcile(migrateState(idbState)),
+            isDemo: idbState.profile.displayName === 'Demo User',
+          }
         })
       }
     })
+  }, [])
+
+  // Re-run catch-up if the tab stays open across a calendar-day boundary or
+  // becomes visible again after being hidden — paydays / Jan 1 grants /
+  // payouts can fire while the tab was idle.
+  useEffect(() => {
+    let lastSyncedDay: string | null = null
+    const tick = () => {
+      setAppData((prev) => {
+        if (!prev.state) return prev
+        const tz = prev.state.profile.timezone || 'America/New_York'
+        const todayIso = getNowInZone(tz).isoDate
+        if (todayIso === lastSyncedDay) return prev
+        lastSyncedDay = todayIso
+        const result = catchUpState(prev.state)
+        if (!result.applied) return prev
+        setTimeout(() => {
+          showToast({
+            message: summarizeCatchUp(result.events),
+            duration: 6000,
+          })
+        }, 0)
+        return { ...prev, state: result.state }
+      })
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') tick()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    const interval = window.setInterval(tick, 60_000)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(interval)
+    }
   }, [])
 
   useEffect(() => {
@@ -128,16 +216,27 @@ export default function App() {
 
   const importState = useCallback((incoming: AppState) => {
     const migrated = migrateState(incoming)
-    const isDemoData = migrated.profile.displayName === 'Demo User'
-    setAppData({ state: migrated, isDemo: isDemoData })
-    saveState(migrated)
+    const reconciled = reconcile(migrated)
+    const isDemoData = reconciled.profile.displayName === 'Demo User'
+    setAppData({ state: reconciled, isDemo: isDemoData })
+    saveState(reconciled)
   }, [])
 
   const updateProfile = useCallback(
     (updates: Partial<AppState['profile']>) => {
       setAppData((prev) => {
         if (!prev.state) return prev
-        return { ...prev, state: { ...prev.state, profile: { ...prev.state.profile, ...updates } } }
+        const nextProfile = { ...prev.state.profile, ...updates }
+        // A manual balance edit overrides whatever the catch-up engine
+        // computed; anchor lastSyncDate to today so subsequent runs don't
+        // re-apply paydays/grants the user just typed past. We deliberately
+        // skip this for cosmetic edits (display name, timezone) so a
+        // timezone change doesn't quietly suppress a pending catch-up.
+        if (balancesChanged(prev.state.profile, nextProfile)) {
+          const tz = nextProfile.timezone || 'America/New_York'
+          nextProfile.lastSyncDate = getNowInZone(tz).isoDate
+        }
+        return { ...prev, state: { ...prev.state, profile: nextProfile } }
       })
     },
     [],

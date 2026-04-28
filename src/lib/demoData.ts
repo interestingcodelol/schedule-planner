@@ -16,6 +16,7 @@ export function generateDemoState(): AppState {
       currentSickHours: 32,
       currentBankHours: 4.75,
       lastPaydayDate: format(lastFriday, 'yyyy-MM-dd'),
+      lastSyncDate: format(today, 'yyyy-MM-dd'),
       timezone: (() => {
         try {
           return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
