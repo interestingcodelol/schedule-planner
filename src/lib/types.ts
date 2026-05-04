@@ -11,6 +11,9 @@ export type HolidayRuleFixed = {
   day: number
   name: string
   weekendObservance: 'nearest_weekday' | 'none'
+  /** First year (inclusive) the rule applies. Used for holidays that didn't
+   *  exist forever (e.g., Juneteenth became federal in 2021). */
+  startYear?: number
 }
 
 export type HolidayRuleNthWeekday = {
@@ -20,6 +23,7 @@ export type HolidayRuleNthWeekday = {
   n: number // 1st, 2nd, 3rd, 4th
   name: string
   weekendObservance: 'nearest_weekday' | 'none'
+  startYear?: number
 }
 
 export type HolidayRuleLastWeekday = {
@@ -28,6 +32,7 @@ export type HolidayRuleLastWeekday = {
   weekday: number
   name: string
   weekendObservance: 'nearest_weekday' | 'none'
+  startYear?: number
 }
 
 export type HolidayRule = HolidayRuleFixed | HolidayRuleNthWeekday | HolidayRuleLastWeekday
@@ -56,6 +61,12 @@ export type BankHoursEntry = {
   date: string // ISO date string
   hours: number // positive = hours banked, negative = hours used
   note?: string
+  /** False for future-dated entries that haven't reached their date yet —
+   *  catch-up folds them into currentBankHours when their date arrives.
+   *  Undefined or true means already credited at create time (the default
+   *  for past/today entries and for entries written before this field
+   *  existed). */
+  appliedToBalance?: boolean
 }
 
 export type UserProfile = {

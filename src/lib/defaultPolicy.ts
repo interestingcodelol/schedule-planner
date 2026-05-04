@@ -25,7 +25,7 @@ export const defaultPolicy: PolicyConfig = {
     { type: 'nth_weekday', month: 1, weekday: 1, n: 3, name: 'Martin Luther King Jr. Day', weekendObservance: 'none' },
     { type: 'nth_weekday', month: 2, weekday: 1, n: 3, name: "Presidents' Day", weekendObservance: 'none' },
     { type: 'last_weekday', month: 5, weekday: 1, name: 'Memorial Day', weekendObservance: 'none' },
-    { type: 'fixed', month: 6, day: 19, name: 'Juneteenth', weekendObservance: 'nearest_weekday' },
+    { type: 'fixed', month: 6, day: 19, name: 'Juneteenth', weekendObservance: 'nearest_weekday', startYear: 2021 },
     { type: 'fixed', month: 7, day: 4, name: 'Independence Day', weekendObservance: 'nearest_weekday' },
     { type: 'nth_weekday', month: 9, weekday: 1, n: 1, name: 'Labor Day', weekendObservance: 'none' },
     { type: 'fixed', month: 11, day: 11, name: 'Veterans Day', weekendObservance: 'nearest_weekday' },

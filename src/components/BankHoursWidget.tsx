@@ -18,6 +18,15 @@ export function BankHoursWidget() {
     const h = Number(hours)
     if (!h || h <= 0) return
 
+    // Confirm large entries (>16h ≈ two work days) — guards against typing
+    // 50 instead of 5.0 and silently doubling the bank balance.
+    if (h > 16) {
+      const confirmed = window.confirm(
+        `Add ${fmt(h)} bank hours? That's a large entry — confirm to proceed.`,
+      )
+      if (!confirmed) return
+    }
+
     addBankHours({
       id: crypto.randomUUID(),
       date: format(new Date(), 'yyyy-MM-dd'),

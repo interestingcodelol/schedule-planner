@@ -6,6 +6,7 @@ import { PolicyEditor } from './PolicyEditor'
 import { exportState, validateImportedState } from '../lib/storage'
 import { generateDemoState } from '../lib/demoData'
 import { COMMON_TIMEZONES } from '../lib/timeUtils'
+import { useFocusTrap } from '../lib/useFocusTrap'
 
 type Props = {
   onClose: () => void
@@ -19,6 +20,7 @@ export function SettingsModal({ onClose }: Props) {
   const [importError, setImportError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(modalRef, true)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -91,6 +93,7 @@ export function SettingsModal({ onClose }: Props) {
         tabIndex={-1}
         className="glass-card rounded-2xl w-full max-w-xl max-h-[85vh] flex flex-col shadow-2xl"
         role="dialog"
+        aria-modal="true"
         aria-label="Settings"
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">

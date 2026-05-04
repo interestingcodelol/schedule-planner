@@ -8,6 +8,7 @@ import {
   formatTimeLabel,
   roundToQuarter,
 } from '../lib/timeUtils'
+import { useFocusTrap } from '../lib/useFocusTrap'
 
 type DayPopoverMode = 'plan' | 'log_past' | 'adjust_past'
 
@@ -72,6 +73,7 @@ export function DayPopover({
     existing?.actualHoursUsed ?? plannedHrs,
   )
   const modalRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(modalRef, true)
 
   const hoursOff =
     partialOrFull === 'full'
@@ -160,6 +162,7 @@ export function DayPopover({
           tabIndex={-1}
           className="glass-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
           role="dialog"
+          aria-modal="true"
           aria-label={`Adjust actual hours used for ${format(date, 'MMMM d')}`}
         >
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40">
@@ -270,6 +273,7 @@ export function DayPopover({
         tabIndex={-1}
         className="glass-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[90vh] flex flex-col"
         role="dialog"
+        aria-modal="true"
         aria-label={`${mode === 'log_past' ? 'Log past absence' : 'Plan time off'} for ${format(date, 'MMMM d')}`}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">

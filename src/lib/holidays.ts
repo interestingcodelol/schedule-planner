@@ -55,12 +55,42 @@ function applyWeekendObservance(
 
 /**
  * Expand all holiday rules into concrete dates for a given year.
+ *
+ * Handles three edge cases that broke the naive map-and-observe path:
+ *   1. Holidays that didn't exist yet (rule.startYear > year) are skipped.
+ *   2. Two rules whose observed dates collide (e.g., Christmas Eve and
+ *      Christmas Day both shifting onto the same Friday when Dec 25 is a
+ *      Saturday) are deduped — calendar code only needs one entry per date.
+ *   3. New Year's Day landing on a Saturday is observed on Dec 31 of the
+ *      *previous* year. We include both the requested year's observed dates
+ *      AND the requested year's Dec-31-spillover from year+1's New Year, so
+ *      the boundary day shows as a holiday from whichever year's loop runs.
  */
 export function computeHolidayDates(policy: PolicyConfig, year: number): Date[] {
-  return policy.holidays.map((rule) => {
+  const seen = new Set<string>()
+  const out: Date[] = []
+  const push = (d: Date) => {
+    if (d.getFullYear() !== year) return
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(d)
+  }
+  for (const rule of policy.holidays) {
+    if (rule.startYear !== undefined && rule.startYear > year) continue
     const raw = computeRawHolidayDate(rule, year)
-    return applyWeekendObservance(raw, rule.weekendObservance)
-  })
+    push(applyWeekendObservance(raw, rule.weekendObservance))
+  }
+  // Pull next year's Jan 1 observance back into this year if it landed on
+  // Dec 31 (Saturday → Friday shift).
+  for (const rule of policy.holidays) {
+    if (rule.type !== 'fixed' || rule.month !== 1 || rule.day !== 1) continue
+    if (rule.startYear !== undefined && rule.startYear > year + 1) continue
+    const nextRaw = computeRawHolidayDate(rule, year + 1)
+    const nextObserved = applyWeekendObservance(nextRaw, rule.weekendObservance)
+    push(nextObserved)
+  }
+  return out
 }
 
 /**
@@ -70,12 +100,14 @@ export function getHolidayName(
   policy: PolicyConfig,
   date: Date,
 ): string | undefined {
-  const year = date.getFullYear()
-  for (const rule of policy.holidays) {
-    const raw = computeRawHolidayDate(rule, year)
-    const observed = applyWeekendObservance(raw, rule.weekendObservance)
-    if (isSameDay(observed, date)) {
-      return rule.name
+  // Check the year the date is in, plus next year (for a Dec 31 New Year's
+  // observance which belongs to year+1's rule but lands on year's calendar).
+  for (const checkYear of [date.getFullYear(), date.getFullYear() + 1]) {
+    for (const rule of policy.holidays) {
+      if (rule.startYear !== undefined && rule.startYear > checkYear) continue
+      const raw = computeRawHolidayDate(rule, checkYear)
+      const observed = applyWeekendObservance(raw, rule.weekendObservance)
+      if (isSameDay(observed, date)) return rule.name
     }
   }
   return undefined

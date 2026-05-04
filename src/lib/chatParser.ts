@@ -140,7 +140,9 @@ function tryParseDate(text: string): Date | null {
   return null
 }
 
-function extractDateRange(input: string): { start: Date; end: Date } | null {
+function extractDateRange(
+  input: string,
+): { start: Date; end: Date; rolledForward?: boolean } | null {
   const today = startOfDay(new Date())
   const lower = input.toLowerCase().trim()
   const thisYear = today.getFullYear()
@@ -290,8 +292,12 @@ function extractDateRange(input: string): { start: Date; end: Date } | null {
     if (m !== undefined) {
       const d1 = parseInt(monthDayRange[2])
       const d2 = parseInt(monthDayRange[3])
-      const year = new Date(thisYear, m, d1) < today ? thisYear + 1 : thisYear
-      return { start: new Date(year, m, d1), end: new Date(year, m, d2) }
+      const rolled = new Date(thisYear, m, d1) < today
+      const year = rolled ? thisYear + 1 : thisYear
+      let start = new Date(year, m, d1)
+      let end = new Date(year, m, d2)
+      if (end < start) [start, end] = [end, start]
+      return { start, end, rolledForward: rolled }
     }
   }
 
@@ -305,9 +311,13 @@ function extractDateRange(input: string): { start: Date; end: Date } | null {
     if (m1 !== undefined && m2 !== undefined) {
       const d1 = parseInt(monthDayToMonthDay[2])
       const d2 = parseInt(monthDayToMonthDay[4])
-      const year1 = new Date(thisYear, m1, d1) < today ? thisYear + 1 : thisYear
+      const rolled = new Date(thisYear, m1, d1) < today
+      const year1 = rolled ? thisYear + 1 : thisYear
       const year2 = m2 < m1 ? year1 + 1 : year1
-      return { start: new Date(year1, m1, d1), end: new Date(year2, m2, d2) }
+      let start = new Date(year1, m1, d1)
+      let end = new Date(year2, m2, d2)
+      if (end < start) [start, end] = [end, start]
+      return { start, end, rolledForward: rolled }
     }
   }
 
@@ -319,7 +329,11 @@ function extractDateRange(input: string): { start: Date; end: Date } | null {
     const s = new Date(thisYear, parseInt(slashRange[1]) - 1, parseInt(slashRange[2]))
     const e = new Date(thisYear, parseInt(slashRange[3]) - 1, parseInt(slashRange[4]))
     if (isValid(s) && isValid(e)) {
-      return { start: s < today ? addDays(s, 365) : s, end: e < today ? addDays(e, 365) : e }
+      const rolled = s < today
+      let startD = rolled ? addDays(s, 365) : s
+      let endD = e < today ? addDays(e, 365) : e
+      if (endD < startD) [startD, endD] = [endD, startD]
+      return { start: startD, end: endD, rolledForward: rolled }
     }
   }
 
@@ -538,10 +552,13 @@ export function processChat(input: string, state: AppState): ChatResponse {
       startDate: format(range.start, 'yyyy-MM-dd'),
       endDate: format(range.end, 'yyyy-MM-dd'),
     }
+    const rolledNotice = range.rolledForward
+      ? `_Interpreting this as **${label}** (next year — that date already passed this year)._\n\n`
+      : ''
 
     if (a.allHolidayOrWeekend) {
       return {
-        text: `**${label}** falls entirely on weekends and/or holidays — **no PTO needed**. You'd have **${fmt(a.projection.totalAvailable)} hrs** available if you needed them.`,
+        text: `${rolledNotice}**${label}** falls entirely on weekends and/or holidays — **no PTO needed**. You'd have **${fmt(a.projection.totalAvailable)} hrs** available if you needed them.`,
       }
     }
 
@@ -549,16 +566,16 @@ export function processChat(input: string, state: AppState): ChatResponse {
       if (a.affordable) {
         const tightness = a.remaining < 0.5 ? ' — it\'s a tight fit with nothing to spare.' : ''
         return {
-          text: `**Yes.** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.${tightness}`,
+          text: `${rolledNotice}**Yes.** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.${tightness}`,
           action,
         }
       }
       if (a.conflictsLater) {
         return {
-          text: `**Conflicts with later plans.** ${label} fits at the start (you'd have **${fmt(a.projection.totalAvailable)} hrs**, need **${fmt(a.needed)} hrs**) but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** across your other planned time off.`,
+          text: `${rolledNotice}**Conflicts with later plans.** ${label} fits at the start (you'd have **${fmt(a.projection.totalAvailable)} hrs**, need **${fmt(a.needed)} hrs**) but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** across your other planned time off.`,
         }
       }
-      let text = `**Not enough hours.** ${label} needs **${fmt(a.needed)} hrs** (${a.workDays} days) but you'll only have **${fmt(a.projection.totalAvailable)} hrs** — **${fmt(a.tripShortfall)} hrs short**.`
+      let text = `${rolledNotice}**Not enough hours.** ${label} needs **${fmt(a.needed)} hrs** (${a.workDays} days) but you'll only have **${fmt(a.projection.totalAvailable)} hrs** — **${fmt(a.tripShortfall)} hrs short**.`
       if (a.earliest) {
         text += `\n\nYou'd have enough by **${format(a.earliest, 'MMM d, yyyy')}** (${differenceInDays(a.earliest, range.start)} days later).`
       } else {
@@ -570,17 +587,17 @@ export function processChat(input: string, state: AppState): ChatResponse {
     if (a.affordable) {
       const tightness = a.remaining < 0.5 ? ' — tight fit!' : ''
       return {
-        text: `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after).${tightness}`,
+        text: `${rolledNotice}**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'll have **${fmt(a.projection.totalAvailable)} hrs** available (**${fmt(a.remaining)} hrs** remaining after).${tightness}`,
         action,
       }
     }
     if (a.conflictsLater) {
       return {
-        text: `**${label}** — fits at the start (**${fmt(a.projection.totalAvailable)} hrs** available, **${fmt(a.needed)} hrs** needed), but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** for your other planned time off.`,
+        text: `${rolledNotice}**${label}** — fits at the start (**${fmt(a.projection.totalAvailable)} hrs** available, **${fmt(a.needed)} hrs** needed), but adding it would leave you **${fmt(a.cumulativeShortfall)} hrs short** for your other planned time off.`,
         action,
       }
     }
-    let text = `**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'd be **${fmt(a.tripShortfall)} hrs short** (only ${fmt(a.projection.totalAvailable)} hrs available).`
+    let text = `${rolledNotice}**${label}** — ${a.workDays} work day${a.workDays !== 1 ? 's' : ''}, **${fmt(a.needed)} hrs** needed. You'd be **${fmt(a.tripShortfall)} hrs short** (only ${fmt(a.projection.totalAvailable)} hrs available).`
     if (a.earliest) {
       text += ` You could afford it by **${format(a.earliest, 'MMM d')}**.`
     }

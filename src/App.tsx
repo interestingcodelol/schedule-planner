@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppState, BankHoursEntry, PlannedVacation } from './lib/types'
-import { loadState, loadStateAsync, saveState, clearState } from './lib/storage'
+import {
+  loadState,
+  loadStateAsync,
+  saveState,
+  clearState,
+  subscribeToCrossTabUpdates,
+} from './lib/storage'
 import { SetupWizard } from './components/SetupWizard'
 import { Dashboard } from './components/Dashboard'
 import { UpdateBanner } from './components/UpdateBanner'
@@ -162,9 +168,11 @@ export default function App() {
 
   // Re-run catch-up if the tab stays open across a calendar-day boundary or
   // becomes visible again after being hidden — paydays / Jan 1 grants /
-  // payouts can fire while the tab was idle.
+  // payouts can fire while the tab was idle. Tick is suspended while the tab
+  // is hidden so we don't burn 1440 catch-ups/day in a background tab.
   useEffect(() => {
     let lastSyncedDay: string | null = null
+    let interval: number | null = null
     const tick = () => {
       setAppData((prev) => {
         if (!prev.state) return prev
@@ -183,15 +191,42 @@ export default function App() {
         return { ...prev, state: result.state }
       })
     }
+    const startInterval = () => {
+      if (interval !== null) return
+      interval = window.setInterval(tick, 60_000)
+    }
+    const stopInterval = () => {
+      if (interval === null) return
+      window.clearInterval(interval)
+      interval = null
+    }
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') tick()
+      if (document.visibilityState === 'visible') {
+        tick()
+        startInterval()
+      } else {
+        stopInterval()
+      }
     }
     document.addEventListener('visibilitychange', onVisibility)
-    const interval = window.setInterval(tick, 60_000)
+    if (document.visibilityState === 'visible') startInterval()
     return () => {
       document.removeEventListener('visibilitychange', onVisibility)
-      window.clearInterval(interval)
+      stopInterval()
     }
+  }, [])
+
+  // Cross-tab sync: when another tab writes to the same key, pull the latest
+  // state in so we don't blow away their changes on our next save.
+  useEffect(() => {
+    return subscribeToCrossTabUpdates((incoming) => {
+      setAppData((prev) => {
+        if (!prev.state) {
+          return { state: incoming, isDemo: incoming.profile.displayName === 'Demo User' }
+        }
+        return { ...prev, state: incoming }
+      })
+    })
   }, [])
 
   useEffect(() => {
@@ -265,11 +300,20 @@ export default function App() {
           vacation.startDate,
           vacation.endDate,
           ...overlapping.flatMap((v) => [v.startDate, v.endDate]),
-        ]
-        const mergedStart = allDates.sort()[0]
-        const mergedEnd = allDates.sort()[allDates.length - 1]
+        ].sort()
+        const mergedStart = allDates[0]
+        const mergedEnd = allDates[allDates.length - 1]
         const filtered = newVacations.filter((v) => !overlapping.includes(v))
         filtered.push({ ...vacation, startDate: mergedStart, endDate: mergedEnd })
+        setTimeout(() => {
+          showToast({
+            message:
+              overlapping.length === 1
+                ? `Merged with overlapping entry → ${mergedStart} to ${mergedEnd}`
+                : `Merged with ${overlapping.length} overlapping entries → ${mergedStart} to ${mergedEnd}`,
+            duration: 6000,
+          })
+        }, 0)
         return { ...prev, state: { ...prev.state, plannedVacations: filtered } }
       }
 
@@ -398,15 +442,21 @@ export default function App() {
   const addBankHours = useCallback((entry: BankHoursEntry) => {
     setAppData((prev) => {
       if (!prev.state) return prev
+      const tz = prev.state.profile.timezone || 'America/New_York'
+      const todayIso = getNowInZone(tz).isoDate
+      const isFuture = entry.date > todayIso
+      const stamped: BankHoursEntry = { ...entry, appliedToBalance: !isFuture }
       return {
         ...prev,
         state: {
           ...prev.state,
           profile: {
             ...prev.state.profile,
-            currentBankHours: prev.state.profile.currentBankHours + entry.hours,
+            currentBankHours: isFuture
+              ? prev.state.profile.currentBankHours
+              : prev.state.profile.currentBankHours + entry.hours,
           },
-          bankHoursLog: [...prev.state.bankHoursLog, entry],
+          bankHoursLog: [...prev.state.bankHoursLog, stamped],
         },
       }
     })
@@ -417,13 +467,19 @@ export default function App() {
       if (!prev.state) return prev
       const entry = prev.state.bankHoursLog.find((e) => e.id === id)
       if (!entry) return prev
+      // Only roll back the balance if the entry was actually credited.
+      // Future-dated entries that never reached their date weren't applied,
+      // so removing them shouldn't affect the running total.
+      const wasApplied = entry.appliedToBalance !== false
       return {
         ...prev,
         state: {
           ...prev.state,
           profile: {
             ...prev.state.profile,
-            currentBankHours: prev.state.profile.currentBankHours - entry.hours,
+            currentBankHours: wasApplied
+              ? prev.state.profile.currentBankHours - entry.hours
+              : prev.state.profile.currentBankHours,
           },
           bankHoursLog: prev.state.bankHoursLog.filter((e) => e.id !== id),
         },

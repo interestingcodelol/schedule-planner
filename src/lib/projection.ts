@@ -25,21 +25,34 @@ import { getNowInZone, isWorkDayOverInZone } from './timeUtils'
 
 const DEFAULT_TZ = 'America/New_York'
 
+/** Build a UTC-midnight Date for a (y, m, d) triple. Avoids the local-timezone
+ *  drift you get from `new Date(y, m-1, d)`, which silently shifts events
+ *  onto the wrong calendar day for users whose browser timezone differs from
+ *  their `profile.timezone`. */
+function isoMidnight(year: number, month: number, day: number): Date {
+  const mm = String(month).padStart(2, '0')
+  const dd = String(day).padStart(2, '0')
+  return parseISO(`${year}-${mm}-${dd}`)
+}
+
 function applyDeduction(
   hours: number,
   source: 'vacation' | 'sick' | 'bank' | 'any',
   pools: { vacation: number; sick: number; bank: number },
 ): void {
+  // Explicit sources floor at 0 like the 'any' branch already does — a
+  // shortfall on an explicit pool shouldn't drag that pool negative; the
+  // shortfall is tracked separately by the caller.
   if (source === 'vacation') {
-    pools.vacation -= hours
+    pools.vacation = Math.max(0, pools.vacation - hours)
     return
   }
   if (source === 'sick') {
-    pools.sick -= hours
+    pools.sick = Math.max(0, pools.sick - hours)
     return
   }
   if (source === 'bank') {
-    pools.bank -= hours
+    pools.bank = Math.max(0, pools.bank - hours)
     return
   }
   let remaining = hours
@@ -167,9 +180,9 @@ export function getCarryoverPayoutDate(
   year: number,
 ): Date | null {
   if (state.policy.carryoverCapStrategy === 'unlimited') return null
-  const anchor = new Date(
+  const anchor = isoMidnight(
     year,
-    state.policy.carryoverPayoutDate.month - 1,
+    state.policy.carryoverPayoutDate.month,
     state.policy.carryoverPayoutDate.day,
   )
   const lastPayday = parseISO(state.profile.lastPaydayDate)
@@ -241,7 +254,12 @@ export function projectBalance(
   state: AppState,
   targetDate: Date,
 ): ProjectionResult {
-  const today = startOfDay(new Date())
+  // Anchor "today" to the user's profile timezone, not the browser's local
+  // timezone — otherwise an East-coast user who travels to LA would see the
+  // wrong day's events fire.
+  const tz0 = state.profile.timezone || DEFAULT_TZ
+  const todayIso = getNowInZone(tz0).isoDate
+  const today = parseISO(todayIso)
   const target = startOfDay(targetDate)
   const hireDate = parseISO(state.profile.hireDate)
   const lastPayday = parseISO(state.profile.lastPaydayDate)
@@ -303,15 +321,48 @@ export function projectBalance(
   }
   const pendingEvents: PendingEvent[] = []
 
-  for (const payday of paydays) {
+  for (let i = 0; i < paydays.length; i++) {
+    const payday = paydays[i]
     if (!isAfter(payday, today)) continue
     pendingEvents.push({
       date: payday,
       type: 'accrual',
       process: () => {
-        const yos = differenceInYears(payday, hireDate)
-        const tier = computeAccrualTier(state.policy, yos)
-        return tier.hoursPerPayPeriod
+        // Pro-rate when a tier transition (service anniversary) falls inside
+        // the pay period: portion-of-period in old tier × old rate +
+        // remainder × new rate. The non-prorated path treated tier
+        // transitions as cliffs and silently shifted small amounts of accrual
+        // off true tenure.
+        const periodStart = i > 0 ? paydays[i - 1] : lastPayday
+        const periodDays = differenceInCalendarDays(payday, periodStart)
+        if (periodDays <= 0) {
+          const yos = differenceInYears(payday, hireDate)
+          return computeAccrualTier(state.policy, yos).hoursPerPayPeriod
+        }
+        const yosStart = differenceInYears(periodStart, hireDate)
+        const yosEnd = differenceInYears(payday, hireDate)
+        const tierStart = computeAccrualTier(state.policy, yosStart)
+        const tierEnd = computeAccrualTier(state.policy, yosEnd)
+        if (tierStart === tierEnd) return tierEnd.hoursPerPayPeriod
+
+        // Find the anniversary day inside (periodStart, payday] that triggered
+        // the tier change. differenceInYears jumps on the anniversary day, so
+        // we walk from periodStart+1 until we land on the day yos increments.
+        let anniversaryDay: Date | null = null
+        for (let d = 1; d <= periodDays; d++) {
+          const probe = addDays(periodStart, d)
+          if (differenceInYears(probe, hireDate) > yosStart) {
+            anniversaryDay = probe
+            break
+          }
+        }
+        if (!anniversaryDay) return tierEnd.hoursPerPayPeriod
+        const daysInOldTier = differenceInCalendarDays(anniversaryDay, periodStart)
+        const daysInNewTier = periodDays - daysInOldTier
+        return (
+          (tierStart.hoursPerPayPeriod * daysInOldTier) / periodDays +
+          (tierEnd.hoursPerPayPeriod * daysInNewTier) / periodDays
+        )
       },
       label: 'Vacation accrual',
     })
@@ -344,9 +395,9 @@ export function projectBalance(
     // The policy date is an anchor ("Feb 1" by default); the actual event
     // fires on the first payday on or after that date so it lands on a real
     // pay cycle rather than a random calendar day.
-    const anchor = new Date(
+    const anchor = isoMidnight(
       y,
-      state.policy.carryoverPayoutDate.month - 1,
+      state.policy.carryoverPayoutDate.month,
       state.policy.carryoverPayoutDate.day,
     )
     const payoutDate = firstPaydayOnOrAfter(
@@ -364,15 +415,24 @@ export function projectBalance(
     }
   }
 
-  for (let y = startYear; y <= endYear + 1; y++) {
-    const payoutStart = new Date(
+  // Bank window can span the year boundary; if endsNextYear, the END date is
+  // for the *following* year. Iterating one extra year on each side captures
+  // payouts whose start fired in startYear-1 and end falls in startYear.
+  const bankStartM = state.policy.bankHoursPayoutStart.month
+  const bankEndM = state.policy.bankHoursPayoutEnd.month
+  const bankEndsNextYear =
+    bankEndM < bankStartM ||
+    (bankEndM === bankStartM &&
+      state.policy.bankHoursPayoutEnd.day < state.policy.bankHoursPayoutStart.day)
+  for (let y = startYear - 1; y <= endYear + 1; y++) {
+    const payoutStart = isoMidnight(
       y,
-      state.policy.bankHoursPayoutStart.month - 1,
+      bankStartM,
       state.policy.bankHoursPayoutStart.day,
     )
-    const payoutEnd = new Date(
-      y,
-      state.policy.bankHoursPayoutEnd.month - 1,
+    const payoutEnd = isoMidnight(
+      bankEndsNextYear ? y + 1 : y,
+      bankEndM,
       state.policy.bankHoursPayoutEnd.day,
     )
     for (const payoutDate of [payoutStart, payoutEnd]) {
@@ -388,7 +448,7 @@ export function projectBalance(
   }
 
   for (let y = startYear + 1; y <= endYear; y++) {
-    const grantDate = new Date(y, 0, 1) // January 1
+    const grantDate = isoMidnight(y, 1, 1) // January 1
     if (isAfter(grantDate, today) && !isAfter(grantDate, target)) {
       pendingEvents.push({
         date: grantDate,

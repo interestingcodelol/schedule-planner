@@ -1,36 +1,61 @@
 import type { AppState } from './types'
 import { loadStateFromIdb, saveStateToIdb, clearIdbState } from './indexedDb'
+import { showToast } from './toastBus'
 
 const STORAGE_KEY = 'schedule-planner-state-v1'
 const LEGACY_STORAGE_KEY = 'leave-lens-state-v1'
 const CURRENT_VERSION = 1
 
+let lastQuotaWarningAt = 0
+
+function warnStorageFailure(reason: 'quota' | 'unavailable'): void {
+  const now = Date.now()
+  if (now - lastQuotaWarningAt < 30_000) return
+  lastQuotaWarningAt = now
+  setTimeout(() => {
+    showToast({
+      message:
+        reason === 'quota'
+          ? 'Browser storage full — recent changes may not be saved. Export a backup or free up space.'
+          : 'Browser storage unavailable — changes will not persist (private/incognito mode?).',
+      duration: 8000,
+    })
+  }, 0)
+}
+
 export function loadState(): AppState | null {
   try {
-    let raw = localStorage.getItem(STORAGE_KEY)
-    // Migrate from legacy key if new key not found
-    if (!raw) {
-      raw = localStorage.getItem(LEGACY_STORAGE_KEY)
-      if (raw) {
-        // Migrate: write to new key and remove old
-        localStorage.setItem(STORAGE_KEY, raw)
-        localStorage.removeItem(LEGACY_STORAGE_KEY)
+    let raw: string | null = null
+    try {
+      raw = localStorage.getItem(STORAGE_KEY)
+      if (!raw) {
+        raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+        if (raw) {
+          localStorage.setItem(STORAGE_KEY, raw)
+          localStorage.removeItem(LEGACY_STORAGE_KEY)
+        }
       }
+    } catch {
+      warnStorageFailure('unavailable')
+      return null
     }
     if (!raw) return null
 
-    const parsed = JSON.parse(raw) as AppState
-
-    if (parsed.version !== CURRENT_VERSION) {
-      // Schema version mismatch — caller should prompt user to reset
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      // Corrupted JSON — wipe so subsequent saves work, but warn first.
+      setTimeout(() => {
+        showToast({
+          message: 'Saved data was corrupted and could not be loaded.',
+          duration: 8000,
+        })
+      }, 0)
       return null
     }
 
-    // Basic validation
-    if (!parsed.profile || !parsed.policy || !Array.isArray(parsed.plannedVacations)) {
-      return null
-    }
-
+    if (!isPlausibleAppState(parsed)) return null
     return parsed
   } catch {
     return null
@@ -40,10 +65,12 @@ export function loadState(): AppState | null {
 export function saveState(state: AppState): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // localStorage may be full or unavailable — silently fail
+  } catch (err) {
+    const isQuota =
+      err instanceof DOMException &&
+      (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+    warnStorageFailure(isQuota ? 'quota' : 'unavailable')
   }
-  // Also persist to IndexedDB (fire and forget)
   saveStateToIdb(state).catch(() => {})
 }
 
@@ -55,7 +82,7 @@ export function clearState(): void {
 /** Tries IndexedDB first, then falls back to localStorage. */
 export async function loadStateAsync(): Promise<AppState | null> {
   const idbState = await loadStateFromIdb()
-  if (idbState && idbState.version === CURRENT_VERSION && idbState.profile && idbState.policy) {
+  if (idbState && isPlausibleAppState(idbState)) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(idbState))
     } catch {
@@ -64,6 +91,46 @@ export async function loadStateAsync(): Promise<AppState | null> {
     return idbState
   }
   return loadState()
+}
+
+/** Cheap structural check used both on load and after IDB hydration. Catches
+ *  corrupted/truncated state before it reaches the rest of the app. */
+function isPlausibleAppState(value: unknown): value is AppState {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  if (v.version !== CURRENT_VERSION) return false
+  if (!v.profile || typeof v.profile !== 'object') return false
+  if (!v.policy || typeof v.policy !== 'object') return false
+  if (!Array.isArray(v.plannedVacations)) return false
+  return true
+}
+
+const TAB_ID =
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2)
+
+/** Subscribe to cross-tab state changes. Fires when another tab writes to the
+ *  same storage key — caller refreshes its in-memory state to avoid the "two
+ *  tabs blow away each other's saves" race. */
+export function subscribeToCrossTabUpdates(
+  onUpdate: (state: AppState) => void,
+): () => void {
+  const handler = (e: StorageEvent) => {
+    if (e.key !== STORAGE_KEY || !e.newValue) return
+    try {
+      const parsed = JSON.parse(e.newValue)
+      if (isPlausibleAppState(parsed)) onUpdate(parsed)
+    } catch {
+      /* ignore — corrupted incoming write */
+    }
+  }
+  window.addEventListener('storage', handler)
+  return () => window.removeEventListener('storage', handler)
+}
+
+export function getTabId(): string {
+  return TAB_ID
 }
 
 export function exportState(state: AppState): void {

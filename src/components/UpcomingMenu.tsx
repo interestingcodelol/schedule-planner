@@ -11,10 +11,14 @@ import { parseISO, startOfDay } from 'date-fns'
 import { CalendarDays, Palmtree } from 'lucide-react'
 import { useAppState } from '../context'
 import { analyzeTripImpact } from '../lib/projection'
-import type { AppState } from '../lib/types'
-import { useUpcomingItems } from '../lib/upcomingItems'
+import type { AppState, PlannedVacation } from '../lib/types'
+import { useUpcomingItems, type InfoEvent } from '../lib/upcomingItems'
 import { navigateCalendarToDate } from '../lib/calendarNav'
 import { UpcomingVacationRow } from './UpcomingVacationRow'
+
+type UpcomingRow =
+  | { kind: 'vacation'; sortDate: Date; vacation: PlannedVacation }
+  | { kind: 'info'; sortDate: Date; event: InfoEvent }
 
 type TriggerRenderArgs = {
   open: boolean
@@ -31,6 +35,17 @@ type Props = {
 export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
   const { state } = useAppState()
   const { sortedVacations, infoEvents } = useUpcomingItems()
+  const mergedRows = useMemo<UpcomingRow[]>(() => {
+    const rows: UpcomingRow[] = [
+      ...sortedVacations.map((v) => ({
+        kind: 'vacation' as const,
+        sortDate: parseISO(v.startDate),
+        vacation: v,
+      })),
+      ...infoEvents.map((e) => ({ kind: 'info' as const, sortDate: e.sortDate, event: e })),
+    ]
+    return rows.sort((a, b) => a.sortDate.getTime() - b.sortDate.getTime())
+  }, [sortedVacations, infoEvents])
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -165,33 +180,36 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
               </div>
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-gray-800/60">
-                {sortedVacations.map((vacation) => (
-                  <UpcomingVacationRow
-                    key={vacation.id}
-                    vacation={vacation}
-                    onJump={(date) => {
-                      navigateCalendarToDate(date)
-                      setOpen(false)
-                    }}
-                  />
-                ))}
-                {infoEvents.map((event) => (
-                  <button
-                    key={event.key}
-                    onClick={() => {
-                      navigateCalendarToDate(event.sortDate)
-                      setOpen(false)
-                    }}
-                    className="w-full text-left px-5 py-3.5 flex items-start gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
-                    title={`Jump to ${event.label}`}
-                  >
-                    <event.icon className={`w-4 h-4 mt-0.5 shrink-0 ${event.accent}`} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold truncate">{event.label}</div>
-                      <div className="text-sm text-gray-400 dark:text-gray-500">{event.detail}</div>
-                    </div>
-                  </button>
-                ))}
+                {mergedRows.map((row) =>
+                  row.kind === 'vacation' ? (
+                    <UpcomingVacationRow
+                      key={`v-${row.vacation.id}`}
+                      vacation={row.vacation}
+                      onJump={(date) => {
+                        navigateCalendarToDate(date)
+                        setOpen(false)
+                      }}
+                    />
+                  ) : (
+                    <button
+                      key={`i-${row.event.key}`}
+                      onClick={() => {
+                        navigateCalendarToDate(row.event.sortDate)
+                        setOpen(false)
+                      }}
+                      className="w-full text-left px-5 py-3.5 flex items-start gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
+                      title={`Jump to ${row.event.label}`}
+                    >
+                      <row.event.icon className={`w-4 h-4 mt-0.5 shrink-0 ${row.event.accent}`} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate">{row.event.label}</div>
+                        <div className="text-sm text-gray-400 dark:text-gray-500">
+                          {row.event.detail}
+                        </div>
+                      </div>
+                    </button>
+                  ),
+                )}
               </div>
             )}
           </div>,

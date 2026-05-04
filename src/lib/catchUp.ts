@@ -23,6 +23,12 @@ import { getNowInZone } from './timeUtils'
 
 const DEFAULT_TZ = 'America/New_York'
 
+function isoMidnight(year: number, month: number, day: number): Date {
+  const mm = String(month).padStart(2, '0')
+  const dd = String(day).padStart(2, '0')
+  return parseISO(`${year}-${mm}-${dd}`)
+}
+
 export type CatchUpEvent = {
   date: string
   type:
@@ -84,17 +90,23 @@ function applyDeduction(
   source: 'vacation' | 'sick' | 'bank' | 'any',
   pools: Pools,
 ): { from: 'vacation' | 'sick' | 'bank'; amount: number }[] {
+  // Match projection's behaviour: explicit pool sources floor at 0. The
+  // attributed amount is the actual hours drawn (capped to what was
+  // available), not the requested hours — the caller tracks any shortfall.
   if (source === 'vacation') {
-    pools.vacation -= hours
-    return [{ from: 'vacation', amount: hours }]
+    const drawn = Math.min(hours, Math.max(0, pools.vacation))
+    pools.vacation = Math.max(0, pools.vacation - hours)
+    return [{ from: 'vacation', amount: drawn }]
   }
   if (source === 'sick') {
-    pools.sick -= hours
-    return [{ from: 'sick', amount: hours }]
+    const drawn = Math.min(hours, Math.max(0, pools.sick))
+    pools.sick = Math.max(0, pools.sick - hours)
+    return [{ from: 'sick', amount: drawn }]
   }
   if (source === 'bank') {
-    pools.bank -= hours
-    return [{ from: 'bank', amount: hours }]
+    const drawn = Math.min(hours, Math.max(0, pools.bank))
+    pools.bank = Math.max(0, pools.bank - hours)
+    return [{ from: 'bank', amount: drawn }]
   }
   const breakdown: { from: 'vacation' | 'sick' | 'bank'; amount: number }[] = []
   let remaining = hours
@@ -160,18 +172,10 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   const lastSync = startOfDay(parseISO(lastSyncIso))
 
   if (!isAfter(today, lastSync)) {
-    if (state.profile.lastSyncDate === todayIso) {
-      return { state, events: [], applied: false, syncedTo: todayIso }
-    }
-    return {
-      state: {
-        ...state,
-        profile: { ...state.profile, lastSyncDate: todayIso },
-      },
-      events: [],
-      applied: false,
-      syncedTo: todayIso,
-    }
+    // Clock went backwards (DST jump, manual change, timezone shift). Refusing
+    // to rewind lastSyncDate prevents the next forward-in-time run from
+    // re-applying paydays/vacations that were already booked.
+    return { state, events: [], applied: false, syncedTo: lastSyncIso }
   }
 
   const lastPayday = parseISO(state.profile.lastPaydayDate)
@@ -215,7 +219,7 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   const startYear = lastSync.getFullYear()
   const endYear = today.getFullYear()
   for (let y = startYear; y <= endYear; y++) {
-    const jan1 = new Date(y, 0, 1)
+    const jan1 = isoMidnight(y, 1, 1)
     if (isAfter(jan1, lastSync) && !isAfter(jan1, today)) {
       pending.push({
         date: jan1,
@@ -257,9 +261,9 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   // --- Carryover-cap payouts ---------------------------------------------
   if (state.policy.carryoverCapStrategy !== 'unlimited') {
     for (let y = startYear; y <= endYear; y++) {
-      const anchor = new Date(
+      const anchor = isoMidnight(
         y,
-        state.policy.carryoverPayoutDate.month - 1,
+        state.policy.carryoverPayoutDate.month,
         state.policy.carryoverPayoutDate.day,
       )
       const payoutDate = firstPaydayOnOrAfter(
@@ -294,15 +298,21 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   }
 
   // --- Bank payouts ------------------------------------------------------
-  for (let y = startYear; y <= endYear + 1; y++) {
-    const start = new Date(
-      y,
-      state.policy.bankHoursPayoutStart.month - 1,
-      state.policy.bankHoursPayoutStart.day,
-    )
-    const end = new Date(
-      y,
-      state.policy.bankHoursPayoutEnd.month - 1,
+  // Window can span the year boundary (e.g., Dec 15 → Feb 15), so the END date
+  // belongs to the NEXT year when end-month <= start-month. Iterate one year
+  // before startYear too, so a payout that fired during the catch-up gap is
+  // correctly captured.
+  const bankStartM = state.policy.bankHoursPayoutStart.month
+  const bankEndM = state.policy.bankHoursPayoutEnd.month
+  const endsNextYear =
+    bankEndM < bankStartM ||
+    (bankEndM === bankStartM &&
+      state.policy.bankHoursPayoutEnd.day < state.policy.bankHoursPayoutStart.day)
+  for (let y = startYear - 1; y <= endYear + 1; y++) {
+    const start = isoMidnight(y, bankStartM, state.policy.bankHoursPayoutStart.day)
+    const end = isoMidnight(
+      endsNextYear ? y + 1 : y,
+      bankEndM,
       state.policy.bankHoursPayoutEnd.day,
     )
     for (const p of [start, end]) {
@@ -323,6 +333,38 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
                 label: `Bank hours paid out: ${payout.toFixed(2)} hrs`,
               })
             }
+          },
+        })
+      }
+    }
+  }
+
+  // --- Future-dated bank-log entries that have now passed --------------
+  // addBankHours() only credits currentBankHours for entries on/before today.
+  // Future-dated entries (e.g., a known overtime shift coming up) get folded
+  // in here once their date has arrived so the persisted balance matches what
+  // the projection has been showing.
+  const appliedBankEntryIds = new Set<string>()
+  if (state.bankHoursLog) {
+    for (const entry of state.bankHoursLog) {
+      const entryDate = startOfDay(parseISO(entry.date))
+      if (isAfter(entryDate, lastSync) && !isAfter(entryDate, today)) {
+        if (entry.appliedToBalance !== false) continue
+        pending.push({
+          date: entryDate,
+          order: 3,
+          apply: () => {
+            pools.bank += entry.hours
+            appliedBankEntryIds.add(entry.id)
+            events.push({
+              date: format(entryDate, 'yyyy-MM-dd'),
+              type: 'bank_payout',
+              pool: 'bank',
+              delta: entry.hours,
+              label: entry.note
+                ? `Bank adjustment — ${entry.note}`
+                : `Bank adjustment ${entry.hours >= 0 ? '+' : ''}${entry.hours.toFixed(2)} hrs`,
+            })
           },
         })
       }
@@ -430,11 +472,19 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
     lastSyncDate: todayIso,
   }
 
+  const newBankHoursLog =
+    appliedBankEntryIds.size === 0
+      ? state.bankHoursLog
+      : state.bankHoursLog.map((e) =>
+          appliedBankEntryIds.has(e.id) ? { ...e, appliedToBalance: true } : e,
+        )
+
   return {
     state: {
       ...state,
       profile: newProfile,
       plannedVacations: newPlannedVacations,
+      bankHoursLog: newBankHoursLog,
     },
     events,
     applied: events.length > 0,

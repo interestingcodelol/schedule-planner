@@ -85,7 +85,19 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   const projection = useMemo(() => {
     if (isPast && !isToday) return null
     return projectBalance(state, date)
-  }, [state, date, isPast, isToday])
+    // Depend on the slices that actually affect projection math, not the
+    // whole `state` reference — so theme toggles and unrelated edits don't
+    // re-run projection on all 42 cells.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    state.profile,
+    state.policy,
+    state.plannedVacations,
+    state.bankHoursLog,
+    date,
+    isPast,
+    isToday,
+  ])
   const projectedBalances = projection
     ? {
         total: projection.totalAvailable,
@@ -288,8 +300,9 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         >
           {format(date, 'd')}
         </span>
-        {/* Indicator icons */}
-        <div className="flex items-center gap-0.5">
+        {/* Indicator icons — decorative; the cell's aria-label already
+            announces holiday/payday/vacation status, so hide these from AT. */}
+        <div className="flex items-center gap-0.5" aria-hidden="true">
           {isHolidayDay && isCurrentMonth && (
             <span className="text-sm leading-none">{getHolidayEmoji(holidayName!)}</span>
           )}

@@ -3,6 +3,21 @@ import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import type { AccrualTier, PolicyConfig } from '../lib/types'
 import { formatHolidayRule } from '../lib/holidays'
 
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+function clampDayForMonth(day: number, month: number): number {
+  const max = DAYS_IN_MONTH[month - 1] ?? 31
+  if (!Number.isFinite(day) || day < 1) return 1
+  return Math.min(Math.floor(day), max)
+}
+function clampPositive(n: number, fallback: number): number {
+  if (!Number.isFinite(n) || n <= 0) return fallback
+  return n
+}
+function clampNonNegativeInt(n: number, fallback: number): number {
+  if (!Number.isFinite(n) || n < 0) return fallback
+  return Math.floor(n)
+}
+
 type Props = {
   policy: PolicyConfig
   onChange: (policy: PolicyConfig) => void
@@ -125,11 +140,14 @@ export function PolicyEditor({ policy, onChange }: Props) {
                   <input
                     type="number"
                     step="0.01"
-                    min="0"
+                    min="0.01"
                     value={tier.hoursPerPayPeriod}
                     onChange={(e) =>
                       updateTier(i, {
-                        hoursPerPayPeriod: Number(e.target.value),
+                        hoursPerPayPeriod: clampPositive(
+                          Number(e.target.value),
+                          tier.hoursPerPayPeriod || 0.01,
+                        ),
                       })
                     }
                     className="w-16 px-1 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -175,12 +193,16 @@ export function PolicyEditor({ policy, onChange }: Props) {
               min="1"
               max="31"
               value={policy.payPeriodLengthDays}
-              onChange={(e) =>
+              onChange={(e) => {
+                const raw = Number(e.target.value)
                 onChange({
                   ...policy,
-                  payPeriodLengthDays: Number(e.target.value),
+                  payPeriodLengthDays: clampNonNegativeInt(
+                    raw,
+                    policy.payPeriodLengthDays,
+                  ) || 1,
                 })
-              }
+              }}
               className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -190,14 +212,17 @@ export function PolicyEditor({ policy, onChange }: Props) {
             </label>
             <input
               type="number"
-              min="1"
+              min="0.5"
               max="24"
               step="0.5"
               value={policy.hoursPerWorkDay}
               onChange={(e) =>
                 onChange({
                   ...policy,
-                  hoursPerWorkDay: Number(e.target.value),
+                  hoursPerWorkDay: clampPositive(
+                    Number(e.target.value),
+                    policy.hoursPerWorkDay,
+                  ),
                 })
               }
               className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -284,15 +309,16 @@ export function PolicyEditor({ policy, onChange }: Props) {
               </label>
               <select
                 value={policy.carryoverPayoutDate.month}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const month = Number(e.target.value)
                   onChange({
                     ...policy,
                     carryoverPayoutDate: {
-                      ...policy.carryoverPayoutDate,
-                      month: Number(e.target.value),
+                      month,
+                      day: clampDayForMonth(policy.carryoverPayoutDate.day, month),
                     },
                   })
-                }
+                }}
                 className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {Array.from({ length: 12 }, (_, i) => (
@@ -309,14 +335,17 @@ export function PolicyEditor({ policy, onChange }: Props) {
               <input
                 type="number"
                 min="1"
-                max="31"
+                max={DAYS_IN_MONTH[policy.carryoverPayoutDate.month - 1] ?? 31}
                 value={policy.carryoverPayoutDate.day}
                 onChange={(e) =>
                   onChange({
                     ...policy,
                     carryoverPayoutDate: {
                       ...policy.carryoverPayoutDate,
-                      day: Number(e.target.value),
+                      day: clampDayForMonth(
+                        Number(e.target.value),
+                        policy.carryoverPayoutDate.month,
+                      ),
                     },
                   })
                 }
@@ -388,15 +417,16 @@ export function PolicyEditor({ policy, onChange }: Props) {
             <div className="flex gap-1">
               <select
                 value={policy.bankHoursPayoutStart.month}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const month = Number(e.target.value)
                   onChange({
                     ...policy,
                     bankHoursPayoutStart: {
-                      ...policy.bankHoursPayoutStart,
-                      month: Number(e.target.value),
+                      month,
+                      day: clampDayForMonth(policy.bankHoursPayoutStart.day, month),
                     },
                   })
-                }
+                }}
                 className="flex-1 px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {Array.from({ length: 12 }, (_, i) => (
@@ -408,14 +438,17 @@ export function PolicyEditor({ policy, onChange }: Props) {
               <input
                 type="number"
                 min="1"
-                max="31"
+                max={DAYS_IN_MONTH[policy.bankHoursPayoutStart.month - 1] ?? 31}
                 value={policy.bankHoursPayoutStart.day}
                 onChange={(e) =>
                   onChange({
                     ...policy,
                     bankHoursPayoutStart: {
                       ...policy.bankHoursPayoutStart,
-                      day: Number(e.target.value),
+                      day: clampDayForMonth(
+                        Number(e.target.value),
+                        policy.bankHoursPayoutStart.month,
+                      ),
                     },
                   })
                 }
@@ -430,15 +463,16 @@ export function PolicyEditor({ policy, onChange }: Props) {
             <div className="flex gap-1">
               <select
                 value={policy.bankHoursPayoutEnd.month}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const month = Number(e.target.value)
                   onChange({
                     ...policy,
                     bankHoursPayoutEnd: {
-                      ...policy.bankHoursPayoutEnd,
-                      month: Number(e.target.value),
+                      month,
+                      day: clampDayForMonth(policy.bankHoursPayoutEnd.day, month),
                     },
                   })
-                }
+                }}
                 className="flex-1 px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {Array.from({ length: 12 }, (_, i) => (
@@ -450,14 +484,17 @@ export function PolicyEditor({ policy, onChange }: Props) {
               <input
                 type="number"
                 min="1"
-                max="31"
+                max={DAYS_IN_MONTH[policy.bankHoursPayoutEnd.month - 1] ?? 31}
                 value={policy.bankHoursPayoutEnd.day}
                 onChange={(e) =>
                   onChange({
                     ...policy,
                     bankHoursPayoutEnd: {
                       ...policy.bankHoursPayoutEnd,
-                      day: Number(e.target.value),
+                      day: clampDayForMonth(
+                        Number(e.target.value),
+                        policy.bankHoursPayoutEnd.month,
+                      ),
                     },
                   })
                 }

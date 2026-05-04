@@ -101,10 +101,17 @@ describe('projectBalance', () => {
 
     const accrualEvents = result.events.filter((e) => e.type === 'accrual')
 
-    // First payday after today (Jun 15) is Jun 27. By then yos = 5, so all
-    // accruals should be at the 5–10 year tier (4.615 hrs/pp).
-    expect(accrualEvents.length).toBeGreaterThan(0)
-    accrualEvents.forEach((e) => {
+    // First payday after today (Jun 15) is Jun 27. The pay-period
+    // (Jun 13 → Jun 27) spans the Jun 15 anniversary, so that payday's
+    // accrual is pro-rated across the two tiers — the rest are full
+    // 5–10-year-tier rate (4.615 hrs/pp).
+    expect(accrualEvents.length).toBeGreaterThan(1)
+    const [first, ...rest] = accrualEvents
+    // 2 days at year-1-5 tier (3.076), 12 days at year-5-10 tier (4.615),
+    // weighted: (3.076 * 2 + 4.615 * 12) / 14 ≈ 4.395
+    expect(first.delta).toBeGreaterThan(3.076)
+    expect(first.delta).toBeLessThan(4.615)
+    rest.forEach((e) => {
       expect(e.delta).toBeCloseTo(4.615, 2)
     })
   })
