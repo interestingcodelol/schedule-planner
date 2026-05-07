@@ -80,8 +80,43 @@ input[type="date"] {
   from { transform: translateY(12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .animate-slide-down { animation: slide-down 0.3s ease-out; }
 .animate-slide-up { animation: slide-up 0.25s ease-out; }
+.animate-fade-in { animation: fade-in 0.18s ease-out; }
+
+/* Collapsible: smooth height transition without measuring children. The
+ * outer element animates grid-template-rows from 0fr → 1fr while the inner
+ * .collapsible-inner has min-height: 0 and overflow: hidden so its content
+ * is clipped during the transition. Use [data-open="true"] to expand. */
+.collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease-out;
+}
+.collapsible[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+.collapsible > .collapsible-inner {
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity 0.2s ease-out;
+  opacity: 0;
+}
+.collapsible[data-open='true'] > .collapsible-inner {
+  opacity: 1;
+}
+
+/* Soft scroll fade — gives long lists a hint that they keep going without
+ * a hard scrollbar. Only applies to scroll-panel children inside a
+ * .scroll-fade wrapper. */
+.scroll-fade {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 16px), transparent 100%);
+}
 
 /* Allow scrolling only inside specific panels */
 .scroll-panel {

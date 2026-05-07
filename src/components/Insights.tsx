@@ -156,6 +156,59 @@ export function Insights() {
       type: 'info',
     })
 
+    // PTO + holidays as a ratio of total time off in the year. Holidays are
+    // "free" days off; PTO scheduled by the user costs hours. Ratio gives a
+    // sense of how much of their year-end time-off mix comes from each.
+    pool.push((() => {
+      const yearStart = startOfYear(today)
+      const yearEnd2 = endOfYear(today)
+      const holidayCount = computeHolidayDates(state.policy, today.getFullYear())
+        .filter((d) => d >= yearStart && d <= yearEnd2 && state.policy.workDaysPerWeek.includes(d.getDay()))
+        .length
+      const plannedDays = state.plannedVacations
+        .filter((v) => v.kind !== 'logged_past')
+        .filter((v) => parseISO(v.startDate) >= yearStart && parseISO(v.endDate) <= yearEnd2)
+        .reduce((sum, v) => {
+          const s = parseISO(v.startDate)
+          const e = parseISO(v.endDate)
+          return sum + countWorkDays(s, e, state.policy)
+        }, 0)
+      const totalOff = holidayCount + plannedDays
+      if (totalOff < 1) return null
+      const holidayPct = Math.round((holidayCount / totalOff) * 100)
+      const ptoPct = 100 - holidayPct
+      return {
+        text: `${holidayPct}% of your year-off days come from holidays · ${ptoPct}% from your own PTO (${holidayCount} holidays + ${plannedDays} planned)`,
+        type: 'info',
+      }
+    })())
+
+    // YTD utilization: how much of your annual PTO accrual you've already
+    // committed to (used + scheduled-future). Pairs with the YTD-accrual
+    // tip already in the pool — accrued vs spent gives both halves.
+    pool.push((() => {
+      const yearStart = startOfYear(today)
+      const yearEnd2 = endOfYear(today)
+      const totalDays = Math.max(1, differenceInDays(yearEnd2, yearStart))
+      const yearPct = Math.round((differenceInDays(today, yearStart) / totalDays) * 100)
+      const usedAndScheduledHrs = state.plannedVacations
+        .filter((v) => parseISO(v.startDate) >= yearStart && parseISO(v.endDate) <= yearEnd2)
+        .reduce((sum, v) => {
+          const s = parseISO(v.startDate)
+          const e = parseISO(v.endDate)
+          const wd = countWorkDays(s, e, state.policy)
+          const perDay = v.actualHoursUsed ?? v.hoursPerDay ?? hoursPerDay
+          return sum + wd * perDay
+        }, 0)
+      if (annualAccrual < 1) return null
+      const utilPct = Math.round((usedAndScheduledHrs / annualAccrual) * 100)
+      if (utilPct < 1) return null
+      return {
+        text: `You've used ${utilPct}% of your annual PTO (${fmt(usedAndScheduledHrs)} of ${fmt(annualAccrual)} hrs) — year is ${yearPct}% done`,
+        type: 'info',
+      }
+    })())
+
     return pool.filter((x): x is Insight => x !== null).slice(0, 4)
   }, [state])
 

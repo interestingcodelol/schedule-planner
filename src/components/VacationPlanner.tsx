@@ -165,6 +165,24 @@ export function VacationPlanner() {
       impact.balanceAfterTrip + hoursNeeded - impact.balanceBeforeTrip,
     )
 
+    // Auto-mode split preview: for source='any', simulate the bank→vacation→sick
+    // drain against the per-pool balances right BEFORE the trip starts. This
+    // tells the user "Auto will pull X from bank, Y from vacation, Z from
+    // sick" so the choice isn't a black box. We use the day-before snapshot
+    // because mid-trip accruals don't replenish bank/sick — they only ever
+    // add to vacation.
+    let autoSplit: { bank: number; vacation: number; sick: number } | null = null
+    if (whatIfSource === 'any') {
+      const before = projectBalance(state, subDays(start, 1))
+      let remaining = hoursNeeded
+      const fromBank = Math.min(remaining, Math.max(0, before.bankBalance))
+      remaining -= fromBank
+      const fromVac = Math.min(remaining, Math.max(0, before.vacationBalance))
+      remaining -= fromVac
+      const fromSick = Math.min(remaining, Math.max(0, before.sickBalance))
+      autoSplit = { bank: fromBank, vacation: fromVac, sick: fromSick }
+    }
+
     return {
       workDays,
       hoursNeeded,
@@ -181,6 +199,7 @@ export function VacationPlanner() {
       funNote,
       isPartial,
       hrsPerDay,
+      autoSplit,
     }
   }, [whatIfStart, whatIfEnd, whatIfHours, whatIfSource, state, today])
 
@@ -436,6 +455,44 @@ export function VacationPlanner() {
                   </span>
                 </div>
               )}
+
+              {whatIfResult.autoSplit &&
+                whatIfResult.affordable &&
+                (whatIfResult.autoSplit.bank > 0 ||
+                  whatIfResult.autoSplit.vacation > 0 ||
+                  whatIfResult.autoSplit.sick > 0) && (
+                  <div className="mt-3 pt-2.5 border-t border-current/15 text-xs animate-fade-in">
+                    <div className="text-[10px] uppercase tracking-wider font-bold opacity-70 mb-1">
+                      Auto will use
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                      {whatIfResult.autoSplit.bank > 0 && (
+                        <span>
+                          <span className="font-semibold tabular-nums">
+                            {fmt(whatIfResult.autoSplit.bank)}h
+                          </span>{' '}
+                          <span className="opacity-70">bank</span>
+                        </span>
+                      )}
+                      {whatIfResult.autoSplit.vacation > 0 && (
+                        <span>
+                          <span className="font-semibold tabular-nums">
+                            {fmt(whatIfResult.autoSplit.vacation)}h
+                          </span>{' '}
+                          <span className="opacity-70">vacation</span>
+                        </span>
+                      )}
+                      {whatIfResult.autoSplit.sick > 0 && (
+                        <span>
+                          <span className="font-semibold tabular-nums">
+                            {fmt(whatIfResult.autoSplit.sick)}h
+                          </span>{' '}
+                          <span className="opacity-70">sick</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
             </div>
           </div>
         )}

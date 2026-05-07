@@ -1,12 +1,14 @@
 import { useRef, useState, useEffect } from 'react'
-import { format } from 'date-fns'
-import { X, Download, Upload, Trash2, RotateCcw } from 'lucide-react'
+import { format, parseISO } from 'date-fns'
+import { X, Download, Upload, Trash2, RotateCcw, CalendarDays, History } from 'lucide-react'
 import { useAppState } from '../context'
 import { PolicyEditor } from './PolicyEditor'
 import { exportState, validateImportedState } from '../lib/storage'
 import { generateDemoState } from '../lib/demoData'
 import { COMMON_TIMEZONES } from '../lib/timeUtils'
 import { useFocusTrap } from '../lib/useFocusTrap'
+import { downloadIcal, DEFAULT_ICAL_OPTIONS, type IcalExportOptions } from '../lib/icalExport'
+import { showToast } from '../lib/toastBus'
 
 type Props = {
   onClose: () => void
@@ -18,9 +20,28 @@ export function SettingsModal({ onClose }: Props) {
   const [confirmReset, setConfirmReset] = useState(false)
   const [confirmClear, setConfirmClear] = useState(0)
   const [importError, setImportError] = useState('')
+  const [showIcalOptions, setShowIcalOptions] = useState(false)
+  const [icalOptions, setIcalOptions] = useState<IcalExportOptions>(DEFAULT_ICAL_OPTIONS)
+  const [showHistory, setShowHistory] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   useFocusTrap(modalRef, true)
+
+  const handleJsonExport = () => {
+    exportState(state)
+    updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
+    showToast({ message: 'Backup downloaded' })
+  }
+
+  const handleIcalExport = () => {
+    const filename = downloadIcal(state, icalOptions)
+    updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
+    showToast({ message: `Calendar exported (${filename})`, duration: 5000 })
+  }
+
+  const toggleIcal = (key: keyof IcalExportOptions) => {
+    setIcalOptions((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -252,22 +273,23 @@ export function SettingsModal({ onClose }: Props) {
             <div className="space-y-5">
               <div>
                 <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
-                  Export & Import
+                  Backup & restore
                 </h3>
                 <div className="space-y-2.5">
                   <button
-                    onClick={() => exportState(state)}
+                    onClick={handleJsonExport}
                     className="w-full flex items-center gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
+                    title="Save a JSON file you can re-import later"
                   >
                     <Download className="w-4 h-4" />
-                    Export data
+                    Export backup (JSON)
                   </button>
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="w-full flex items-center gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
                   >
                     <Upload className="w-4 h-4" />
-                    Import data
+                    Import backup
                   </button>
                   <input
                     ref={fileInputRef}
@@ -279,6 +301,214 @@ export function SettingsModal({ onClose }: Props) {
                   {importError && (
                     <p className="text-red-400 text-sm">{importError}</p>
                   )}
+                  {state.profile.lastExportDate && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      Last backup:{' '}
+                      {format(parseISO(state.profile.lastExportDate), 'MMM d, yyyy')}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200/60 dark:border-gray-700/40 pt-5">
+                <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">
+                  Calendar export
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-snug">
+                  Generate an .ics file you can import into Outlook (it will appear in
+                  Teams calendar too), Google Calendar, or Apple Calendar.
+                </p>
+                <div className="space-y-2.5">
+                  <button
+                    onClick={() => setShowIcalOptions((v) => !v)}
+                    className="w-full flex items-center justify-between gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
+                    aria-expanded={showIcalOptions}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <CalendarDays className="w-4 h-4" />
+                      What to include
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {showIcalOptions ? 'Hide' : 'Show'}
+                    </span>
+                  </button>
+                  <div className="collapsible" data-open={showIcalOptions}>
+                    <div className="collapsible-inner">
+                      <div className="rounded-xl bg-gray-50 dark:bg-gray-800/40 p-4 space-y-2 border border-gray-200/60 dark:border-gray-700/40">
+                        <IcalToggle
+                          label="Scheduled time off"
+                          checked={icalOptions.includePlannedTimeOff}
+                          onChange={() => toggleIcal('includePlannedTimeOff')}
+                        />
+                        <IcalToggle
+                          label="Logged past absences"
+                          checked={icalOptions.includeLoggedPast}
+                          onChange={() => toggleIcal('includeLoggedPast')}
+                        />
+                        <IcalToggle
+                          label="Holidays"
+                          checked={icalOptions.includeHolidays}
+                          onChange={() => toggleIcal('includeHolidays')}
+                        />
+                        <IcalToggle
+                          label="Paydays (with accrual amount)"
+                          checked={icalOptions.includePaydays}
+                          onChange={() => toggleIcal('includePaydays')}
+                        />
+                        <IcalToggle
+                          label="Carryover payout date"
+                          checked={icalOptions.includeCarryoverPayout}
+                          onChange={() => toggleIcal('includeCarryoverPayout')}
+                        />
+                        <IcalToggle
+                          label="Bank hours payout window"
+                          checked={icalOptions.includeBankWindow}
+                          onChange={() => toggleIcal('includeBankWindow')}
+                        />
+                        <IcalToggle
+                          label="Work anniversaries / tier increases"
+                          checked={icalOptions.includeAnniversaries}
+                          onChange={() => toggleIcal('includeAnniversaries')}
+                        />
+                        <div className="flex items-center justify-between pt-2 border-t border-gray-200/60 dark:border-gray-700/40">
+                          <label
+                            htmlFor="ical-years"
+                            className="text-sm text-gray-600 dark:text-gray-300"
+                          >
+                            Years ahead
+                          </label>
+                          <input
+                            id="ical-years"
+                            type="number"
+                            min="1"
+                            max="5"
+                            value={icalOptions.yearsAhead}
+                            onChange={(e) =>
+                              setIcalOptions((prev) => ({
+                                ...prev,
+                                yearsAhead: Math.max(
+                                  1,
+                                  Math.min(5, Number(e.target.value) || 1),
+                                ),
+                              }))
+                            }
+                            className="w-16 px-2 py-1 text-sm tabular-nums text-right bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleIcalExport}
+                    className="w-full flex items-center gap-2.5 px-5 py-3 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20"
+                    title="Download .ics file"
+                  >
+                    <CalendarDays className="w-4 h-4" />
+                    Export to calendar (.ics)
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200/60 dark:border-gray-700/40 pt-5">
+                <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
+                  Backup reminder
+                </h3>
+                <div className="space-y-3">
+                  <label className="flex items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    <span>Show reminder when no backup in</span>
+                    <span className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        max="365"
+                        value={state.profile.backupReminderDays ?? 30}
+                        onChange={(e) =>
+                          updateProfile({
+                            backupReminderDays: Math.max(
+                              1,
+                              Math.min(365, Number(e.target.value) || 30),
+                            ),
+                          })
+                        }
+                        className="w-16 px-2 py-1 text-sm tabular-nums text-right bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-500 dark:text-gray-400">days</span>
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={!!state.profile.backupRemindersDisabled}
+                      onChange={(e) =>
+                        updateProfile({ backupRemindersDisabled: e.target.checked })
+                      }
+                      className="w-4 h-4 rounded accent-blue-500"
+                    />
+                    Disable backup reminders entirely
+                  </label>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200/60 dark:border-gray-700/40 pt-5">
+                <button
+                  onClick={() => setShowHistory((v) => !v)}
+                  className="w-full flex items-center justify-between text-sm font-bold text-gray-700 dark:text-gray-300 mb-2"
+                  aria-expanded={showHistory}
+                >
+                  <span className="flex items-center gap-2">
+                    <History className="w-4 h-4" />
+                    Recent catch-up history
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {(state.catchUpHistory?.length ?? 0)} entries · {showHistory ? 'Hide' : 'Show'}
+                  </span>
+                </button>
+                <div className="collapsible" data-open={showHistory}>
+                  <div className="collapsible-inner">
+                    <div className="rounded-xl bg-gray-50 dark:bg-gray-800/40 p-3 max-h-[260px] overflow-y-auto scroll-panel border border-gray-200/60 dark:border-gray-700/40">
+                      {state.catchUpHistory && state.catchUpHistory.length > 0 ? (
+                        <div className="space-y-3">
+                          {state.catchUpHistory.map((entry, i) => (
+                            <div key={i} className="text-xs">
+                              <div className="flex items-center justify-between text-gray-500 dark:text-gray-400 font-semibold">
+                                <span>{format(parseISO(entry.ranOn), 'MMM d, yyyy')}</span>
+                                <span className="text-[10px] uppercase tracking-wider">
+                                  synced through {format(parseISO(entry.syncedTo), 'MMM d')}
+                                </span>
+                              </div>
+                              <div className="text-gray-700 dark:text-gray-300 mt-0.5">
+                                {entry.summary}
+                              </div>
+                              {entry.events.length > 0 && (
+                                <ul className="mt-1 ml-2 text-gray-400 dark:text-gray-500 space-y-0.5">
+                                  {entry.events.slice(0, 6).map((e, j) => (
+                                    <li key={j} className="truncate">
+                                      {format(parseISO(e.date), 'MMM d')} · {e.label}{' '}
+                                      <span className="tabular-nums">
+                                        ({e.delta > 0 ? '+' : ''}
+                                        {Number.isInteger(e.delta) ? e.delta : e.delta.toFixed(2)})
+                                      </span>
+                                    </li>
+                                  ))}
+                                  {entry.events.length > 6 && (
+                                    <li className="italic">
+                                      … and {entry.events.length - 6} more
+                                    </li>
+                                  )}
+                                </ul>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-2">
+                          No catch-up runs recorded yet. Entries appear here after
+                          the app reconciles missed paydays, sick grants, or
+                          finished vacations.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -316,5 +546,27 @@ export function SettingsModal({ onClose }: Props) {
         </div>
       </div>
     </div>
+  )
+}
+
+function IcalToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: () => void
+}) {
+  return (
+    <label className="flex items-center gap-2.5 text-sm text-gray-600 dark:text-gray-300 cursor-pointer">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        className="w-4 h-4 rounded accent-blue-500"
+      />
+      {label}
+    </label>
   )
 }

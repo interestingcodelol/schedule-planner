@@ -4,8 +4,10 @@ import {
   CalendarDays,
   CheckCircle,
   Lock,
+  Pencil,
   Trash2,
   Unlock,
+  X,
   XCircle,
 } from 'lucide-react'
 import { useAppState } from '../context'
@@ -38,12 +40,60 @@ type Props = {
 export function UpcomingVacationRow({ vacation, onJump }: Props) {
   const { state, addVacation, removeVacation, updateVacation } = useAppState()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editStart, setEditStart] = useState(vacation.startDate)
+  const [editEnd, setEditEnd] = useState(vacation.endDate)
+  const [editError, setEditError] = useState('')
   const emojiRef = useRef<HTMLSpanElement>(null)
   const today = startOfDay(new Date())
   const start = parseISO(vacation.startDate)
   const end = parseISO(vacation.endDate)
   const isPast = isBefore(end, today)
   const daysUntil = differenceInDays(start, today)
+
+  const enterEdit = () => {
+    setEditStart(vacation.startDate)
+    setEditEnd(vacation.endDate)
+    setEditError('')
+    setIsEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setIsEditing(false)
+    setEditError('')
+  }
+
+  const saveEdit = () => {
+    if (!editStart || !editEnd) {
+      setEditError('Both dates are required')
+      return
+    }
+    if (editEnd < editStart) {
+      setEditError('End date must be on or after start date')
+      return
+    }
+    // Check for collisions with OTHER existing entries (not this one).
+    const conflicts = state.plannedVacations.filter(
+      (v) =>
+        v.id !== vacation.id &&
+        v.startDate <= editEnd &&
+        v.endDate >= editStart,
+    )
+    if (conflicts.length > 0) {
+      setEditError(
+        `Overlaps with ${conflicts.length} existing entr${
+          conflicts.length === 1 ? 'y' : 'ies'
+        } — remove or merge those first`,
+      )
+      return
+    }
+    updateVacation(vacation.id, {
+      startDate: editStart,
+      endDate: editEnd,
+    })
+    showToast({ message: 'Dates updated' })
+    setIsEditing(false)
+  }
 
   useEffect(() => {
     if (!showEmojiPicker) return
@@ -217,6 +267,18 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
               )}
             </span>
           )}
+          {!vacation.locked && !isPast && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                enterEdit()
+              }}
+              className="p-1 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-90 transition-all"
+              title="Edit dates"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -250,6 +312,58 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
           )}
         </div>
       </div>
+
+      {isEditing && (
+        <div
+          className="mt-2.5 rounded-lg bg-gray-50 dark:bg-gray-800/40 border border-gray-200/60 dark:border-gray-700/40 p-2.5 space-y-2 animate-fade-in"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
+                Start
+              </label>
+              <input
+                type="date"
+                value={editStart}
+                onChange={(e) => setEditStart(e.target.value)}
+                className="w-full px-2 py-1.5 text-sm bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
+                End
+              </label>
+              <input
+                type="date"
+                value={editEnd}
+                onChange={(e) => setEditEnd(e.target.value)}
+                min={editStart || undefined}
+                className="w-full px-2 py-1.5 text-sm bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+          {editError && (
+            <p className="text-xs text-red-500 dark:text-red-400">{editError}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={cancelEdit}
+              className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg transition-colors flex items-center gap-1"
+            >
+              <X className="w-3 h-3" />
+              Cancel
+            </button>
+            <button
+              onClick={saveEdit}
+              className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-lg transition-colors"
+            >
+              <Pencil className="w-3 h-3" />
+              Save dates
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

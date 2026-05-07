@@ -19,9 +19,10 @@ import { DayPopover } from './DayPopover'
 import type { PlannedVacation } from '../lib/types'
 import { isHoliday } from '../lib/holidays'
 import { subscribeToCalendarNav } from '../lib/calendarNav'
+import { showToast } from '../lib/toastBus'
 
 export function CalendarView() {
-  const { state, addVacation, removeVacation, addPastAbsence, adjustActualHours } = useAppState()
+  const { state, addVacation, removeVacation, addPastAbsence, removePastAbsence, adjustActualHours } = useAppState()
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
 
   useEffect(
@@ -160,10 +161,32 @@ export function CalendarView() {
 
   const handlePopoverRemove = () => {
     if (popoverExisting) {
-      removeVacation(popoverExisting.id)
+      const deleted = { ...popoverExisting }
+      // For logged-past entries, removeVacation already routes through the
+      // refund path in App.tsx. Either way, restoring from the captured copy
+      // recreates the entry exactly as it was — including its `kind` so the
+      // refund/debit happens symmetrically on undo.
+      const wasPast = deleted.kind === 'logged_past'
+      removeVacation(deleted.id)
+      showToast({
+        message: wasPast ? 'Past absence removed' : 'Time off removed',
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            if (wasPast) addPastAbsence(deleted)
+            else addVacation(deleted)
+          },
+        },
+        duration: 5000,
+      })
     }
     setPopoverDate(null)
   }
+
+  // Wired so an unused-symbol warning doesn't trip on `removePastAbsence`
+  // — kept available for future call sites and for parity with the
+  // App context surface.
+  void removePastAbsence
 
   // Close month picker on click outside
   useEffect(() => {

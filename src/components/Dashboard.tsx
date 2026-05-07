@@ -14,6 +14,7 @@ import { ChatAssistant } from './ChatAssistant'
 import { UpcomingMenu } from './UpcomingMenu'
 import { BalanceForecast } from './BalanceForecast'
 import { InlineToast } from './Toast'
+import { BackupNag } from './BackupNag'
 
 export function Dashboard() {
   const { state, setShowTour, isDemo, resetToSetup } = useAppState()
@@ -127,6 +128,7 @@ export function Dashboard() {
           />
         </div>
         <div className="flex items-center gap-2 shrink-0" data-tour="settings">
+          <BackupNag />
           <InlineToast />
           <button
             onClick={() => setShowTour(true)}

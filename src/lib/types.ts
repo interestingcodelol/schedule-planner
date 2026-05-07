@@ -86,6 +86,13 @@ export type UserProfile = {
    *  deductions that occurred while the tab was closed. Optional for
    *  backward compatibility; migrateState backfills it. */
   lastSyncDate?: string
+  /** ISO date the user last downloaded a backup (JSON or iCal). Drives
+   *  the auto-backup reminder banner. */
+  lastExportDate?: string
+  /** When true, the auto-backup reminder banner is suppressed. */
+  backupRemindersDisabled?: boolean
+  /** How many days between backup reminders. Default 30. */
+  backupReminderDays?: number
 }
 
 export type PlannedVacation = {
@@ -110,6 +117,28 @@ export type PlannedVacation = {
   actualHoursUsed?: number
 }
 
+/** A condensed catch-up event written to history when reconcile() applies
+ *  changes. Kept to one line per pool so 30 ticks worth of catch-ups don't
+ *  bloat localStorage. */
+export type CatchUpHistoryEntry = {
+  /** ISO date the catch-up ran (the day the user opened the app). */
+  ranOn: string
+  /** ISO date the catch-up reconciled through. Same as ranOn unless the
+   *  catch-up window covered multiple days. */
+  syncedTo: string
+  /** Compact one-line summary, same string the toast shows. */
+  summary: string
+  /** Per-event detail for the audit log. Stored separately from the
+   *  summary so we don't duplicate the work. */
+  events: Array<{
+    date: string
+    type: string
+    pool: 'vacation' | 'sick' | 'bank'
+    delta: number
+    label: string
+  }>
+}
+
 export type AppState = {
   profile: UserProfile
   policy: PolicyConfig
@@ -118,6 +147,9 @@ export type AppState = {
   theme: 'light' | 'dark'
   showTour: boolean
   version: number
+  /** Rolling history of the last N catch-up runs. Capped to 50 entries
+   *  in App.tsx. Optional for backward compatibility. */
+  catchUpHistory?: CatchUpHistoryEntry[]
 }
 
 export type ProjectionEvent = {

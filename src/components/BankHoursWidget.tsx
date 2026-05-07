@@ -114,22 +114,24 @@ export function BankHoursWidget() {
         </div>
       </div>
 
-      {showHistory && allEntries.length === 0 && hasBalance && (
-        <div className="border-t border-gray-200/60 dark:border-gray-700/40 px-5 py-3.5 text-center">
-          <p className="text-xs text-gray-400 dark:text-gray-500">
-            No log entries — this balance was set directly or restored from a backup.
-          </p>
-          <button
-            onClick={handleResetBalance}
-            className="mt-2 text-xs font-semibold text-red-500 hover:text-red-400 transition-colors"
-          >
-            Reset balance to 0
-          </button>
+      <div className="collapsible" data-open={showHistory && allEntries.length === 0 && hasBalance}>
+        <div className="collapsible-inner">
+          <div className="border-t border-gray-200/60 dark:border-gray-700/40 px-5 py-3.5 text-center">
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              No log entries — this balance was set directly or restored from a backup.
+            </p>
+            <button
+              onClick={handleResetBalance}
+              className="mt-2 text-xs font-semibold text-red-500 hover:text-red-400 transition-colors"
+            >
+              Reset balance to 0
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
       {showHistory && allEntries.length > 0 && (
-        <div className="border-t border-gray-200/60 dark:border-gray-700/40 divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[200px] overflow-y-auto scroll-panel">
+        <div className="border-t border-gray-200/60 dark:border-gray-700/40 divide-y divide-gray-100 dark:divide-gray-800/60 max-h-[200px] overflow-y-auto scroll-panel animate-fade-in">
           {allEntries.map((entry) => (
             <div key={entry.id} className="px-5 py-2 flex items-center justify-between group hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors">
               <div className="text-sm flex items-center gap-2">

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { format, isBefore, startOfDay } from 'date-fns'
+import { useMemo, useState, useEffect, useRef } from 'react'
+import { format, isBefore, startOfDay, subDays } from 'date-fns'
 import { X, Clock, CalendarOff, CalendarCheck, Pencil, History } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
 import {
@@ -9,6 +9,11 @@ import {
   roundToQuarter,
 } from '../lib/timeUtils'
 import { useFocusTrap } from '../lib/useFocusTrap'
+import { useAppState } from '../context'
+import {
+  getEffectiveCurrentBalances,
+  projectBalance,
+} from '../lib/projection'
 
 type DayPopoverMode = 'plan' | 'log_past' | 'adjust_past'
 
@@ -43,6 +48,7 @@ export function DayPopover({
   onRemove,
   onClose,
 }: Props) {
+  const { state } = useAppState()
   const workStart = 8
   const workEnd = workStart + hoursPerWorkDay
   const isPastDay = isBefore(date, startOfDay(new Date()))
@@ -79,6 +85,38 @@ export function DayPopover({
     partialOrFull === 'full'
       ? hoursPerWorkDay
       : Math.max(0, roundToQuarter(hhmmToHours(endTime) - hhmmToHours(startTime)))
+
+  // Auto-mode preview: simulate the bank → vacation → sick drain so users
+  // know exactly which pool will pay before they save. For past days
+  // (logged absences) we use the live current balance; for future days we
+  // project balances forward to the day BEFORE the entry, since mid-day
+  // accruals don't help cover that day.
+  const autoSplit = useMemo(() => {
+    if (source !== 'any') return null
+    if (hoursOff <= 0) return null
+    let bank: number
+    let vacation: number
+    let sick: number
+    if (mode === 'log_past') {
+      const eff = getEffectiveCurrentBalances(state)
+      bank = eff.bank
+      vacation = eff.vacation
+      sick = eff.sick
+    } else {
+      const projection = projectBalance(state, subDays(date, 1))
+      bank = projection.bankBalance
+      vacation = projection.vacationBalance
+      sick = projection.sickBalance
+    }
+    let remaining = hoursOff
+    const fromBank = Math.min(remaining, Math.max(0, bank))
+    remaining -= fromBank
+    const fromVac = Math.min(remaining, Math.max(0, vacation))
+    remaining -= fromVac
+    const fromSick = Math.min(remaining, Math.max(0, sick))
+    remaining -= fromSick
+    return { bank: fromBank, vacation: fromVac, sick: fromSick, short: Math.max(0, remaining) }
+  }, [source, hoursOff, mode, state, date])
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -440,6 +478,40 @@ export function DayPopover({
                   </>
                 )}
               </select>
+              {autoSplit && (
+                <div className="mt-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200/40 dark:border-blue-800/30 px-2.5 py-1.5 text-[11px] text-blue-700 dark:text-blue-300 animate-fade-in">
+                  <span className="font-bold uppercase tracking-wider mr-1.5">Will use:</span>
+                  {autoSplit.bank > 0 || autoSplit.vacation > 0 || autoSplit.sick > 0 ? (
+                    <span className="space-x-2">
+                      {autoSplit.bank > 0 && (
+                        <span>
+                          <span className="font-bold tabular-nums">{fmt(autoSplit.bank)}h</span>{' '}
+                          bank
+                        </span>
+                      )}
+                      {autoSplit.vacation > 0 && (
+                        <span>
+                          <span className="font-bold tabular-nums">{fmt(autoSplit.vacation)}h</span>{' '}
+                          vacation
+                        </span>
+                      )}
+                      {autoSplit.sick > 0 && (
+                        <span>
+                          <span className="font-bold tabular-nums">{fmt(autoSplit.sick)}h</span>{' '}
+                          sick
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="opacity-80">No hours available — would be a shortfall</span>
+                  )}
+                  {autoSplit.short > 0 && (
+                    <span className="ml-2 text-amber-600 dark:text-amber-400 font-bold tabular-nums">
+                      ({fmt(autoSplit.short)}h short)
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             <input
               type="text"

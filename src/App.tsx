@@ -40,6 +40,7 @@ function migrateState(loaded: AppState): AppState {
       lastSyncDate,
     },
     bankHoursLog: loaded.bankHoursLog ?? [],
+    catchUpHistory: loaded.catchUpHistory ?? [],
     showTour: loaded.showTour ?? false,
     policy: {
       ...loaded.policy,
@@ -52,6 +53,28 @@ function migrateState(loaded: AppState): AppState {
       kind: v.kind ?? ('planned' as const),
     })),
   }
+}
+
+const CATCH_UP_HISTORY_LIMIT = 50
+
+function appendCatchUpHistory(state: AppState, result: ReturnType<typeof catchUpState>): AppState {
+  if (!result.applied) return result.state
+  const tz = state.profile.timezone || 'America/New_York'
+  const entry = {
+    ranOn: getNowInZone(tz).isoDate,
+    syncedTo: result.syncedTo,
+    summary: summarizeCatchUp(result.events),
+    events: result.events.map((e) => ({
+      date: e.date,
+      type: e.type,
+      pool: e.pool,
+      delta: e.delta,
+      label: e.label,
+    })),
+  }
+  const prev = result.state.catchUpHistory ?? []
+  const next = [entry, ...prev].slice(0, CATCH_UP_HISTORY_LIMIT)
+  return { ...result.state, catchUpHistory: next }
 }
 
 /**
@@ -71,7 +94,7 @@ function reconcile(state: AppState): AppState {
       })
     }, 0)
   }
-  return result.state
+  return appendCatchUpHistory(state, result)
 }
 
 /** Field-level identity check: did any of the user-visible balance fields
@@ -188,7 +211,7 @@ export default function App() {
             duration: 6000,
           })
         }, 0)
-        return { ...prev, state: result.state }
+        return { ...prev, state: appendCatchUpHistory(prev.state, result) }
       })
     }
     const startInterval = () => {
@@ -223,6 +246,21 @@ export default function App() {
       setAppData((prev) => {
         if (!prev.state) {
           return { state: incoming, isDemo: incoming.profile.displayName === 'Demo User' }
+        }
+        // Only toast when the change actually came from elsewhere — guard
+        // on a structural diff so saving back a no-op doesn't spam users.
+        const same =
+          JSON.stringify(prev.state.profile) === JSON.stringify(incoming.profile) &&
+          JSON.stringify(prev.state.plannedVacations) ===
+            JSON.stringify(incoming.plannedVacations) &&
+          JSON.stringify(prev.state.bankHoursLog) === JSON.stringify(incoming.bankHoursLog)
+        if (!same) {
+          setTimeout(() => {
+            showToast({
+              message: 'Updated from another tab',
+              duration: 5000,
+            })
+          }, 0)
         }
         return { ...prev, state: incoming }
       })
