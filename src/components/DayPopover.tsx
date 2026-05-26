@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
-import { format, isBefore, startOfDay, subDays } from 'date-fns'
+import { format, subDays } from 'date-fns'
 import { X, Clock, CalendarOff, CalendarCheck, Pencil, History } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
 import {
@@ -7,6 +7,7 @@ import {
   hoursToHHMM,
   formatTimeLabel,
   roundToQuarter,
+  getNowInZone,
 } from '../lib/timeUtils'
 import { useFocusTrap } from '../lib/useFocusTrap'
 import { useAppState } from '../context'
@@ -51,7 +52,14 @@ export function DayPopover({
   const { state } = useAppState()
   const workStart = 8
   const workEnd = workStart + hoursPerWorkDay
-  const isPastDay = isBefore(date, startOfDay(new Date()))
+  // Derive "today" from the profile timezone (not the browser's local clock)
+  // so plan vs logged-past routing matches the rest of the app near midnight
+  // or when the browser TZ differs from the profile TZ. The calendar cell's
+  // `date` is a local-midnight Date; comparing on the formatted yyyy-MM-dd
+  // string keeps the comparison timezone-agnostic and consistent with
+  // CalendarDay / projection.
+  const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
+  const isPastDay = format(date, 'yyyy-MM-dd') < todayIso
 
   const mode: DayPopoverMode = isPastDay
     ? existing
@@ -198,7 +206,7 @@ export function DayPopover({
         <div
           ref={modalRef}
           tabIndex={-1}
-          className="glass-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
+          className="glass-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[90vh] overflow-y-auto"
           role="dialog"
           aria-modal="true"
           aria-label={`Adjust actual hours used for ${format(date, 'MMMM d')}`}

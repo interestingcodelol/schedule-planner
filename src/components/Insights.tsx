@@ -36,25 +36,24 @@ export function Insights() {
     const annualAccrual = tier.hoursPerPayPeriod * periodsPerYear
     const hoursPerDay = state.policy.hoursPerWorkDay
 
-    const total =
-      state.profile.currentVacationHours +
-      state.profile.currentSickHours +
-      state.profile.currentBankHours
-
     const yearEndProj = projectBalance(state, yearEnd)
 
     const futureVacations = state.plannedVacations.filter(
       (v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today),
     )
-    const plannedHours = futureVacations.reduce((sum, v) => {
-      const start = parseISO(v.startDate)
-      const end = parseISO(v.endDate)
-      const effectiveStart = start > today ? start : today
-      const workDays = countWorkDays(effectiveStart, end, state.policy)
-      const perDay = v.hoursPerDay ?? hoursPerDay
-      return sum + workDays * perDay
-    }, 0)
-    const sickDaysBuffer = Math.floor(Math.max(0, total - plannedHours) / hoursPerDay)
+
+    // Buffer = hours left over AFTER all planned time off is funded, derived
+    // from the projection so this agrees with StatusCards / VacationPlanner
+    // (which use projectBalance). The projection already honors hourSource and
+    // actualHoursUsed when deducting, and surfaces any uncovered hours as
+    // `shortfall`. Guard against absent projection fields so we never crash.
+    const projectedRemaining = Number.isFinite(yearEndProj?.totalAvailable)
+      ? yearEndProj.totalAvailable
+      : 0
+    const projectedShortfall = Number.isFinite(yearEndProj?.shortfall)
+      ? yearEndProj.shortfall
+      : 0
+    const sickDaysBuffer = Math.floor(Math.max(0, projectedRemaining) / hoursPerDay)
 
     const carryoverCap =
       state.policy.carryoverCapStrategy === 'unlimited'
@@ -69,15 +68,18 @@ export function Insights() {
       const surplus = yearEndProj.vacationBalance - carryoverCap
       if (surplus > 0) {
         pool.push({
-          text: `Projected to exceed the ${Math.round(carryoverCap)}h carryover cap by ${fmt(surplus)} hrs — excess is paid out on the first February pay date`,
+          text: `Projected to exceed the ${Math.round(carryoverCap)}h carryover cap by **${fmt(surplus)} hrs** — excess is paid out on the first February pay date`,
           type: 'warning',
         })
       }
     }
 
-    if (sickDaysBuffer < 1 && futureVacations.length > 0) {
+    if ((sickDaysBuffer < 1 || projectedShortfall > 0) && futureVacations.length > 0) {
       pool.push({
-        text: `Your planned time off accounts for nearly all of your available hours`,
+        text:
+          projectedShortfall > 0
+            ? `Your planned time off exceeds your projected hours by **${fmt(projectedShortfall)} hrs** — you'll be short`
+            : `Your planned time off accounts for **nearly all** of your available hours`,
         type: 'warning',
       })
     }
@@ -94,7 +96,7 @@ export function Insights() {
       if (yearsToNext <= 0 || yearsToNext > 0.5) return null
       const daysToNext = Math.max(1, Math.ceil(yearsToNext * 365.25))
       return {
-        text: `Accrual rate increases from ${fmt(tier.hoursPerPayPeriod)} to ${fmt(nextTier.hoursPerPayPeriod)} hrs/period in ${daysToNext} day${daysToNext !== 1 ? 's' : ''} (work anniversary)`,
+        text: `Accrual rate increases to **${fmt(nextTier.hoursPerPayPeriod)} hrs/period** in ${daysToNext} day${daysToNext !== 1 ? 's' : ''} (work anniversary)`,
         type: 'positive',
       }
     })())
@@ -103,7 +105,7 @@ export function Insights() {
       const surplus = yearEndProj.vacationBalance - carryoverCap
       if (surplus > -20 && surplus <= 0) {
         pool.push({
-          text: `Projected year-end vacation is ${fmt(yearEndProj.vacationBalance)} hrs, under the ${Math.round(carryoverCap)}h carryover cap`,
+          text: `Projected year-end vacation is **${fmt(yearEndProj.vacationBalance)} hrs**, under the ${Math.round(carryoverCap)}h carryover cap`,
           type: 'positive',
         })
       }
@@ -113,7 +115,7 @@ export function Insights() {
       const payoutMonth = state.policy.bankHoursPayoutStart.month
       const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
       pool.push({
-        text: `${fmt(state.profile.currentBankHours)} bank hrs in your account — payout window opens in ${monthNames[payoutMonth]}`,
+        text: `**${fmt(state.profile.currentBankHours)} bank hrs** in your account — payout window opens in ${monthNames[payoutMonth]}`,
         type: 'info',
       })
     }
@@ -131,7 +133,7 @@ export function Insights() {
       const ytdAccrual = periodsSoFar * tier.hoursPerPayPeriod
       if (yearPct < 5 || ytdAccrual < 1) return null
       return {
-        text: `${yearPct}% through the year — you've accrued ~${fmt(ytdAccrual)} vacation hrs so far`,
+        text: `${yearPct}% through the year — you've accrued **~${fmt(ytdAccrual)} vacation hrs** so far`,
         type: 'info',
       }
     })())
@@ -145,14 +147,14 @@ export function Insights() {
       const upcoming = all.filter((d) => d > today && d <= lookahead).length
       if (upcoming === 0) return null
       return {
-        text: `${upcoming} paid holiday${upcoming !== 1 ? 's' : ''} on the calendar in the next 90 days`,
+        text: `**${upcoming} paid holiday${upcoming !== 1 ? 's' : ''}** on the calendar in the next 90 days`,
         type: 'positive',
       }
     })())
 
     const monthlyAccrual = (tier.hoursPerPayPeriod * 30) / state.policy.payPeriodLengthDays
     pool.push({
-      text: `You earn ~${fmt(monthlyAccrual)} hrs/month — that's about ${fmt(monthlyAccrual / hoursPerDay)} days of time off per month`,
+      text: `You earn **~${fmt(monthlyAccrual)} hrs/month** — that's about ${fmt(monthlyAccrual / hoursPerDay)} days of time off per month`,
       type: 'info',
     })
 
@@ -178,7 +180,7 @@ export function Insights() {
       const holidayPct = Math.round((holidayCount / totalOff) * 100)
       const ptoPct = 100 - holidayPct
       return {
-        text: `${holidayPct}% of your year-off days come from holidays · ${ptoPct}% from your own PTO (${holidayCount} holidays + ${plannedDays} planned)`,
+        text: `**${holidayPct}%** of your year-off days come from holidays · **${ptoPct}%** from your own PTO (${holidayCount} holidays + ${plannedDays} planned)`,
         type: 'info',
       }
     })())
@@ -204,7 +206,7 @@ export function Insights() {
       const utilPct = Math.round((usedAndScheduledHrs / annualAccrual) * 100)
       if (utilPct < 1) return null
       return {
-        text: `You've used ${utilPct}% of your annual PTO (${fmt(usedAndScheduledHrs)} of ${fmt(annualAccrual)} hrs) — year is ${yearPct}% done`,
+        text: `You've used **${utilPct}%** of your annual PTO (${fmt(usedAndScheduledHrs)} of ${fmt(annualAccrual)} hrs) — year is ${yearPct}% done`,
         type: 'info',
       }
     })())
@@ -214,26 +216,45 @@ export function Insights() {
 
   if (insights.length === 0) return null
 
+  // Three on-brand semantic colors only: informational tips use the app's
+  // blue/cyan brand hue (not washed-out gray), positive milestones stay
+  // emerald, and warnings stay amber. Keeps the row colorful but restrained.
   const colorMap = {
     positive: 'text-emerald-600 dark:text-emerald-400',
     warning: 'text-amber-600 dark:text-amber-400',
-    info: 'text-gray-500 dark:text-gray-400',
+    info: 'text-sky-700 dark:text-sky-300',
   }
 
   const dotMap = {
     positive: 'bg-emerald-500',
     warning: 'bg-amber-500',
-    info: 'bg-gray-400 dark:bg-gray-500',
+    info: 'bg-sky-500',
   }
 
   return (
-    <div className="glass-card rounded-xl px-4 py-3 flex items-start gap-3">
+    <div className="glass-card rounded-xl px-3 py-2 sm:px-4 sm:py-3 flex items-start gap-2 sm:gap-3">
       <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-      <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+      <div className="flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-1 sm:gap-y-1.5">
         {insights.map((insight, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full shrink-0 ${dotMap[insight.type]}`} />
-            <span className={`text-sm ${colorMap[insight.type]}`}>{insight.text}</span>
+          <div
+            key={i}
+            className={`flex items-start gap-1.5 ${i >= 2 ? 'hidden lg:flex' : ''}`}
+          >
+            <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 mt-1.5 sm:mt-1 rounded-full shrink-0 ${dotMap[insight.type]}`} />
+            {/* Base text is a calm muted gray; only the key value(s) wrapped in
+             *  **…** get the semantic accent color, so each tip highlights what
+             *  matters without flooding the row with color. */}
+            <span className="text-xs sm:text-sm leading-snug text-gray-500 dark:text-gray-400">
+              {insight.text.split('**').map((seg, j) =>
+                j % 2 === 1 ? (
+                  <span key={j} className={`font-semibold ${colorMap[insight.type]}`}>
+                    {seg}
+                  </span>
+                ) : (
+                  seg
+                ),
+              )}
+            </span>
           </div>
         ))}
       </div>

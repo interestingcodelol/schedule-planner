@@ -292,7 +292,10 @@ function extractDateRange(
     if (m !== undefined) {
       const d1 = parseInt(monthDayRange[2])
       const d2 = parseInt(monthDayRange[3])
-      const rolled = new Date(thisYear, m, d1) < today
+      // Roll the whole range based on its END date, not its start. A range
+      // only jumps to next year if its last day is already in the past; if
+      // today falls inside the range we keep the current-year dates.
+      const rolled = new Date(thisYear, m, d2) < today
       const year = rolled ? thisYear + 1 : thisYear
       let start = new Date(year, m, d1)
       let end = new Date(year, m, d2)
@@ -311,9 +314,15 @@ function extractDateRange(
     if (m1 !== undefined && m2 !== undefined) {
       const d1 = parseInt(monthDayToMonthDay[2])
       const d2 = parseInt(monthDayToMonthDay[4])
-      const rolled = new Date(thisYear, m1, d1) < today
+      // A range whose end month is before its start month genuinely crosses
+      // the year boundary (e.g. "Dec 30 - Jan 3"), so the end is one year
+      // after the start. Roll the whole range based on its END date: only
+      // jump to next year if the last day is already past.
+      const crossesYearEnd = m2 < m1
+      const endYearAtThisYear = crossesYearEnd ? thisYear + 1 : thisYear
+      const rolled = new Date(endYearAtThisYear, m2, d2) < today
       const year1 = rolled ? thisYear + 1 : thisYear
-      const year2 = m2 < m1 ? year1 + 1 : year1
+      const year2 = crossesYearEnd ? year1 + 1 : year1
       let start = new Date(year1, m1, d1)
       let end = new Date(year2, m2, d2)
       if (end < start) [start, end] = [end, start]
@@ -326,12 +335,24 @@ function extractDateRange(
     /(\d{1,2})[/-](\d{1,2})\s*[-–]\s*(\d{1,2})[/-](\d{1,2})/,
   )
   if (slashRange) {
-    const s = new Date(thisYear, parseInt(slashRange[1]) - 1, parseInt(slashRange[2]))
-    const e = new Date(thisYear, parseInt(slashRange[3]) - 1, parseInt(slashRange[4]))
+    const m1 = parseInt(slashRange[1]) - 1
+    const sd = parseInt(slashRange[2])
+    const m2 = parseInt(slashRange[3]) - 1
+    const ed = parseInt(slashRange[4])
+    const s = new Date(thisYear, m1, sd)
+    const e = new Date(thisYear, m2, ed)
     if (isValid(s) && isValid(e)) {
-      const rolled = s < today
-      let startD = rolled ? addDays(s, 365) : s
-      let endD = e < today ? addDays(e, 365) : e
+      // Same whole-range logic as the month/day range: a range whose end
+      // month precedes its start month crosses the year boundary, and the
+      // range only rolls to next year if its END date is already past.
+      // Use a calendar-year roll (new Date(year+1, ...)), not addDays(±365).
+      const crossesYearEnd = m2 < m1
+      const endYearAtThisYear = crossesYearEnd ? thisYear + 1 : thisYear
+      const rolled = new Date(endYearAtThisYear, m2, ed) < today
+      const year1 = rolled ? thisYear + 1 : thisYear
+      const year2 = crossesYearEnd ? year1 + 1 : year1
+      let startD = new Date(year1, m1, sd)
+      let endD = new Date(year2, m2, ed)
       if (endD < startD) [startD, endD] = [endD, startD]
       return { start: startD, end: endD, rolledForward: rolled }
     }
@@ -355,13 +376,18 @@ function extractDateRange(
   }
 
   // --- Single date tokens ---
+  // A single date that lands in a future year is one tryParseDate rolled
+  // forward because the same month/day already passed this year. Surface the
+  // same "interpreting as next year" notice that ranges set.
+  const singleRolled = (d: Date): boolean =>
+    d.getFullYear() > thisYear && new Date(thisYear, d.getMonth(), d.getDate()) < today
   const tokens = lower.replace(/[,?!.]/g, '').split(/\s+/)
   for (let i = 0; i < tokens.length; i++) {
     const single = tryParseDate(tokens[i])
-    if (single) return { start: single, end: single }
+    if (single) return { start: single, end: single, rolledForward: singleRolled(single) }
     if (i + 1 < tokens.length) {
       const pair = tryParseDate(`${tokens[i]} ${tokens[i + 1]}`)
-      if (pair) return { start: pair, end: pair }
+      if (pair) return { start: pair, end: pair, rolledForward: singleRolled(pair) }
     }
   }
 

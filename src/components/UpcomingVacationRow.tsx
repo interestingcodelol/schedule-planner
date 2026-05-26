@@ -198,7 +198,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
                   </button>
                   {showEmojiPicker && (
                     <div
-                      className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48 animate-in fade-in zoom-in-95 duration-150"
+                      className="absolute top-7 left-0 z-20 glass-card rounded-xl shadow-xl p-2 grid grid-cols-5 gap-1 w-48 max-w-[calc(100vw-2rem)] animate-in fade-in zoom-in-95 duration-150"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {EMOJI_OPTIONS.map((emoji) => (
@@ -273,7 +273,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
                 e.stopPropagation()
                 enterEdit()
               }}
-              className="p-1 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-90 transition-all"
+              className="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 active:scale-90 transition-all"
               title="Edit dates"
             >
               <Pencil className="w-3.5 h-3.5" />
@@ -284,7 +284,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
               e.stopPropagation()
               updateVacation(vacation.id, { locked: !vacation.locked })
             }}
-            className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 active:scale-90 transition-all"
+            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 active:scale-90 transition-all"
             title={vacation.locked ? 'Unlock' : 'Lock'}
           >
             {vacation.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
@@ -304,7 +304,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
                   duration: 5000,
                 })
               }}
-              className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 active:scale-90 transition-all"
+              className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 active:scale-90 transition-all"
               title="Delete"
             >
               <Trash2 className="w-3.5 h-3.5" />

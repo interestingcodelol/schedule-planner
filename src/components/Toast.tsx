@@ -18,8 +18,8 @@ export function InlineToast() {
   if (!toast) return null
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-sm animate-slide-up">
-      <span className="text-gray-600 dark:text-gray-300">{toast.message}</span>
+    <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-gray-100 dark:bg-gray-800/80 text-sm animate-slide-up max-w-[calc(100vw-2rem)]">
+      <span className="min-w-0 break-words text-gray-600 dark:text-gray-300">{toast.message}</span>
       {toast.action && (
         <button
           onClick={() => {

@@ -293,7 +293,7 @@ export function VacationPlanner() {
         </div>
 
         {/* Hour source + partial day */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="col-span-2">
             <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Use hours from
@@ -411,7 +411,7 @@ export function VacationPlanner() {
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs opacity-90">
+              <div className="mt-3 grid grid-cols-3 gap-x-2 sm:gap-x-3 gap-y-1.5 text-xs opacity-90">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
                     Needed

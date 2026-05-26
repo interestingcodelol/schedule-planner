@@ -162,6 +162,68 @@ describe('chat "can I afford" edge cases', () => {
   })
 })
 
+describe('chat: date-range year-roll edge cases', () => {
+  // The rolled-forward notice text the parser surfaces for next-year dates.
+  const NEXT_YEAR_NOTICE = /next year/i
+
+  it('(a) range straddling today keeps the current year (does not roll)', () => {
+    // today = mid-range. "July 14-18" with today July 16 must stay 2026,
+    // not jump to 2027 just because the start day (14) is in the past.
+    mockToday('2026-07-16')
+    const state = makeState()
+    const r = processChat('take off july 14-18', state)
+    // Should reference July (current year) and NOT show the next-year notice.
+    expect(r.text).not.toMatch(NEXT_YEAR_NOTICE)
+    expect(r.action).toBeDefined()
+    expect(r.action?.startDate).toBe('2026-07-14')
+    expect(r.action?.endDate).toBe('2026-07-18')
+  })
+
+  it('(b) fully-past range rolls to next year as a contiguous same-year range', () => {
+    // today = July 16, "July 4-8" is entirely in the past → roll BOTH
+    // endpoints to 2027, contiguous.
+    mockToday('2026-07-16')
+    const state = makeState()
+    const r = processChat('take off july 4-8', state)
+    expect(r.text).toMatch(NEXT_YEAR_NOTICE)
+    expect(r.action?.startDate).toBe('2027-07-04')
+    expect(r.action?.endDate).toBe('2027-07-08')
+  })
+
+  it('(c) slash range straddling today stays current year and is not inverted', () => {
+    // today = April 16, "4/14-4/17" → start 14 is past but end 17 is not.
+    // Must stay 2026 and remain a short contiguous range (no ~year-long span).
+    mockToday('2026-04-16')
+    const state = makeState()
+    const r = processChat('book 4/14-4/17', state)
+    expect(r.text).not.toMatch(NEXT_YEAR_NOTICE)
+    expect(r.action?.startDate).toBe('2026-04-14')
+    expect(r.action?.endDate).toBe('2026-04-17')
+  })
+
+  it('(d) year-boundary range "Dec 30 - Jan 3" crosses into next year correctly', () => {
+    // today = 2026-04-22 (default). End month (Jan) < start month (Dec) means
+    // the range genuinely spans the year boundary: Dec 2026 → Jan 2027.
+    const state = makeState()
+    const r = processChat('plan dec 30 - jan 3', state)
+    expect(r.action?.startDate).toBe('2026-12-30')
+    expect(r.action?.endDate).toBe('2027-01-03')
+  })
+
+  it('(e) single past date rolls forward and surfaces the next-year notice', () => {
+    // today = July 16; "take july 7 off" already passed this year → roll to
+    // 2027 AND show the same notice ranges show (previously single dates rolled
+    // silently). July 7 2027 is a Wednesday (weekday, not a holiday) so it
+    // produces a real plan action — unlike July 4, which lands on a weekend.
+    mockToday('2026-07-16')
+    const state = makeState()
+    const r = processChat('take july 7 off', state)
+    expect(r.text).toMatch(NEXT_YEAR_NOTICE)
+    expect(r.action?.startDate).toBe('2027-07-07')
+    expect(r.action?.endDate).toBe('2027-07-07')
+  })
+})
+
 describe('chat: balance + help + greetings', () => {
   it('greeting returns balance summary and does not crash', () => {
     const state = makeState()

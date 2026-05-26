@@ -34,7 +34,7 @@ function Card({
 }) {
   return (
     <div
-      className={`glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 relative overflow-hidden min-h-[5.5rem] flex flex-col ${glow || ''} ${className || ''}`}
+      className={`glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 relative overflow-hidden min-h-[4.5rem] sm:min-h-[5.5rem] flex flex-col ${glow || ''} ${className || ''}`}
       aria-label={`${label}: ${value}`}
     >
       <div

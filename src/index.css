@@ -2,9 +2,21 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Mobile/tablet: let the document scroll naturally so stacked content below
+ * the fold (calendar, planner, forecast) is reachable. The desktop "fixed app
+ * shell" (full-height, no page scroll, inner panels scroll) only kicks in at
+ * lg+, matching App.tsx's `lg:h-screen lg:overflow-hidden`. Without this gate,
+ * a global overflow:hidden froze the whole page on phones and made everything
+ * past the first viewport unreachable. */
 html, body, #root {
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
+}
+
+@media (min-width: 1024px) {
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
 body {

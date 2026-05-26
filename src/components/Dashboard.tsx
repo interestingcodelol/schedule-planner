@@ -34,10 +34,10 @@ export function Dashboard() {
 
   return (
     <div className="h-full flex flex-col lg:overflow-hidden">
-      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 sm:px-6 py-3 shrink-0">
+      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 sm:px-6 py-3 shrink-0">
         <div className="glass-card rounded-xl flex items-stretch min-w-0">
-          <div className="flex items-center gap-3 px-4 py-2 shrink-0">
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight">
+          <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 shrink-0">
+            <h1 className="text-base sm:text-xl font-bold tracking-tight whitespace-nowrap shrink-0">
               <span className="gradient-text">Schedule Planner</span>
             </h1>
             {isDemo && (
@@ -69,11 +69,11 @@ export function Dashboard() {
                     <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 dark:bg-blue-400/10 shrink-0">
                       <CalendarClock className="w-3.5 h-3.5 text-blue-500" />
                     </div>
-                    <div className="flex flex-col items-start min-w-0 leading-tight">
+                    <div className="hidden sm:flex flex-col items-start min-w-0 leading-tight">
                       <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400 dark:text-gray-500">
                         Next time off
                       </span>
-                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[180px] sm:max-w-[260px]">
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[80px] sm:max-w-[260px]">
                         {daysUntilNext === 0
                           ? 'Today!'
                           : daysUntilNext === 1
@@ -93,7 +93,7 @@ export function Dashboard() {
                     <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-gray-500/10 shrink-0">
                       <CalendarClock className="w-3.5 h-3.5 text-gray-400" />
                     </div>
-                    <div className="flex flex-col items-start leading-tight">
+                    <div className="hidden sm:flex flex-col items-start leading-tight">
                       <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400 dark:text-gray-500">
                         Next time off
                       </span>
@@ -104,7 +104,7 @@ export function Dashboard() {
                   </>
                 )}
 
-                <span className="h-8 w-px bg-gray-200/60 dark:bg-gray-700/60 mx-1 shrink-0" aria-hidden />
+                <span className="hidden sm:block h-8 w-px bg-gray-200/60 dark:bg-gray-700/60 mx-1 shrink-0" aria-hidden />
 
                 <div className="flex items-center gap-1.5 shrink-0 relative">
                   <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400 dark:text-gray-500 hidden sm:inline">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { format, differenceInDays, parseISO } from 'date-fns'
 import { Download, X, ShieldAlert } from 'lucide-react'
 import { useAppState } from '../context'
-import { exportState } from '../lib/storage'
+import { exportState, getLastExportTimestamp } from '../lib/storage'
 import { showToast } from '../lib/toastBus'
 
 const DEFAULT_REMINDER_DAYS = 30
@@ -33,14 +33,22 @@ export function BackupNag() {
   const reminderDays =
     state.profile.backupReminderDays ?? DEFAULT_REMINDER_DAYS
 
+  // Prefer the profile timestamp (synced into state), but fall back to the
+  // standalone localStorage key written by every export path — so an export
+  // done outside the normal profile-update flow still clears the chip.
+  const lastExportIso = useMemo(() => {
+    if (state.profile.lastExportDate) return state.profile.lastExportDate
+    return getLastExportTimestamp()
+  }, [state.profile.lastExportDate])
+
   const daysSince = useMemo(() => {
-    if (!state.profile.lastExportDate) return null
+    if (!lastExportIso) return null
     try {
-      return differenceInDays(new Date(), parseISO(state.profile.lastExportDate))
+      return differenceInDays(new Date(), parseISO(lastExportIso))
     } catch {
       return null
     }
-  }, [state.profile.lastExportDate])
+  }, [lastExportIso])
 
   const visible = useMemo(() => {
     if (state.profile.backupRemindersDisabled) return false
@@ -49,13 +57,13 @@ export function BackupNag() {
       state.plannedVacations.length > 0 ||
       (state.bankHoursLog?.length ?? 0) > 0
     if (!hasMeaningfulData) return false
-    // First-time nag: never exported.
-    if (state.profile.lastExportDate === undefined) return true
+    // First-time nag: never exported (no profile date AND no stored timestamp).
+    if (!lastExportIso) return true
     if (daysSince === null) return false
     return daysSince >= reminderDays
   }, [
     state.profile.backupRemindersDisabled,
-    state.profile.lastExportDate,
+    lastExportIso,
     state.plannedVacations.length,
     state.bankHoursLog?.length,
     dismissed,
@@ -96,12 +104,12 @@ export function BackupNag() {
   if (!visible) return null
 
   const message =
-    state.profile.lastExportDate === undefined
+    !lastExportIso || daysSince === null
       ? 'No backup yet'
       : `Backup ${daysSince}d old`
 
   const fullMessage =
-    state.profile.lastExportDate === undefined
+    !lastExportIso || daysSince === null
       ? "You haven't backed up your Schedule Planner data yet."
       : `Last backup was ${daysSince} day${daysSince === 1 ? '' : 's'} ago.`
 
@@ -147,7 +155,7 @@ export function BackupNag() {
       {open && (
         <div
           ref={popoverRef}
-          className="absolute top-full right-0 mt-2 z-30 glass-card rounded-xl shadow-xl px-4 py-3 w-72 animate-fade-in"
+          className="absolute top-full right-0 mt-2 z-30 glass-card rounded-xl shadow-xl px-4 py-3 w-72 max-w-[calc(100vw-1rem)] animate-fade-in"
           role="dialog"
           aria-label="Backup reminder"
         >

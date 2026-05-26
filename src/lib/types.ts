@@ -115,6 +115,12 @@ export type PlannedVacation = {
   kind?: 'planned' | 'logged_past'
   /** Actual hours used on a past entry, when different from `hoursPerDay`. */
   actualHoursUsed?: number
+  /** When a `logged_past` entry actually debited the stored balances, this
+   *  records how many hours were drawn from each pool. Lets a later refund
+   *  reverse the deduction EXACTLY (re-crediting each pool by the recorded
+   *  amount) instead of guessing the split. Absent on entries that never
+   *  debited (e.g. still `planned`) or that predate this field. */
+  debitedFrom?: { vacation: number; sick: number; bank: number }
 }
 
 /** A condensed catch-up event written to history when reconcile() applies
@@ -128,7 +134,7 @@ export type CatchUpHistoryEntry = {
   syncedTo: string
   /** Compact one-line summary, same string the toast shows. */
   summary: string
-  /** Per-event detail for the audit log. Stored separately from the
+  /** Per-event detail for the change history. Stored separately from the
    *  summary so we don't duplicate the work. */
   events: Array<{
     date: string
@@ -150,6 +156,12 @@ export type AppState = {
   /** Rolling history of the last N catch-up runs. Capped to 50 entries
    *  in App.tsx. Optional for backward compatibility. */
   catchUpHistory?: CatchUpHistoryEntry[]
+  /** Epoch ms when this snapshot was last persisted by `saveState`. Used to
+   *  arbitrate between the localStorage and IndexedDB copies on load so a
+   *  stale IDB snapshot can't clobber a newer localStorage write (or vice
+   *  versa). Optional: older data/tests without it are treated as timestamp 0
+   *  (oldest possible), and the validators ignore it as an extra field. */
+  savedAt?: number
 }
 
 export type ProjectionEvent = {

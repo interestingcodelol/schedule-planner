@@ -6,12 +6,23 @@ const VERSION_URL = `${import.meta.env.BASE_URL}version.json`
 
 type UpdateCallback = (available: boolean) => void
 
+/** sessionStorage key remembering the latest build we already prompted a
+ *  reload for. If a reload didn't change the running build, we suppress
+ *  re-showing the banner for that same latest version to avoid a permanent,
+ *  un-clearable banner. */
+const SEEN_LATEST_KEY = 'schedule-planner-seen-latest'
+
 async function fetchVersion(): Promise<string | null> {
   try {
-    const res = await fetch(VERSION_URL, { cache: 'no-store' })
+    // Cache-bust in addition to no-store so an intermediary/proxy can't serve
+    // a stale version.json and pin a false "update available" state.
+    const res = await fetch(`${VERSION_URL}?t=${Date.now()}`, { cache: 'no-store' })
     if (!res.ok) return null
     const data = await res.json()
-    return data.v ?? null
+    // Only trust a string `v`. A numeric/garbage value would otherwise never
+    // equal CURRENT_BUILD and trigger a false, sticky update banner.
+    if (typeof data?.v !== 'string') return null
+    return data.v
   } catch {
     return null
   }
@@ -32,6 +43,26 @@ export function startUpdateChecker(onUpdate: UpdateCallback): () => void {
     const latest = await fetchVersion()
     if (!latest) return // fetch failed or no version.json (dev mode)
     if (latest !== CURRENT_BUILD) {
+      // If we already prompted a reload for this exact `latest` and the running
+      // build STILL doesn't match it, the reload didn't pick up the new build
+      // (CDN lag, SW cache, etc.). Suppress further banners for this latest so
+      // the user isn't stuck with an un-clearable banner.
+      let seenLatest: string | null = null
+      try {
+        seenLatest = sessionStorage.getItem(SEEN_LATEST_KEY)
+      } catch {
+        // sessionStorage unavailable (private mode / disabled) — fall through
+        // and behave as before (show the banner once per session via `notified`).
+      }
+      if (seenLatest === latest) {
+        notified = true // stop re-checking this session; reload didn't help
+        return
+      }
+      try {
+        sessionStorage.setItem(SEEN_LATEST_KEY, latest)
+      } catch {
+        /* non-fatal */
+      }
       notified = true
       onUpdate(true)
     }

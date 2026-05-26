@@ -98,7 +98,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
               key={i}
               className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg"
             >
-              <div className="flex-1 grid grid-cols-4 gap-2 items-center">
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
                 <input
                   type="text"
                   value={tier.label}
@@ -159,7 +159,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
                   {policy.accrualTiers.length > 1 && (
                     <button
                       onClick={() => removeTier(i)}
-                      className="p-1 text-gray-400 hover:text-red-500 transition-colors duration-150"
+                      className="p-2 text-gray-400 hover:text-red-500 transition-colors duration-150"
                       aria-label={`Remove tier ${i + 1}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -233,7 +233,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
           <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
             Work days
           </label>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
               <button
                 key={day}
@@ -529,7 +529,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
                 <span className="flex-1 truncate">{formatHolidayRule(rule)}</span>
                 <button
                   onClick={() => removeHoliday(i)}
-                  className="p-1 text-gray-400 hover:text-red-500 transition-colors duration-150"
+                  className="p-2 text-gray-400 hover:text-red-500 transition-colors duration-150"
                   aria-label={`Remove ${rule.name}`}
                 >
                   <Trash2 className="w-3 h-3" />

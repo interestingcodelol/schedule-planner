@@ -94,15 +94,24 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
     const update = () => {
       if (!triggerRef.current) return
       const rect = triggerRef.current.getBoundingClientRect()
+      const vw = window.innerWidth
+      // Effective panel width: full-bleed (vw - 1rem) below sm, 22rem above.
+      // Measure the live panel when available so this stays correct if the
+      // width classes ever change.
+      const panelW = panelRef.current?.offsetWidth ?? (vw < 640 ? vw - 16 : 352)
+      // Largest offset that still keeps the panel's far edge 8px inside the
+      // viewport. On a phone the panel is nearly full-width, so this pins it
+      // to the 8px gutter instead of letting it hang off the trigger's edge.
+      const maxOffset = Math.max(8, vw - panelW - 8)
       if (align === 'right') {
         setCoords({
           top: rect.bottom + 8,
-          right: Math.max(8, window.innerWidth - rect.right),
+          right: Math.min(Math.max(8, vw - rect.right), maxOffset),
         })
       } else {
         setCoords({
           top: rect.bottom + 8,
-          left: Math.max(8, rect.left),
+          left: Math.min(Math.max(8, rect.left), maxOffset),
         })
       }
     }
@@ -161,7 +170,7 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
         createPortal(
           <div
             ref={panelRef}
-            className="fixed z-[60] rounded-xl shadow-2xl w-[22rem] max-w-[calc(100vw-1rem)] max-h-[70vh] overflow-y-auto scroll-panel animate-slide-up bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-700/60 ring-1 ring-black/5 dark:ring-white/5"
+            className="fixed z-[60] rounded-xl shadow-2xl w-[calc(100vw-1rem)] sm:w-[22rem] max-w-[calc(100vw-1rem)] max-h-[70vh] overflow-y-auto scroll-panel animate-slide-up bg-white dark:bg-gray-900 border border-gray-200/80 dark:border-gray-700/60 ring-1 ring-black/5 dark:ring-white/5"
             style={{
               top: `${coords.top}px`,
               ...(coords.left !== undefined ? { left: `${coords.left}px` } : {}),

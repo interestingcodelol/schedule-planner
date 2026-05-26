@@ -101,7 +101,8 @@ export function GuidedTour() {
 
     const vw = window.innerWidth
     const vh = window.innerHeight
-    left = Math.max(12, Math.min(left, vw - TOOLTIP_W - 12))
+    const tipW = Math.min(TOOLTIP_W, vw - 24)
+    left = Math.max(12, Math.min(left, vw - tipW - 12))
     top = Math.max(12, Math.min(top, vh - TOOLTIP_H - 12))
 
     setTooltipPos({ top, left })
@@ -143,6 +144,7 @@ export function GuidedTour() {
 
   const vw = window.innerWidth
   const vh = window.innerHeight
+  const tipW = Math.min(TOOLTIP_W, vw - 24)
 
   return (
     <>
@@ -198,7 +200,7 @@ export function GuidedTour() {
         style={{
           top: tooltipPos.top,
           left: tooltipPos.left,
-          width: TOOLTIP_W,
+          width: tipW,
           backgroundColor: 'rgba(15, 23, 42, 0.95)',
           border: '1px solid rgba(59, 130, 246, 0.25)',
           backdropFilter: 'blur(20px)',

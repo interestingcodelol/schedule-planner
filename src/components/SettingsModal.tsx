@@ -1,9 +1,26 @@
 import { useRef, useState, useEffect } from 'react'
 import { format, parseISO } from 'date-fns'
-import { X, Download, Upload, Trash2, RotateCcw, CalendarDays, History } from 'lucide-react'
+import {
+  X,
+  Download,
+  Upload,
+  Trash2,
+  RotateCcw,
+  CalendarDays,
+  History,
+  ClipboardCopy,
+  ClipboardPaste,
+  Share2,
+} from 'lucide-react'
 import { useAppState } from '../context'
 import { PolicyEditor } from './PolicyEditor'
-import { exportState, validateImportedState } from '../lib/storage'
+import {
+  exportState,
+  parseImportedBackup,
+  buildBackupJson,
+  backupFilename,
+  markExported,
+} from '../lib/storage'
 import { generateDemoState } from '../lib/demoData'
 import { COMMON_TIMEZONES } from '../lib/timeUtils'
 import { useFocusTrap } from '../lib/useFocusTrap'
@@ -23,14 +40,106 @@ export function SettingsModal({ onClose }: Props) {
   const [showIcalOptions, setShowIcalOptions] = useState(false)
   const [icalOptions, setIcalOptions] = useState<IcalExportOptions>(DEFAULT_ICAL_OPTIONS)
   const [showHistory, setShowHistory] = useState(false)
+  const [showPaste, setShowPaste] = useState(false)
+  const [pasteText, setPasteText] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   useFocusTrap(modalRef, true)
+
+  // Feature-detect file sharing (mobile Safari/Chrome) so the Share button
+  // only appears where it actually works.
+  const canShareFiles =
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function' &&
+    (() => {
+      try {
+        return navigator.canShare({
+          files: [new File(['{}'], 'probe.json', { type: 'application/json' })],
+        })
+      } catch {
+        return false
+      }
+    })()
+
+  const canCopy =
+    typeof navigator !== 'undefined' &&
+    !!navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
 
   const handleJsonExport = () => {
     exportState(state)
     updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
     showToast({ message: 'Backup downloaded' })
+  }
+
+  const handleCopyBackup = async () => {
+    try {
+      await navigator.clipboard.writeText(buildBackupJson(state))
+      markExported()
+      updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
+      showToast({ message: 'Backup copied — paste it into an email to yourself.' })
+    } catch {
+      showToast({
+        message: 'Could not copy to clipboard. Use Export or Share instead.',
+        duration: 6000,
+      })
+    }
+  }
+
+  const handleShareBackup = async () => {
+    try {
+      const file = new File([buildBackupJson(state)], backupFilename(), {
+        type: 'application/json',
+      })
+      await navigator.share({
+        files: [file],
+        title: 'Schedule Planner backup',
+        text: 'My Schedule Planner backup — open Settings → Data to restore it.',
+      })
+      markExported()
+      updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
+    } catch (err) {
+      // AbortError = user dismissed the share sheet; stay silent for that.
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      showToast({
+        message: 'Sharing was not available. Use Export or Copy instead.',
+        duration: 6000,
+      })
+    }
+  }
+
+  /** Single restore path shared by file upload and pasted text. Confirms,
+   *  routes through the existing importState callback, and reports a summary. */
+  const applyRestore = (raw: string) => {
+    const result = parseImportedBackup(raw)
+    if (!result.ok) {
+      setImportError(result.error)
+      showToast({ message: result.error, duration: 7000 })
+      return false
+    }
+    if (!window.confirm('This will replace all your current data. Continue?')) {
+      return false
+    }
+    importState(result.state)
+    setImportError('')
+
+    const vacationCount = result.state.plannedVacations.length
+    const syncIso =
+      result.state.profile.lastSyncDate ?? result.state.profile.lastPaydayDate
+    let asOf = ''
+    try {
+      asOf = ` · balances as of ${format(parseISO(syncIso), 'MMM d, yyyy')}`
+    } catch {
+      asOf = ''
+    }
+    showToast({
+      message: `Restored — ${vacationCount} planned vacation${
+        vacationCount === 1 ? '' : 's'
+      }${asOf}`,
+      duration: 6000,
+    })
+    return true
   }
 
   const handleIcalExport = () => {
@@ -61,22 +170,22 @@ export function SettingsModal({ onClose }: Props) {
 
     const reader = new FileReader()
     reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target?.result as string)
-        if (validateImportedState(data)) {
-          if (window.confirm('This will replace all your current data. Continue?')) {
-            importState(data)
-            setImportError('')
-          }
-        } else {
-          setImportError('Invalid file format — not a valid Schedule Planner backup.')
-        }
-      } catch {
-        setImportError('Could not parse file as JSON.')
-      }
+      applyRestore((ev.target?.result as string) ?? '')
+    }
+    reader.onerror = () => {
+      const msg = 'Could not read that file. Try the paste option instead.'
+      setImportError(msg)
+      showToast({ message: msg, duration: 6000 })
     }
     reader.readAsText(file)
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const handlePasteRestore = () => {
+    if (applyRestore(pasteText)) {
+      setPasteText('')
+      setShowPaste(false)
+    }
   }
 
   const handleResetDemo = () => {
@@ -171,7 +280,7 @@ export function SettingsModal({ onClose }: Props) {
                   className={inputClass}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1.5 font-medium">
                     Vacation hrs
@@ -272,32 +381,104 @@ export function SettingsModal({ onClose }: Props) {
           {activeTab === 'data' && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
+                <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">
                   Backup & restore
                 </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-snug">
+                  Download this file and email it to yourself. Open Settings → Data
+                  on any device, paste or upload it, and your exact setup is
+                  restored. Keep it updated as your authoritative backup.
+                </p>
                 <div className="space-y-2.5">
                   <button
                     onClick={handleJsonExport}
-                    className="w-full flex items-center gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
-                    title="Save a JSON file you can re-import later"
+                    className="w-full flex items-center gap-2.5 px-5 py-3 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20"
+                    title="Save a JSON file you can re-import on any device"
                   >
                     <Download className="w-4 h-4" />
                     Export backup (JSON)
                   </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
-                  >
-                    <Upload className="w-4 h-4" />
-                    Import backup
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json"
-                    onChange={handleImport}
-                    className="hidden"
-                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {canCopy && (
+                      <button
+                        onClick={handleCopyBackup}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
+                        title="Copy the backup JSON so you can paste it into an email"
+                      >
+                        <ClipboardCopy className="w-4 h-4 shrink-0" />
+                        Copy to clipboard
+                      </button>
+                    )}
+                    {canShareFiles && (
+                      <button
+                        onClick={handleShareBackup}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
+                        title="Share or email the backup file"
+                      >
+                        <Share2 className="w-4 h-4 shrink-0" />
+                        Share / email backup
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="border-t border-gray-200/60 dark:border-gray-700/40 pt-2.5 space-y-2.5">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full flex items-center gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Restore from file
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={handleImport}
+                      className="hidden"
+                    />
+
+                    <button
+                      onClick={() => setShowPaste((v) => !v)}
+                      className="w-full flex items-center justify-between gap-2.5 px-5 py-3 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-150"
+                      aria-expanded={showPaste}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <ClipboardPaste className="w-4 h-4" />
+                        Restore from pasted text
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {showPaste ? 'Hide' : 'Show'}
+                      </span>
+                    </button>
+                    <div className="collapsible" data-open={showPaste}>
+                      <div className="collapsible-inner">
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800/40 p-3 space-y-2.5 border border-gray-200/60 dark:border-gray-700/40">
+                          <p className="text-xs text-gray-500 dark:text-gray-400 leading-snug">
+                            Emailed yourself the backup? Open it, copy everything,
+                            and paste it below.
+                          </p>
+                          <textarea
+                            value={pasteText}
+                            onChange={(e) => setPasteText(e.target.value)}
+                            rows={5}
+                            placeholder='Paste your backup JSON here (starts with { … )'
+                            className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
+                            spellCheck={false}
+                          />
+                          <button
+                            onClick={handlePasteRestore}
+                            disabled={!pasteText.trim()}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white rounded-xl transition-all duration-150 shadow-md shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                          >
+                            <ClipboardPaste className="w-4 h-4" />
+                            Restore from pasted text
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {importError && (
                     <p className="text-red-400 text-sm">{importError}</p>
                   )}

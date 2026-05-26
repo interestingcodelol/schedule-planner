@@ -28,6 +28,9 @@ export type IcalExportOptions = {
    *  anniversaries, carryover, bank window). 1-3 years is typical — keeps
    *  the file size sane while covering the planning horizon. */
   yearsAhead: number
+  /** Days before a *planned* time-off event to fire a display reminder
+   *  (VALARM). 0 disables the alarm. Logged-past absences never get alarms. */
+  reminderDaysBeforeTimeOff?: number
 }
 
 export const DEFAULT_ICAL_OPTIONS: IcalExportOptions = {
@@ -39,6 +42,19 @@ export const DEFAULT_ICAL_OPTIONS: IcalExportOptions = {
   includeBankWindow: true,
   includeAnniversaries: true,
   yearsAhead: 2,
+  reminderDaysBeforeTimeOff: 1,
+}
+
+/** Per-category event colour (RFC 7986 COLOR property, CSS3 colour names).
+ *  Keeps Outlook/Apple Calendar from rendering everything in one flat tone.
+ *  Key matches the first entry in each event's `categories` array. */
+const CATEGORY_COLORS: Record<string, string> = {
+  'Time Off': 'royalblue',
+  Holiday: 'seagreen',
+  Payday: 'goldenrod',
+  Payout: 'darkorange',
+  Bank: 'teal',
+  Anniversary: 'mediumpurple',
 }
 
 /** Stable per-app domain so re-imports update existing events instead of
@@ -71,8 +87,15 @@ function foldLine(line: string): string {
   return parts.join('\r\n ')
 }
 
+/** Format an all-day DATE value (YYYYMMDD) in UTC. Every event date in this
+ *  module is constructed at UTC midnight (parseISO / isoMidnight), matching the
+ *  projection engine's convention. Formatting with local getters would render
+ *  the previous day for any user behind UTC, so we read UTC components. */
 function formatDate(d: Date): string {
-  return format(d, 'yyyyMMdd')
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}${m}${day}`
 }
 
 function fmtHrs(n: number): string {
@@ -89,6 +112,12 @@ type RawEvent = {
   startDate?: Date
   endDate?: Date
   categories?: string[]
+  /** True for time-off events that should show the user as Out of Office /
+   *  busy (planned + logged absences). Informational events are FREE. */
+  oof?: boolean
+  /** True only for *planned* (future) time off — drives the VALARM reminder.
+   *  Logged-past absences are oof=true but planned=false (no reminder). */
+  planned?: boolean
 }
 
 function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
@@ -111,8 +140,8 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
           ? 'auto'
           : v.hourSource
       const summary = isLogged
-        ? `Time off (logged) ${v.note ? '— ' + v.note : ''}`.trim()
-        : `Time off ${v.note ? '— ' + v.note : ''}`.trim()
+        ? '🌴 Time off (logged)'
+        : `🌴 Time off${v.note ? ' — ' + v.note : ''}`
       const descriptionLines = [
         v.note ? `Note: ${v.note}` : '',
         partial
@@ -127,6 +156,8 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
         startDate: start,
         endDate: end,
         categories: ['Time Off'],
+        oof: true,
+        planned: !isLogged,
       })
     }
   }
@@ -204,31 +235,31 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
     }
   }
 
-  // --- Bank payout window ----------------------------------------------
+  // --- Bank hours payout -----------------------------------------------
+  // Banked / overtime hours are paid out via payroll on the FIRST PAYDAY on or
+  // after the payout window opens — a single pay date, not a multi-day window.
   if (opts.includeBankWindow) {
     const startYear = today.getFullYear()
     const endYear = horizon.getFullYear()
     const startM = state.policy.bankHoursPayoutStart.month
     const startD = state.policy.bankHoursPayoutStart.day
-    const endM = state.policy.bankHoursPayoutEnd.month
-    const endD = state.policy.bankHoursPayoutEnd.day
-    const wraps =
-      endM < startM || (endM === startM && endD < startD)
-    for (let y = startYear; y <= endYear; y++) {
-      const winStart = parseISO(
+    const lastPayday = parseISO(state.profile.lastPaydayDate)
+    for (let y = startYear - 1; y <= endYear; y++) {
+      const windowOpen = parseISO(
         `${y}-${String(startM).padStart(2, '0')}-${String(startD).padStart(2, '0')}`,
       )
-      const winEnd = parseISO(
-        `${wraps ? y + 1 : y}-${String(endM).padStart(2, '0')}-${String(endD).padStart(2, '0')}`,
+      const payoutDate = firstPaydayOnOrAfter(
+        lastPayday,
+        state.policy.payPeriodLengthDays,
+        windowOpen,
       )
-      if (winStart > horizon) continue
-      if (winEnd < today) continue
+      if (payoutDate < today || payoutDate > horizon) continue
       events.push({
-        uid: `bank-window-${y}@${UID_DOMAIN}`,
-        summary: '🏦 Bank hours payout window',
-        description: 'Bank hours can be paid out during this window.',
-        startDate: winStart,
-        endDate: winEnd,
+        uid: `bank-payout-${y}@${UID_DOMAIN}`,
+        summary: '🏦 Bank hours payout',
+        description:
+          'Banked / overtime hours are paid out on this pay date — the first payday on or after the payout window opens.',
+        date: payoutDate,
         categories: ['Bank'],
       })
     }
@@ -286,6 +317,7 @@ export function buildIcalString(
   const now = new Date()
   const dtstamp =
     format(now, "yyyyMMdd'T'HHmmss") + 'Z'
+  const reminderDays = opts.reminderDaysBeforeTimeOff ?? 0
 
   const lines: string[] = []
   lines.push('BEGIN:VCALENDAR')
@@ -297,6 +329,10 @@ export function buildIcalString(
   lines.push(
     foldLine('X-WR-CALDESC:Time off, holidays, paydays, and balance milestones from Schedule Planner'),
   )
+  // Hint to subscribing clients (Outlook/Apple) how often to refresh a
+  // subscribed/published calendar. All-day events carry no time zone, so
+  // X-WR-TIMEZONE is intentionally omitted.
+  lines.push('X-PUBLISHED-TTL:PT12H')
 
   for (const ev of events) {
     lines.push('BEGIN:VEVENT')
@@ -316,8 +352,46 @@ export function buildIcalString(
     }
     if (ev.categories && ev.categories.length > 0) {
       lines.push(foldLine(`CATEGORIES:${ev.categories.map(escapeText).join(',')}`))
+      // RFC 7986 COLOR keyed off the primary category.
+      const color = CATEGORY_COLORS[ev.categories[0]]
+      if (color) lines.push(`COLOR:${color}`)
     }
-    lines.push('TRANSP:TRANSPARENT')
+
+    // Per-event lifecycle metadata so re-imports update cleanly rather than
+    // duplicating, and clients can reason about the event state.
+    lines.push('STATUS:CONFIRMED')
+    lines.push('SEQUENCE:0')
+    lines.push('CLASS:PUBLIC')
+    lines.push(`CREATED:${dtstamp}`)
+    lines.push(`LAST-MODIFIED:${dtstamp}`)
+
+    if (ev.oof) {
+      // Time off → block the calendar and surface Out-of-Office presence in
+      // Outlook and Teams.
+      lines.push('TRANSP:OPAQUE')
+      lines.push('X-MICROSOFT-CDO-BUSYSTATUS:OOF')
+      lines.push('X-MICROSOFT-CDO-INTENDEDSTATUS:OOF')
+      lines.push('X-MICROSOFT-CDO-ALLDAYEVENT:TRUE')
+    } else {
+      // Informational events (holidays, paydays, carryover/bank, anniversary/
+      // tier) stay free so they never block the user's calendar. Holidays
+      // could arguably be OOF, but we deliberately keep them FREE so an
+      // imported holiday doesn't make the user look busy/out of office.
+      lines.push('TRANSP:TRANSPARENT')
+      lines.push('X-MICROSOFT-CDO-BUSYSTATUS:FREE')
+      lines.push('X-MICROSOFT-CDO-ALLDAYEVENT:TRUE')
+    }
+
+    // Reminder: only on *planned* (future) time off, never on logged-past
+    // absences or informational events. Nested INSIDE the VEVENT.
+    if (ev.planned && reminderDays > 0) {
+      lines.push('BEGIN:VALARM')
+      lines.push('ACTION:DISPLAY')
+      lines.push(`TRIGGER:-P${reminderDays}D`)
+      lines.push(foldLine(`DESCRIPTION:${escapeText(ev.summary)}`))
+      lines.push('END:VALARM')
+    }
+
     lines.push('END:VEVENT')
   }
 

@@ -103,7 +103,7 @@ export function SetupWizard({ onComplete }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-gray-950 text-gray-100 flex items-start sm:items-center justify-center overflow-y-auto py-8 p-4 relative">
       {/* GIS-themed background */}
       <div className="absolute inset-0 opacity-[0.07]" style={{
         backgroundImage: `
@@ -194,7 +194,7 @@ export function SetupWizard({ onComplete }: Props) {
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1">
                     Vacation <span className="text-red-400">*</span>

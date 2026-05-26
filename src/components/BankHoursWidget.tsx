@@ -83,7 +83,7 @@ export function BankHoursWidget() {
       </div>
 
       <div className="px-5 py-3 border-t border-gray-200/60 dark:border-gray-700/40">
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <input
             type="number"
             step="0.25"
@@ -92,7 +92,7 @@ export function BankHoursWidget() {
             value={hours}
             onChange={(e) => setHours(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent placeholder-gray-400"
+            className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent placeholder-gray-400"
           />
           <input
             type="text"
@@ -100,12 +100,12 @@ export function BankHoursWidget() {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            className="flex-1 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+            className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
           />
           <button
             onClick={handleAdd}
             disabled={!hours || Number(hours) <= 0}
-            className="px-3 py-2 text-sm font-medium bg-teal-600 hover:bg-teal-500 active:scale-95 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all flex items-center gap-1"
+            className="w-full sm:w-auto shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium bg-teal-600 hover:bg-teal-500 active:scale-95 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all flex items-center justify-center gap-1"
             title="Add bank hours"
           >
             <Plus className="w-3.5 h-3.5" />

@@ -127,9 +127,15 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     plannedVacation?.actualHoursUsed ??
     plannedVacation?.hoursPerDay ??
     state.policy.hoursPerWorkDay
+  // `projectedBalance` is `projectBalance(state, date).totalAvailable`, which
+  // ALREADY has this day's planned deduction applied (the deduction event
+  // fires on/before `date`). So a day is only truly unaffordable when the
+  // post-deduction balance goes negative — comparing against `deductHours`
+  // here would count the deduction a second time and wrongly flag
+  // exactly-affordable days (balance lands at 0) as "Can't afford".
   const isUnaffordable =
     isPlannedVacation && !isWeekend && !isHolidayDay &&
-    projectedBalance !== null && projectedBalance < deductHours
+    projectedBalance !== null && projectedBalance < -0.001
 
   const isLocked = !!plannedVacation?.locked
   const canPlanNew = !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
@@ -210,7 +216,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         else if (days >= 4) parts.push('✨ Mini vacation!')
       }
       if (isUnaffordable) {
-        parts.push(`⚠️ Not enough hours — only ${fmt(projectedBalance ?? 0)} hrs available, need ${fmt(deductHours)}`)
+        parts.push(`⚠️ Not enough hours — ${fmt(Math.abs(projectedBalance ?? 0))} hrs short after this day's time off`)
       }
     }
 
@@ -278,7 +284,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={`
-        group relative p-1.5 min-h-0 border-r border-b
+        group relative p-1.5 min-h-[58px] lg:min-h-0 border-r border-b
         ${borderClass}
         ${bgClass}
         ${!isCurrentMonth ? 'opacity-[0.08]' : ''}
@@ -293,7 +299,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       <div className="flex items-center justify-between">
         <span
           className={`
-            inline-flex items-center justify-center w-8 h-8 text-base font-bold rounded-full
+            inline-flex items-center justify-center w-6 h-6 text-xs sm:w-8 sm:h-8 sm:text-base font-bold rounded-full
             ${isToday ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/40' : ''}
             ${isWeekend && !isToday && isCurrentMonth ? 'text-gray-400 dark:text-gray-500' : ''}
           `}
@@ -341,10 +347,10 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
             e.stopPropagation()
             updateVacation(plannedVacation.id, { locked: !isLocked })
           }}
-          className={`absolute bottom-1 left-1 p-0.5 rounded transition-all ${
+          className={`absolute bottom-1 left-1 p-1.5 lg:p-0.5 rounded transition-all ${
             isLocked
               ? 'text-amber-500 hover:text-amber-400 hover:bg-amber-500/15'
-              : 'text-gray-400/70 dark:text-gray-500/70 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-500/10 opacity-0 group-hover:opacity-100'
+              : 'text-gray-400/70 dark:text-gray-500/70 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-500/10 opacity-100 lg:opacity-0 lg:group-hover:opacity-100'
           }`}
           title={isLocked ? 'Locked — click to unlock' : 'Click to lock this time off'}
           aria-label={isLocked ? 'Unlock this time off' : 'Lock this time off'}
@@ -355,10 +361,10 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 
       {/* Time-off indicator — centered in cell */}
       {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
-        <div className="absolute inset-x-2 top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
+        <div className="absolute inset-x-2 top-7 sm:top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
           {isPartialDay ? (
             <>
-              <div className={`text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
+              <div className={`text-[10px] sm:text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
                 {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
                   ? `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`
                   : `${fmt(deductHours)}h`}
@@ -382,7 +388,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       {isCurrentMonth && projectedBalance !== null && !isPast && !isWeekend && !isHolidayDay && (
         <div className="absolute bottom-1 right-1">
           <span
-            className={`text-sm tabular-nums font-bold px-1.5 py-0.5 rounded ${
+            className={`text-[9px] px-1 py-0 sm:text-sm sm:px-1.5 sm:py-0.5 tabular-nums font-bold rounded ${
               isUnaffordable
                 ? 'bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400'
                 : 'bg-gray-100/80 dark:bg-gray-800/60 text-gray-500 dark:text-gray-400'

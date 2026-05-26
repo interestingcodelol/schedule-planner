@@ -3,10 +3,8 @@ import {
   differenceInYears,
   eachDayOfInterval,
   format,
-  getDay,
   isAfter,
   isBefore,
-  isSameDay,
   parseISO,
   startOfDay,
 } from 'date-fns'
@@ -18,10 +16,15 @@ import type {
   UserProfile,
 } from './types'
 import { computeHolidayDates } from './holidays'
-import { computeAccrualTier, firstPaydayOnOrAfter } from './projection'
+import { accrualForPeriod, computeAccrualTier, firstPaydayOnOrAfter } from './projection'
 import { getNowInZone } from './timeUtils'
 
 const DEFAULT_TZ = 'America/New_York'
+
+/** Round to 2 decimals at the boundary. Pools accumulate full-precision in
+ *  the loop; only the balances written back into the profile are rounded so
+ *  stored/displayed values never carry a float tail like 71.53999999999999. */
+const r2 = (n: number): number => Math.round(n * 100) / 100
 
 function isoMidnight(year: number, month: number, day: number): Date {
   const mm = String(month).padStart(2, '0')
@@ -54,10 +57,21 @@ export type CatchUpResult = {
 
 type Pools = { vacation: number; sick: number; bank: number }
 
+/** Same UTC calendar day? See projection.ts for the rationale — holiday dates
+ *  and the vacation day-stream are all UTC-midnight, so compare UTC fields
+ *  rather than using date-fns isSameDay (which compares LOCAL fields). */
+function isSameUtcDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  )
+}
+
 function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean {
-  const dow = getDay(date)
+  const dow = date.getUTCDay()
   if (!policy.workDaysPerWeek.includes(dow)) return false
-  return !holidays.some((h) => isSameDay(h, date))
+  return !holidays.some((h) => isSameUtcDay(h, date))
 }
 
 function computeCarryoverCap(policy: PolicyConfig, tier: AccrualTier): number | null {
@@ -190,29 +204,44 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   const pending: PendingEvent[] = []
 
   // --- Paydays / accruals -------------------------------------------------
+  // Defensive: clamp the stride to >= 1 day so a bad policy value (0/negative)
+  // can't make addDays a no-op and spin these payday-walk loops forever.
+  const period = Math.max(1, state.policy.payPeriodLengthDays)
   let payday = lastPayday
   while (!isAfter(payday, lastSync)) {
-    payday = addDays(payday, state.policy.payPeriodLengthDays)
+    payday = addDays(payday, period)
   }
   while (!isAfter(payday, today)) {
     const paydayCopy = payday
+    // The pay period covered by this payday runs from the PREVIOUS payday
+    // (one period earlier) to this one. Pass it to accrualForPeriod so the
+    // accrual is pro-rated across a service-anniversary boundary exactly the
+    // way projection does — otherwise catch-up applies the full new-tier rate
+    // as a cliff and the persisted balance drifts from the projected balance.
+    const periodStart = addDays(paydayCopy, -period)
     pending.push({
       date: paydayCopy,
       order: 1,
       apply: () => {
+        const accrued = accrualForPeriod(
+          state.policy,
+          hireDate,
+          periodStart,
+          paydayCopy,
+        )
         const yos = differenceInYears(paydayCopy, hireDate)
         const tier = computeAccrualTier(state.policy, yos)
-        pools.vacation += tier.hoursPerPayPeriod
+        pools.vacation += accrued
         events.push({
           date: format(paydayCopy, 'yyyy-MM-dd'),
           type: 'accrual',
           pool: 'vacation',
-          delta: tier.hoursPerPayPeriod,
+          delta: accrued,
           label: `Vacation accrual (${tier.label})`,
         })
       },
     })
-    payday = addDays(payday, state.policy.payPeriodLengthDays)
+    payday = addDays(payday, period)
   }
 
   // --- Jan 1 sick grants --------------------------------------------------
@@ -298,44 +327,36 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   }
 
   // --- Bank payouts ------------------------------------------------------
-  // Window can span the year boundary (e.g., Dec 15 → Feb 15), so the END date
-  // belongs to the NEXT year when end-month <= start-month. Iterate one year
-  // before startYear too, so a payout that fired during the catch-up gap is
-  // correctly captured.
+  // Window can span the year boundary (e.g., Dec 15 → Feb 15). The payout fires
+  // ONCE per window, when the window OPENS (start). Iterate one year before
+  // startYear too, so a window-open that fell during the catch-up gap from an
+  // adjacent calendar year is correctly captured.
   const bankStartM = state.policy.bankHoursPayoutStart.month
-  const bankEndM = state.policy.bankHoursPayoutEnd.month
-  const endsNextYear =
-    bankEndM < bankStartM ||
-    (bankEndM === bankStartM &&
-      state.policy.bankHoursPayoutEnd.day < state.policy.bankHoursPayoutStart.day)
   for (let y = startYear - 1; y <= endYear + 1; y++) {
-    const start = isoMidnight(y, bankStartM, state.policy.bankHoursPayoutStart.day)
-    const end = isoMidnight(
-      endsNextYear ? y + 1 : y,
-      bankEndM,
-      state.policy.bankHoursPayoutEnd.day,
-    )
-    for (const p of [start, end]) {
-      if (isAfter(p, lastSync) && !isAfter(p, today)) {
-        const pCopy = p
-        pending.push({
-          date: pCopy,
-          order: 4,
-          apply: () => {
-            if (pools.bank > 0) {
-              const payout = pools.bank
-              pools.bank = 0
-              events.push({
-                date: format(pCopy, 'yyyy-MM-dd'),
-                type: 'bank_payout',
-                pool: 'bank',
-                delta: -payout,
-                label: `Bank hours paid out: ${payout.toFixed(2)} hrs`,
-              })
-            }
-          },
-        })
-      }
+    const windowOpen = isoMidnight(y, bankStartM, state.policy.bankHoursPayoutStart.day)
+    // Paid out via payroll on the FIRST PAYDAY on/after the window opens — once
+    // per window, on a real pay date (not the window-open calendar day, and not
+    // again at the window close, which would wipe hours banked mid-window).
+    const start = firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, windowOpen)
+    if (isAfter(start, lastSync) && !isAfter(start, today)) {
+      const pCopy = start
+      pending.push({
+        date: pCopy,
+        order: 4,
+        apply: () => {
+          if (pools.bank > 0) {
+            const payout = pools.bank
+            pools.bank = 0
+            events.push({
+              date: format(pCopy, 'yyyy-MM-dd'),
+              type: 'bank_payout',
+              pool: 'bank',
+              delta: -payout,
+              label: `Bank hours paid out: ${payout.toFixed(2)} hrs`,
+            })
+          }
+        },
+      })
     }
   }
 
@@ -386,7 +407,7 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   const earliestVacYear = state.plannedVacations.reduce<number>(
     (min, v) => {
       if (v.kind === 'logged_past') return min
-      const y = parseISO(v.startDate).getFullYear()
+      const y = parseISO(v.startDate).getUTCFullYear()
       return y < min ? y : min
     },
     startYear,
@@ -397,6 +418,12 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
 
   const processedVacationIds = new Set<string>()
   const vacationActuals: Record<string, number> = {}
+  // Per-pool breakdown of what each converted vacation actually debited, so
+  // the App layer can record `debitedFrom` for exact future refunds.
+  const vacationDebits: Record<
+    string,
+    { vacation: number; sick: number; bank: number }
+  > = {}
 
   for (const vacation of state.plannedVacations) {
     if (vacation.kind === 'logged_past') continue
@@ -418,7 +445,13 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
             vacation.hourSource || 'any',
             pools,
           )
+          const debit = (vacationDebits[vacation.id] ??= {
+            vacation: 0,
+            sick: 0,
+            bank: 0,
+          })
           for (const b of breakdown) {
+            debit[b.from] += b.amount
             events.push({
               date: format(dayCopy, 'yyyy-MM-dd'),
               type: 'vacation_deduction',
@@ -446,8 +479,8 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   // continue to anchor on a real pay cycle.
   let mostRecentPayday = lastPayday
   let probe = lastPayday
-  while (!isAfter(addDays(probe, state.policy.payPeriodLengthDays), today)) {
-    probe = addDays(probe, state.policy.payPeriodLengthDays)
+  while (!isAfter(addDays(probe, period), today)) {
+    probe = addDays(probe, period)
     if (!isAfter(probe, today)) mostRecentPayday = probe
   }
 
@@ -460,14 +493,17 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
             ...v,
             kind: 'logged_past' as const,
             actualHoursUsed: v.actualHoursUsed ?? vacationActuals[v.id],
+            // Record the exact per-pool draw so a later refund can reverse it
+            // precisely. Preserve any pre-existing value defensively.
+            debitedFrom: v.debitedFrom ?? vacationDebits[v.id],
           }
         })
 
   const newProfile: UserProfile = {
     ...state.profile,
-    currentVacationHours: pools.vacation,
-    currentSickHours: pools.sick,
-    currentBankHours: pools.bank,
+    currentVacationHours: r2(pools.vacation),
+    currentSickHours: r2(pools.sick),
+    currentBankHours: r2(pools.bank),
     lastPaydayDate: format(mostRecentPayday, 'yyyy-MM-dd'),
     lastSyncDate: todayIso,
   }

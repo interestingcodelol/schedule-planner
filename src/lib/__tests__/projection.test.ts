@@ -3,6 +3,7 @@ import { addDays, format, subYears, previousFriday } from 'date-fns'
 import {
   analyzeTripImpact,
   computeAccrualTier,
+  countWorkDays,
   earliestAffordableDate,
   earliestAffordableTripStart,
   firstPaydayOnOrAfter,
@@ -12,6 +13,7 @@ import {
 } from '../projection'
 import { computeHolidayDates } from '../holidays'
 import { defaultPolicy } from '../defaultPolicy'
+import { parseISO } from 'date-fns'
 import type { AppState, PlannedVacation } from '../types'
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
@@ -224,20 +226,23 @@ describe('projectBalance', () => {
   it('Test 6: Holiday observance — Independence Day on Saturday observed on Friday, Christmas on Sunday observed on Monday', () => {
     // 2026: July 4 is a Saturday -> observed Friday July 3
     // 2022: Christmas Dec 25 is a Sunday -> observed Monday Dec 26
+    // Holiday dates are constructed on the UTC-midnight basis, so read
+    // their calendar fields in UTC — otherwise a behind-UTC test runner would
+    // see the previous local day.
     const holidays2026 = computeHolidayDates(defaultPolicy, 2026)
     const july3 = holidays2026.find(
-      (d) => d.getMonth() === 6 && d.getDate() === 3,
+      (d) => d.getUTCMonth() === 6 && d.getUTCDate() === 3,
     )
     expect(july3).toBeDefined()
     // No July 4 in the observed list
     const july4 = holidays2026.find(
-      (d) => d.getMonth() === 6 && d.getDate() === 4,
+      (d) => d.getUTCMonth() === 6 && d.getUTCDate() === 4,
     )
     expect(july4).toBeUndefined()
 
     const holidays2022 = computeHolidayDates(defaultPolicy, 2022)
     const dec26 = holidays2022.find(
-      (d) => d.getMonth() === 11 && d.getDate() === 26,
+      (d) => d.getUTCMonth() === 11 && d.getUTCDate() === 26,
     )
     expect(dec26).toBeDefined()
   })
@@ -431,6 +436,84 @@ describe('carryover payout date snapping', () => {
     })
     expect(getCarryoverPayoutDate(state, 2026)).toBeNull()
   })
+
+  it('firstPaydayOnOrAfter snaps backward when lastPayday is AFTER the anchor', () => {
+    // Demo scenario: lastPayday May 15 2026, biweekly, carryover anchor Feb 1.
+    // A forward-only walk never runs (May 15 is already >= Feb 1) and would
+    // wrongly return May 15. The correct answer is the first payday on/after
+    // Feb 1 on the 14-day cycle anchored at May 15.
+    const lastPayday = parseISO('2026-05-15')
+    const anchor = parseISO('2026-02-01')
+    const result = firstPaydayOnOrAfter(lastPayday, 14, anchor)
+
+    // On or after Feb 1, and strictly before Feb 1 + 14 days (i.e. it's the
+    // FIRST payday that qualifies, not some later one).
+    expect(result.getTime()).toBeGreaterThanOrEqual(anchor.getTime())
+    expect(result.getTime()).toBeLessThan(addDays(anchor, 14).getTime())
+
+    // It lands on the 14-day cycle from May 15: (result - May 15) is a
+    // multiple of 14 days.
+    const dayDelta = Math.round(
+      (result.getTime() - lastPayday.getTime()) / (24 * 60 * 60 * 1000),
+    )
+    expect(Math.abs(dayDelta % 14)).toBe(0) // abs() avoids the -0 vs +0 quirk for negative deltas
+
+    // And it is a February date, not May.
+    expect(result.getUTCMonth()).toBe(1) // Feb (0-indexed)
+  })
+
+  it('getCarryoverPayoutDate on a demo-like state returns FEBRUARY, not May', () => {
+    const state = makeState({
+      profile: {
+        displayName: 'Demo User',
+        hireDate: '2020-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2026-05-15', // demo's lastPaydayDate
+      },
+      policy: {
+        ...defaultPolicy,
+        payPeriodLengthDays: 14,
+        carryoverPayoutDate: { month: 2, day: 1 },
+      },
+    })
+    const date = getCarryoverPayoutDate(state, 2026)
+    expect(date).not.toBeNull()
+    // The bug returned May 15; the fix must return a February date.
+    expect(date!.getUTCMonth()).toBe(1) // February
+    expect(date!.getUTCFullYear()).toBe(2026)
+  })
+})
+
+describe('bank payout fires ONCE per window, on the first payday after it opens', () => {
+  it('emits exactly one bank_payout per year, dated on the next payday after the window opens', () => {
+    // Default window: Dec 15 → Feb 15 (spans year boundary). Today: Dec 1 2025.
+    // lastPayday Nov 28 (Fri), biweekly → paydays Nov 28, Dec 12, Dec 26… The
+    // first payday on/after the Dec 15 window-open is Dec 26, so the payout
+    // lands there (not on Dec 15, and not again at Feb 15).
+    mockToday('2025-12-01')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 12,
+        lastPaydayDate: '2025-11-28',
+      },
+    })
+
+    const result = projectBalance(state, new Date('2026-03-01'))
+
+    const payouts = result.events.filter((e) => e.type === 'bank_payout')
+    expect(payouts).toHaveLength(1)
+    expect(payouts[0].date).toBe('2025-12-26')
+    expect(payouts[0].delta).toBe(-12)
+    expect(result.bankBalance).toBe(0)
+    // Total paid out reflects a single payout, not a double-count.
+    expect(result.bankPayout).toBe(12)
+  })
 })
 
 describe('sick leave carryover cap', () => {
@@ -509,7 +592,7 @@ describe('computeHolidayDates', () => {
   it('correctly computes MLK Day 2025 (3rd Monday in January)', () => {
     const holidays = computeHolidayDates(defaultPolicy, 2025)
     const mlk = holidays.find(
-      (d) => d.getMonth() === 0 && d.getDate() === 20,
+      (d) => d.getUTCMonth() === 0 && d.getUTCDate() === 20,
     )
     expect(mlk).toBeDefined()
   })
@@ -517,7 +600,7 @@ describe('computeHolidayDates', () => {
   it('correctly computes Memorial Day 2025 (last Monday in May)', () => {
     const holidays = computeHolidayDates(defaultPolicy, 2025)
     const memorial = holidays.find(
-      (d) => d.getMonth() === 4 && d.getDate() === 26,
+      (d) => d.getUTCMonth() === 4 && d.getUTCDate() === 26,
     )
     expect(memorial).toBeDefined()
   })
@@ -525,7 +608,7 @@ describe('computeHolidayDates', () => {
   it('correctly computes Thanksgiving 2025 (4th Thursday in November)', () => {
     const holidays = computeHolidayDates(defaultPolicy, 2025)
     const thanksgiving = holidays.find(
-      (d) => d.getMonth() === 10 && d.getDate() === 27,
+      (d) => d.getUTCMonth() === 10 && d.getUTCDate() === 27,
     )
     expect(thanksgiving).toBeDefined()
   })
@@ -701,5 +784,220 @@ describe('analyzeTripImpact (cross-year affordability)', () => {
     const trip = tripFor('2025-07-07', '2025-07-11')
     const impact = analyzeTripImpact(state, trip, new Date('2025-12-31'))
     expect(impact.tripItselfShortfall).toBeGreaterThan(0)
+  })
+})
+
+describe('returned balances are rounded to 2 decimals', () => {
+  it('a known accrual sequence returns a clean 2-dp number (no float tail)', () => {
+    // 3.076 hrs/period accumulated over many paydays produces a binary-float
+    // tail (e.g. 71.53999999999999). The RETURNED balance must be rounded.
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+      },
+    })
+    const result = projectBalance(state, new Date('2026-05-15'))
+
+    // The returned value must equal its own 2-dp rounding — i.e. no long tail.
+    for (const n of [
+      result.vacationBalance,
+      result.sickBalance,
+      result.bankBalance,
+      result.totalAvailable,
+      result.carryoverAdjustment,
+      result.bankPayout,
+      result.shortfall,
+    ]) {
+      expect(n).toBe(Math.round(n * 100) / 100)
+    }
+
+    // Accrual events still carry full-precision deltas (e.g. 3.076); the raw
+    // sum of them would have a long float tail. Proves rounding happens at the
+    // boundary, not mid-loop: the raw accrual sum is NOT clean 2-dp, but the
+    // returned balance is.
+    const accruals = result.events.filter((e) => e.type === 'accrual')
+    const rawAccrualSum = accruals.reduce((s, e) => s + e.delta, 0)
+    expect(rawAccrualSum).not.toBe(Math.round(rawAccrualSum * 100) / 100)
+    expect(result.vacationBalance).toBe(Math.round(result.vacationBalance * 100) / 100)
+  })
+})
+
+describe('holiday dates + isWorkDay are UTC-consistent regardless of runner TZ', () => {
+  it('a fixed holiday (July 4) and an nth-weekday holiday (Thanksgiving) have exact ISO dates', () => {
+    const h2025 = computeHolidayDates(defaultPolicy, 2025)
+    const iso = (d: Date) =>
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
+        d.getUTCDate(),
+      ).padStart(2, '0')}`
+    const isoDates = h2025.map(iso)
+
+    // July 4, 2025 is a Friday — no weekend shift, observed on the 4th.
+    expect(isoDates).toContain('2025-07-04')
+    // Thanksgiving = 4th Thursday of Nov 2025 = Nov 27.
+    expect(isoDates).toContain('2025-11-27')
+  })
+
+  it('isWorkDay (via countWorkDays) excludes the holiday and weekend days, computed in UTC', () => {
+    // Range: Thu Jul 3 → Wed Jul 9, 2025, parsed as UTC midnight (same basis
+    // as the engine). Independence Day (Fri Jul 4) is a holiday.
+    // Calendar (getUTCDay): Jul 3 Thu, 4 Fri(holiday), 5 Sat, 6 Sun, 7 Mon,
+    // 8 Tue, 9 Wed → work days = Jul 3, 7, 8, 9 = 4.
+    const start = parseISO('2025-07-03')
+    const end = parseISO('2025-07-09')
+
+    // Expected work-day count computed independently via getUTCDay.
+    const holidays = computeHolidayDates(defaultPolicy, 2025)
+    const holidaySet = new Set(
+      holidays.map(
+        (d) => `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`,
+      ),
+    )
+    let expected = 0
+    for (let i = 0; i < 7; i++) {
+      const day = parseISO('2025-07-03')
+      day.setUTCDate(day.getUTCDate() + i)
+      const dow = day.getUTCDay()
+      const key = `${day.getUTCFullYear()}-${day.getUTCMonth()}-${day.getUTCDate()}`
+      if (defaultPolicy.workDaysPerWeek.includes(dow) && !holidaySet.has(key)) {
+        expected++
+      }
+    }
+
+    expect(countWorkDays(start, end, defaultPolicy)).toBe(expected)
+    expect(countWorkDays(start, end, defaultPolicy)).toBe(4)
+  })
+})
+
+describe('projection does not double-add already-applied future bank entries', () => {
+  it('a future bank entry with appliedToBalance true/undefined is NOT added by projection', () => {
+    const base = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 10, // entry already credited into the stored balance
+        lastPaydayDate: '2025-06-13',
+      },
+    })
+
+    // appliedToBalance === true → already in currentBankHours, must not re-add.
+    const applied = projectBalance(
+      {
+        ...base,
+        bankHoursLog: [
+          { id: 'b1', date: '2025-07-01', hours: 10, appliedToBalance: true },
+        ],
+      },
+      new Date('2025-08-01'),
+    )
+    expect(applied.bankBalance).toBe(10)
+
+    // appliedToBalance undefined (legacy entry) → treated as already applied.
+    const legacy = projectBalance(
+      {
+        ...base,
+        bankHoursLog: [{ id: 'b2', date: '2025-07-01', hours: 10 }],
+      },
+      new Date('2025-08-01'),
+    )
+    expect(legacy.bankBalance).toBe(10)
+
+    // Sanity: an explicitly-unapplied future entry IS folded in.
+    const unapplied = projectBalance(
+      {
+        ...base,
+        profile: { ...base.profile, currentBankHours: 0 },
+        bankHoursLog: [
+          { id: 'b3', date: '2025-07-01', hours: 10, appliedToBalance: false },
+        ],
+      },
+      new Date('2025-08-01'),
+    )
+    expect(unapplied.bankBalance).toBe(10)
+  })
+})
+
+describe('tier comparison is by value, surviving a JSON round-trip', () => {
+  it('a deep-cloned policy produces the same accrual as the original', () => {
+    // Hire date crosses the 5-year mark mid-projection so the tier-transition
+    // proration path runs. Object-identity comparison would mis-fire after a
+    // clone and prorate every period.
+    const base = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2020-06-15',
+        currentVacationHours: 20,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+      },
+    })
+
+    const cloned: AppState = {
+      ...base,
+      policy: JSON.parse(JSON.stringify(base.policy)),
+    }
+
+    const target = new Date('2025-12-15')
+    const orig = projectBalance(base, target)
+    const clone = projectBalance(cloned, target)
+
+    expect(clone.vacationBalance).toBe(orig.vacationBalance)
+
+    const origAccruals = orig.events.filter((e) => e.type === 'accrual')
+    const cloneAccruals = clone.events.filter((e) => e.type === 'accrual')
+    expect(cloneAccruals.length).toBe(origAccruals.length)
+    cloneAccruals.forEach((e, i) => {
+      expect(e.delta).toBeCloseTo(origAccruals[i].delta, 6)
+    })
+
+    // After the single anniversary period, all later accruals are the flat
+    // 5–10yr rate (4.615) — NOT a per-period prorated value.
+    const [, ...rest] = cloneAccruals
+    rest.forEach((e) => expect(e.delta).toBeCloseTo(4.615, 3))
+  })
+})
+
+describe('payPeriodLengthDays is clamped to >= 1 (no infinite loop)', () => {
+  it('a zero pay-period length does not hang projectBalance', () => {
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 10,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+      },
+      policy: { ...defaultPolicy, payPeriodLengthDays: 0 },
+    })
+    // If the clamp were missing, addDays(d, 0) would never advance and this
+    // would spin forever. The clamp makes it terminate.
+    expect(() =>
+      projectBalance(state, new Date('2025-07-15')),
+    ).not.toThrow()
+  })
+
+  it('a negative pay-period length does not hang earliestAffordableDate', () => {
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 20,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-06-13',
+      },
+      policy: { ...defaultPolicy, payPeriodLengthDays: -5 },
+    })
+    expect(() =>
+      earliestAffordableDate(state, 80, new Date('2025-06-15')),
+    ).not.toThrow()
   })
 })

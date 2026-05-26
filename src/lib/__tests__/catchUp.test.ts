@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { catchUpState, summarizeCatchUp } from '../catchUp'
+import { projectBalance } from '../projection'
 import { defaultPolicy } from '../defaultPolicy'
 import type { AppState } from '../types'
 
@@ -116,8 +117,10 @@ describe('catchUpState', () => {
     expect(result.state.profile.currentVacationHours).toBeCloseTo(119.99, 1)
   })
 
-  it('zeros bank hours when crossing the bank payout window', () => {
-    mockToday('2025-12-16')
+  it('zeros bank hours when crossing the bank payout payday', () => {
+    // lastPayday Dec 12 (Fri), biweekly → next payday after the Dec 15 window
+    // open is Dec 26, so the payout lands Dec 26. today is past it.
+    mockToday('2025-12-27')
     const state = makeState({
       profile: {
         displayName: 'Test User',
@@ -126,7 +129,7 @@ describe('catchUpState', () => {
         currentSickHours: 20,
         currentBankHours: 12,
         lastPaydayDate: '2025-12-12',
-        lastSyncDate: '2025-12-14', // before the Dec 15 payout
+        lastSyncDate: '2025-12-14', // before the Dec 26 payout payday
         timezone: 'America/New_York',
       },
     })
@@ -134,6 +137,38 @@ describe('catchUpState', () => {
     const payouts = result.events.filter((e) => e.type === 'bank_payout')
     expect(payouts.length).toBeGreaterThan(0)
     expect(result.state.profile.currentBankHours).toBe(0)
+  })
+
+  it('bank payout fires once (next payday after window opens); hours banked later are NOT re-zeroed', () => {
+    // Window Dec 15 → Feb 15. lastPayday Dec 12 → payout payday Dec 26. lastSync
+    // Dec 14 2025, today Mar 1 2026 — the whole window is in the catch-up gap.
+    // Bank starts at 12. An unapplied bank-log entry of +20 lands Jan 10 2026
+    // (after the Dec 26 payout). Old code: payout at Dec 15 AND Feb 15 → the Feb
+    // 15 payout wiped the +20. Fix: only the Dec 26 payday payout fires, so the
+    // +20 survives.
+    mockToday('2026-03-01')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 12,
+        lastPaydayDate: '2025-12-12',
+        lastSyncDate: '2025-12-14',
+        timezone: 'America/New_York',
+      },
+      bankHoursLog: [
+        { id: 'mid', date: '2026-01-10', hours: 20, appliedToBalance: false },
+      ],
+    })
+    const result = catchUpState(state)
+    const payouts = result.events.filter((e) => e.type === 'bank_payout' && e.delta < 0)
+    // Exactly one zeroing payout — on the Dec 26 payday.
+    expect(payouts).toHaveLength(1)
+    expect(payouts[0].date).toBe('2025-12-26')
+    // The 12 starting hrs were paid out Dec 26; the +20 banked Jan 10 remains.
+    expect(result.state.profile.currentBankHours).toBe(20)
   })
 
   it('deducts a fully-past planned vacation and marks it logged_past', () => {
@@ -242,6 +277,118 @@ describe('catchUpState', () => {
     expect(types.has('accrual')).toBe(true)
     expect(types.has('sick_grant')).toBe(true)
     expect(result.state.profile.lastSyncDate).toBe('2026-02-09')
+  })
+
+  it('records debitedFrom per-pool on a converted any-source entry that drained bank', () => {
+    // A single past work-day vacation (Mon Jan 5, 2026), source 'any', funded
+    // entirely from bank (bank=20, vacation/sick=0). 'any' drains bank first,
+    // so the whole 8 hrs come from bank. After conversion to logged_past the
+    // entry must record debitedFrom = {vacation:0, sick:0, bank:8}.
+    mockToday('2026-01-07')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 20,
+        lastPaydayDate: '2025-12-12',
+        lastSyncDate: '2026-01-04',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'bank-drain',
+          startDate: '2026-01-05',
+          endDate: '2026-01-05',
+          hourSource: 'any',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+    const result = catchUpState(state)
+    const updated = result.state.plannedVacations.find(
+      (v) => v.id === 'bank-drain',
+    )
+    expect(updated?.kind).toBe('logged_past')
+    expect(updated?.debitedFrom).toEqual({ vacation: 0, sick: 0, bank: 8 })
+    // Bank should have dropped by exactly the recorded amount.
+    expect(result.state.profile.currentBankHours).toBe(12)
+  })
+
+  it('written-back balances are rounded to 2 decimals (no float tail)', () => {
+    // Several biweekly accruals of 3.076 produce a binary-float tail; the
+    // balance written into the profile must be cleanly 2-dp rounded.
+    mockToday('2026-03-13')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 20,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-12',
+        lastSyncDate: '2025-12-12',
+        timezone: 'America/New_York',
+      },
+    })
+    const result = catchUpState(state)
+    const v = result.state.profile.currentVacationHours
+    expect(v).toBe(Math.round(v * 100) / 100)
+    const s = result.state.profile.currentSickHours
+    expect(s).toBe(Math.round(s * 100) / 100)
+    const b = result.state.profile.currentBankHours
+    expect(b).toBe(Math.round(b * 100) / 100)
+  })
+
+  it('catch-up and projection agree on a payday period straddling a service anniversary', () => {
+    // Hire 2020-06-15. The pay period 2025-06-13 → 2025-06-27 straddles the
+    // 5-year anniversary (Jun 15), so that payday's accrual is PRO-RATED:
+    // ~2 days at the 2–5yr rate (3.076) + ~12 days at the 6–10yr rate (4.615).
+    // Before this fix, catch-up applied the full new-tier rate as a cliff and
+    // diverged from the projection by a fraction of an hour. Both engines must
+    // now produce the SAME vacation balance for the same single period.
+    const baseProfile = {
+      displayName: 'Test User',
+      hireDate: '2020-06-15',
+      currentVacationHours: 20,
+      currentSickHours: 0,
+      currentBankHours: 0,
+      lastPaydayDate: '2025-06-13',
+      timezone: 'America/New_York',
+    }
+
+    // Projection: "today" Jun 15 2025 → the Jun 27 payday is in the future and
+    // is the only accrual before the target (Jun 28). periodStart = lastPayday
+    // = Jun 13.
+    mockToday('2025-06-15')
+    const projState = makeState({ profile: { ...baseProfile } })
+    const proj = projectBalance(projState, new Date('2025-06-28'))
+    const projAccruals = proj.events.filter((e) => e.type === 'accrual')
+    expect(projAccruals).toHaveLength(1)
+
+    // Catch-up: lastSync = lastPayday (Jun 13), "today" Jun 28 → the only
+    // payday in the gap is Jun 27, periodStart = Jun 27 - 14 = Jun 13. Same
+    // period as the projection.
+    mockToday('2025-06-28')
+    const cuState = makeState({
+      profile: { ...baseProfile, lastSyncDate: '2025-06-13' },
+    })
+    const cu = catchUpState(cuState)
+    const cuAccruals = cu.events.filter((e) => e.type === 'accrual')
+    expect(cuAccruals).toHaveLength(1)
+
+    // The single prorated accrual delta must match to full precision...
+    expect(cuAccruals[0].delta).toBeCloseTo(projAccruals[0].delta, 10)
+    // ...and it must be a PRORATED value, strictly between the two tier rates
+    // (proving neither side took the cliff shortcut).
+    expect(cuAccruals[0].delta).toBeGreaterThan(3.076)
+    expect(cuAccruals[0].delta).toBeLessThan(4.615)
+
+    // And the resulting persisted/projected vacation balances are equal after
+    // the 2-dp rounding both engines apply at the boundary.
+    expect(cu.state.profile.currentVacationHours).toBe(proj.vacationBalance)
   })
 
   it('falls back to lastPaydayDate when lastSyncDate is missing', () => {

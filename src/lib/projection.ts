@@ -4,10 +4,8 @@ import {
   differenceInYears,
   eachDayOfInterval,
   format,
-  getDay,
   isAfter,
   isBefore,
-  isSameDay,
   parseISO,
   startOfDay,
   subDays,
@@ -24,6 +22,19 @@ import { computeHolidayDates } from './holidays'
 import { getNowInZone, isWorkDayOverInZone } from './timeUtils'
 
 const DEFAULT_TZ = 'America/New_York'
+
+/** Round to 2 decimals at the API boundary. Accumulation stays full-precision;
+ *  only the RETURNED numbers are rounded so the UI never shows a float tail
+ *  like 71.53999999999999. */
+const r2 = (n: number): number => Math.round(n * 100) / 100
+
+/** Two accrual tiers are "the same" when their resolved rate AND tenure floor
+ *  match — by VALUE, not object identity. The policy is JSON-serialized to
+ *  localStorage, so after a reload `===` would never hold between two tier
+ *  objects even when they represent the identical tier. */
+function sameTier(a: AccrualTier, b: AccrualTier): boolean {
+  return a.hoursPerPayPeriod === b.hoursPerPayPeriod && a.minYears === b.minYears
+}
 
 /** Build a UTC-midnight Date for a (y, m, d) triple. Avoids the local-timezone
  *  drift you get from `new Date(y, m-1, d)`, which silently shifts events
@@ -135,6 +146,59 @@ export function computeAccrualTier(
 }
 
 /**
+ * Vacation hours accrued for a single pay period ending on `payday`, with
+ * proration when a service anniversary (tier transition) falls inside the
+ * period: portion-of-period in the old tier × old rate + remainder × new rate.
+ *
+ * This is the single source of truth for per-period accrual. Both the
+ * projection's accrual path AND catchUp's payday loop call it so the persisted
+ * balance can never drift from the projected one over an anniversary period.
+ *
+ * The logic here reproduces projection's previous inline behaviour exactly,
+ * so projection's numeric output is unchanged.
+ */
+export function accrualForPeriod(
+  policy: PolicyConfig,
+  hireDate: Date,
+  periodStart: Date,
+  payday: Date,
+): number {
+  const periodDays = differenceInCalendarDays(payday, periodStart)
+  if (periodDays <= 0) {
+    const yos = differenceInYears(payday, hireDate)
+    return computeAccrualTier(policy, yos).hoursPerPayPeriod
+  }
+  const yosStart = differenceInYears(periodStart, hireDate)
+  const yosEnd = differenceInYears(payday, hireDate)
+  const tierStart = computeAccrualTier(policy, yosStart)
+  const tierEnd = computeAccrualTier(policy, yosEnd)
+  // Compare by VALUE, not object identity: a JSON round-trip of the policy
+  // (localStorage load) produces fresh tier objects, so `===` would always
+  // think the tier changed and wrongly prorate every pay period. Prorate only
+  // when the resolved rate actually differs.
+  if (sameTier(tierStart, tierEnd)) return tierEnd.hoursPerPayPeriod
+
+  // Find the anniversary day inside (periodStart, payday] that triggered the
+  // tier change. differenceInYears jumps on the anniversary day, so we walk
+  // from periodStart+1 until we land on the day yos increments.
+  let anniversaryDay: Date | null = null
+  for (let d = 1; d <= periodDays; d++) {
+    const probe = addDays(periodStart, d)
+    if (differenceInYears(probe, hireDate) > yosStart) {
+      anniversaryDay = probe
+      break
+    }
+  }
+  if (!anniversaryDay) return tierEnd.hoursPerPayPeriod
+  const daysInOldTier = differenceInCalendarDays(anniversaryDay, periodStart)
+  const daysInNewTier = periodDays - daysInOldTier
+  return (
+    (tierStart.hoursPerPayPeriod * daysInOldTier) / periodDays +
+    (tierEnd.hoursPerPayPeriod * daysInNewTier) / periodDays
+  )
+}
+
+/**
  * Generate all payday dates from a starting payday forward to (and including) a target date.
  */
 function generatePaydays(
@@ -142,11 +206,14 @@ function generatePaydays(
   targetDate: Date,
   periodDays: number,
 ): Date[] {
+  // Defensive: a bad policy value (0 or negative) would make addDays a no-op
+  // and spin this loop forever. Clamp to a minimum 1-day stride.
+  const period = Math.max(1, periodDays)
   const paydays: Date[] = []
-  let current = addDays(lastPayday, periodDays)
+  let current = addDays(lastPayday, period)
   while (!isAfter(current, targetDate)) {
     paydays.push(current)
-    current = addDays(current, periodDays)
+    current = addDays(current, period)
   }
   return paydays
 }
@@ -162,10 +229,17 @@ export function firstPaydayOnOrAfter(
   periodDays: number,
   anchor: Date,
 ): Date {
+  const period = Math.max(1, periodDays)
   let payday = startOfDay(lastPayday)
-  while (isBefore(payday, anchor)) {
-    payday = addDays(payday, periodDays)
-  }
+  // The anchor can sit BEFORE lastPayday (e.g. a Feb 1 carryover anchor with a
+  // May lastPayday). A forward-only walk would never run and return lastPayday
+  // unchanged. Jump close with a day-count estimate (which may overshoot in
+  // either direction), then correct both ways so we land on the first payday on
+  // the lastPayday ± n*period cycle that is on/after the anchor.
+  const est = Math.ceil(differenceInCalendarDays(anchor, payday) / period)
+  payday = addDays(payday, est * period)
+  while (isBefore(payday, anchor)) payday = addDays(payday, period)
+  while (!isBefore(addDays(payday, -period), anchor)) payday = addDays(payday, -period)
   return payday
 }
 
@@ -189,13 +263,27 @@ export function getCarryoverPayoutDate(
   return firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, anchor)
 }
 
+/** Same UTC calendar day? Holiday dates and day-stream dates are all built on
+ *  the UTC-midnight basis (parseISO / isoMidnight / eachDayOfInterval over UTC
+ *  anchors), so compare their UTC fields rather than using date-fns isSameDay,
+ *  which compares LOCAL fields and would mis-match for users behind UTC. */
+function isSameUtcDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  )
+}
+
 /**
  * Check if a date is a work day (in workDaysPerWeek and not a holiday).
+ * Uses getUTCDay so weekday detection agrees with the UTC-midnight basis the
+ * holiday dates and vacation day-streams are built on.
  */
 function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean {
-  const dow = getDay(date)
+  const dow = date.getUTCDay()
   if (!policy.workDaysPerWeek.includes(dow)) return false
-  return !holidays.some((h) => isSameDay(h, date))
+  return !holidays.some((h) => isSameUtcDay(h, date))
 }
 
 /**
@@ -278,6 +366,12 @@ export function projectBalance(
 
   if (state.bankHoursLog) {
     for (const entry of state.bankHoursLog) {
+      // Only fold in entries that haven't already been credited to the stored
+      // balance. catch-up flips `appliedToBalance` to true once an entry's
+      // date passes; without this gate, an already-applied future entry would
+      // be double-counted by the projection. Mirrors catchUp.ts's
+      // `appliedToBalance !== false` gate (here we require strict false).
+      if (entry.appliedToBalance !== false) continue
       const entryDate = parseISO(entry.date)
       if (isAfter(entryDate, today) && !isAfter(entryDate, target)) {
         bankBalance += entry.hours
@@ -288,10 +382,10 @@ export function projectBalance(
   if (!isAfter(target, today)) {
     const eff = getEffectiveCurrentBalances(state)
     return {
-      vacationBalance: eff.vacation,
-      sickBalance: eff.sick,
-      bankBalance: eff.bank,
-      totalAvailable: eff.total,
+      vacationBalance: r2(eff.vacation),
+      sickBalance: r2(eff.sick),
+      bankBalance: r2(eff.bank),
+      totalAvailable: r2(eff.total),
       carryoverAdjustment: 0,
       bankPayout: 0,
       shortfall: 0,
@@ -329,40 +423,10 @@ export function projectBalance(
       type: 'accrual',
       process: () => {
         // Pro-rate when a tier transition (service anniversary) falls inside
-        // the pay period: portion-of-period in old tier × old rate +
-        // remainder × new rate. The non-prorated path treated tier
-        // transitions as cliffs and silently shifted small amounts of accrual
-        // off true tenure.
+        // the pay period. Delegated to the shared accrualForPeriod helper so
+        // projection and catch-up stay in lockstep over anniversary periods.
         const periodStart = i > 0 ? paydays[i - 1] : lastPayday
-        const periodDays = differenceInCalendarDays(payday, periodStart)
-        if (periodDays <= 0) {
-          const yos = differenceInYears(payday, hireDate)
-          return computeAccrualTier(state.policy, yos).hoursPerPayPeriod
-        }
-        const yosStart = differenceInYears(periodStart, hireDate)
-        const yosEnd = differenceInYears(payday, hireDate)
-        const tierStart = computeAccrualTier(state.policy, yosStart)
-        const tierEnd = computeAccrualTier(state.policy, yosEnd)
-        if (tierStart === tierEnd) return tierEnd.hoursPerPayPeriod
-
-        // Find the anniversary day inside (periodStart, payday] that triggered
-        // the tier change. differenceInYears jumps on the anniversary day, so
-        // we walk from periodStart+1 until we land on the day yos increments.
-        let anniversaryDay: Date | null = null
-        for (let d = 1; d <= periodDays; d++) {
-          const probe = addDays(periodStart, d)
-          if (differenceInYears(probe, hireDate) > yosStart) {
-            anniversaryDay = probe
-            break
-          }
-        }
-        if (!anniversaryDay) return tierEnd.hoursPerPayPeriod
-        const daysInOldTier = differenceInCalendarDays(anniversaryDay, periodStart)
-        const daysInNewTier = periodDays - daysInOldTier
-        return (
-          (tierStart.hoursPerPayPeriod * daysInOldTier) / periodDays +
-          (tierEnd.hoursPerPayPeriod * daysInNewTier) / periodDays
-        )
+        return accrualForPeriod(state.policy, hireDate, periodStart, payday)
       },
       label: 'Vacation accrual',
     })
@@ -415,35 +479,33 @@ export function projectBalance(
     }
   }
 
-  // Bank window can span the year boundary; if endsNextYear, the END date is
-  // for the *following* year. Iterating one extra year on each side captures
-  // payouts whose start fired in startYear-1 and end falls in startYear.
+  // Bank window can span the year boundary (e.g. Dec 15 → Feb 15). The payout
+  // fires ONCE per window, when the window OPENS (payoutStart). Iterating one
+  // extra year on each side captures a window-open that lands just inside the
+  // projection range from an adjacent calendar year.
   const bankStartM = state.policy.bankHoursPayoutStart.month
-  const bankEndM = state.policy.bankHoursPayoutEnd.month
-  const bankEndsNextYear =
-    bankEndM < bankStartM ||
-    (bankEndM === bankStartM &&
-      state.policy.bankHoursPayoutEnd.day < state.policy.bankHoursPayoutStart.day)
   for (let y = startYear - 1; y <= endYear + 1; y++) {
-    const payoutStart = isoMidnight(
+    const windowOpen = isoMidnight(
       y,
       bankStartM,
       state.policy.bankHoursPayoutStart.day,
     )
-    const payoutEnd = isoMidnight(
-      bankEndsNextYear ? y + 1 : y,
-      bankEndM,
-      state.policy.bankHoursPayoutEnd.day,
+    // Bank hours are paid out via payroll on the FIRST PAYDAY on/after the
+    // window opens — not on the window-open calendar date, and not again at the
+    // window close (which would zero the bank a second time and wipe anything
+    // banked during the window). One payout per window, on a real pay date.
+    const payoutDate = firstPaydayOnOrAfter(
+      lastPayday,
+      state.policy.payPeriodLengthDays,
+      windowOpen,
     )
-    for (const payoutDate of [payoutStart, payoutEnd]) {
-      if (isAfter(payoutDate, today) && !isAfter(payoutDate, target)) {
-        pendingEvents.push({
-          date: payoutDate,
-          type: 'bank_payout',
-          process: () => 0,
-          label: `Bank hours payout (${format(payoutDate, 'MMM d')})`,
-        })
-      }
+    if (isAfter(payoutDate, today) && !isAfter(payoutDate, target)) {
+      pendingEvents.push({
+        date: payoutDate,
+        type: 'bank_payout',
+        process: () => 0,
+        label: `Bank hours payout (${format(payoutDate, 'MMM d')})`,
+      })
     }
   }
 
@@ -567,13 +629,13 @@ export function projectBalance(
   }
 
   return {
-    vacationBalance,
-    sickBalance,
-    bankBalance,
-    totalAvailable: vacationBalance + sickBalance + bankBalance,
-    carryoverAdjustment: totalCarryoverAdjustment,
-    bankPayout: totalBankPayout,
-    shortfall: totalShortfall,
+    vacationBalance: r2(vacationBalance),
+    sickBalance: r2(sickBalance),
+    bankBalance: r2(bankBalance),
+    totalAvailable: r2(vacationBalance + sickBalance + bankBalance),
+    carryoverAdjustment: r2(totalCarryoverAdjustment),
+    bankPayout: r2(totalBankPayout),
+    shortfall: r2(totalShortfall),
     events,
   }
 }
@@ -589,21 +651,22 @@ export function earliestAffordableDate(
   notBefore: Date,
 ): Date | null {
   const maxDate = addDays(new Date(), 365 * 3)
+  const period = Math.max(1, state.policy.payPeriodLengthDays)
   const lastPayday = parseISO(state.profile.lastPaydayDate)
   const checkDate = startOfDay(notBefore)
 
   const initial = projectBalance(state, checkDate)
   if (initial.totalAvailable >= hoursNeeded) return checkDate
 
-  let payday = addDays(lastPayday, state.policy.payPeriodLengthDays)
+  let payday = addDays(lastPayday, period)
   while (!isAfter(payday, checkDate)) {
-    payday = addDays(payday, state.policy.payPeriodLengthDays)
+    payday = addDays(payday, period)
   }
 
   while (!isAfter(payday, maxDate)) {
     const result = projectBalance(state, payday)
     if (result.totalAvailable >= hoursNeeded) return payday
-    payday = addDays(payday, state.policy.payPeriodLengthDays)
+    payday = addDays(payday, period)
   }
 
   return null
@@ -715,15 +778,16 @@ export function earliestAffordableTripStart(
   const initial = startOfDay(notBefore)
   if (tryStart(initial)) return initial
 
+  const period = Math.max(1, state.policy.payPeriodLengthDays)
   const lastPayday = parseISO(state.profile.lastPaydayDate)
-  let payday = addDays(lastPayday, state.policy.payPeriodLengthDays)
+  let payday = addDays(lastPayday, period)
   while (!isAfter(payday, initial)) {
-    payday = addDays(payday, state.policy.payPeriodLengthDays)
+    payday = addDays(payday, period)
   }
 
   while (!isAfter(payday, maxDate)) {
     if (tryStart(payday)) return payday
-    payday = addDays(payday, state.policy.payPeriodLengthDays)
+    payday = addDays(payday, period)
   }
 
   return null
@@ -753,10 +817,11 @@ export function countWorkDays(
  * Get the next payday date after today.
  */
 export function getNextPayday(lastPayday: Date, periodDays: number): Date {
+  const period = Math.max(1, periodDays)
   const today = startOfDay(new Date())
-  let next = addDays(lastPayday, periodDays)
+  let next = addDays(lastPayday, period)
   while (!isAfter(next, today)) {
-    next = addDays(next, periodDays)
+    next = addDays(next, period)
   }
   return next
 }

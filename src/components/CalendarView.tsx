@@ -22,7 +22,7 @@ import { subscribeToCalendarNav } from '../lib/calendarNav'
 import { showToast } from '../lib/toastBus'
 
 export function CalendarView() {
-  const { state, addVacation, removeVacation, addPastAbsence, removePastAbsence, adjustActualHours } = useAppState()
+  const { state, addVacation, removeVacation, updateVacation, addPastAbsence, removePastAbsence, adjustActualHours } = useAppState()
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
 
   useEffect(
@@ -140,6 +140,23 @@ export function CalendarView() {
       return
     }
 
+    // Editing an existing MULTI-day planned entry must NOT collapse the whole
+    // span to a single day. Update its editable fields in place across the
+    // entire entry, preserving startDate/endDate/kind/actualHoursUsed.
+    if (popoverExisting && popoverExisting.startDate !== popoverExisting.endDate) {
+      updateVacation(popoverExisting.id, {
+        hoursPerDay: config.hoursPerDay,
+        timeOffStart: config.timeOffStart,
+        timeOffEnd: config.timeOffEnd,
+        hourSource: config.hourSource,
+        note: config.note,
+      })
+      setPopoverDate(null)
+      return
+    }
+
+    // Single-day entry (or brand-new day): remove the old entry, if any, and
+    // add the edited single-day entry.
     if (popoverExisting) {
       removeVacation(popoverExisting.id)
     }
@@ -227,7 +244,7 @@ export function CalendarView() {
           </button>
 
           {showMonthPicker && (
-            <div className="absolute top-full left-0 mt-2 z-30 glass-card rounded-xl shadow-xl p-3 w-64 animate-slide-up">
+            <div className="absolute top-full left-0 mt-2 z-30 glass-card rounded-xl shadow-xl p-3 w-64 max-w-[calc(100vw-1.5rem)] animate-slide-up">
               {/* Year selector */}
               <div className="flex items-center justify-between mb-2">
                 <button
@@ -275,7 +292,7 @@ export function CalendarView() {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setCurrentMonth((m) => subMonths(m, 1))}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
+            className="p-2.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
             aria-label="Previous month"
             title="Previous month"
           >
@@ -283,7 +300,7 @@ export function CalendarView() {
           </button>
           <button
             onClick={() => setCurrentMonth(startOfMonth(new Date()))}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
+            className="p-2.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
             aria-label="Go to current month"
             title="Go to current month"
           >
@@ -291,7 +308,7 @@ export function CalendarView() {
           </button>
           <button
             onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
+            className="p-2.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
             aria-label="Next month"
             title="Next month"
           >

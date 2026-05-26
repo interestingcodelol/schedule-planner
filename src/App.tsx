@@ -15,6 +15,11 @@ import { catchUpState, summarizeCatchUp } from './lib/catchUp'
 import { showToast } from './lib/toastBus'
 import { getNowInZone } from './lib/timeUtils'
 
+/** Must match CURRENT_VERSION in lib/storage.ts. Hardcoded here (rather than
+ *  imported) to avoid widening storage's public surface; isPlausibleAppState
+ *  rejects any other value at load time. */
+const CURRENT_VERSION = 1
+
 function detectTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/New_York'
@@ -33,6 +38,11 @@ function migrateState(loaded: AppState): AppState {
     loaded.profile.lastSyncDate ?? loaded.profile.lastPaydayDate
   return {
     ...loaded,
+    // Force the current schema version so an imported backup carrying a
+    // different version number doesn't get persisted and then permanently
+    // rejected by the strict load-time check (which would kick the user back
+    // to the Setup Wizard). Mirrors CURRENT_VERSION in storage.ts.
+    version: CURRENT_VERSION,
     profile: {
       ...loaded.profile,
       currentBankHours: loaded.profile.currentBankHours ?? 0,
@@ -44,6 +54,9 @@ function migrateState(loaded: AppState): AppState {
     showTour: loaded.showTour ?? false,
     policy: {
       ...loaded.policy,
+      // Older backups predate carryoverPayoutDate; backfill so projection and
+      // catch-up don't crash on `.month`/`.day`. Default = first Feb pay date.
+      carryoverPayoutDate: loaded.policy.carryoverPayoutDate ?? { month: 2, day: 1 },
       bankHoursPayoutStart: loaded.policy.bankHoursPayoutStart ?? { month: 12, day: 15 },
       bankHoursPayoutEnd: loaded.policy.bankHoursPayoutEnd ?? { month: 2, day: 15 },
     },
@@ -112,51 +125,87 @@ function balancesChanged(
   )
 }
 
-/** Subtract hours from the matching pool. For 'any', drain bank → vacation → sick. */
+/** Per-pool breakdown of how many hours a debit actually drew from each pool.
+ *  Stored on the entry as `debitedFrom` so a later refund credits the exact
+ *  same pools instead of guessing. */
+type PoolBreakdown = { vacation: number; sick: number; bank: number }
+
+/** Result of a debit: the new pool balances PLUS the per-pool amounts that
+ *  were actually deducted. Callers persist `drawn` into the entry's
+ *  `debitedFrom` so the refund side is symmetric with the debit side. */
+type DebitResult = {
+  balances: PoolBreakdown
+  drawn: PoolBreakdown
+}
+
+/** Subtract hours from the matching pool. For 'any', drain bank → vacation → sick.
+ *  Returns both the new balances and the per-pool breakdown actually deducted. */
 function applyDebit(
   state: AppState,
   hours: number,
   source: 'vacation' | 'sick' | 'bank' | 'any',
-): { vacation: number; sick: number; bank: number } {
+): DebitResult {
   let vacation = state.profile.currentVacationHours
   let sick = state.profile.currentSickHours
   let bank = state.profile.currentBankHours
+  const drawn: PoolBreakdown = { vacation: 0, sick: 0, bank: 0 }
   if (source === 'vacation') {
     vacation -= hours
+    drawn.vacation = hours
   } else if (source === 'sick') {
     sick -= hours
+    drawn.sick = hours
   } else if (source === 'bank') {
     bank -= hours
+    drawn.bank = hours
   } else {
     let remaining = hours
     const fromBank = Math.min(remaining, Math.max(0, bank))
     bank -= fromBank
     remaining -= fromBank
+    drawn.bank = fromBank
     if (remaining > 0) {
       const fromVaca = Math.min(remaining, Math.max(0, vacation))
       vacation -= fromVaca
       remaining -= fromVaca
+      drawn.vacation = fromVaca
     }
     if (remaining > 0) {
       const fromSick = Math.min(remaining, Math.max(0, sick))
       sick -= fromSick
+      drawn.sick = fromSick
     }
   }
-  return { vacation, sick, bank }
+  return { balances: { vacation, sick, bank }, drawn }
 }
 
-/** Refund hours to the matching pool. 'any' credits back to vacation. */
+/** Refund hours to the matching pool. 'any' credits back to vacation. Used as
+ *  the fallback for older entries that have no recorded `debitedFrom`. */
 function applyRefund(
   state: AppState,
   hours: number,
   source: 'vacation' | 'sick' | 'bank' | 'any',
-): { vacation: number; sick: number; bank: number } {
+): PoolBreakdown {
   const vacation = state.profile.currentVacationHours
   const sick = state.profile.currentSickHours
   const bank = state.profile.currentBankHours
   if (source === 'sick') return { vacation, sick: sick + hours, bank }
   if (source === 'bank') return { vacation, sick, bank: bank + hours }
   return { vacation: vacation + hours, sick, bank }
+}
+
+/** Refund an entry's exact recorded per-pool breakdown back to those pools.
+ *  Used when `debitedFrom` is present so a bank-only debit refunds to bank,
+ *  not vacation. */
+function applyBreakdownRefund(
+  state: AppState,
+  breakdown: PoolBreakdown,
+): PoolBreakdown {
+  return {
+    vacation: state.profile.currentVacationHours + breakdown.vacation,
+    sick: state.profile.currentSickHours + breakdown.sick,
+    bank: state.profile.currentBankHours + breakdown.bank,
+  }
 }
 
 function getInitialState(): { state: AppState | null; isDemo: boolean } {
@@ -329,9 +378,20 @@ export default function App() {
     setAppData((prev) => {
       if (!prev.state) return prev
       const newVacations = [...prev.state.plannedVacations]
-      const overlapping = newVacations.filter(
-        (v) => v.startDate <= vacation.endDate && v.endDate >= vacation.startDate,
-      )
+      // Only auto-merge PLANNED entries with other overlapping PLANNED entries.
+      // Never merge a logged_past entry (it already mutated balances) and never
+      // merge across kind — doing so corrupts balances. logged_past incoming
+      // entries don't come through addVacation, but guard anyway.
+      const incomingKind = vacation.kind ?? 'planned'
+      const overlapping =
+        incomingKind === 'planned'
+          ? newVacations.filter(
+              (v) =>
+                (v.kind ?? 'planned') === 'planned' &&
+                v.startDate <= vacation.endDate &&
+                v.endDate >= vacation.startDate,
+            )
+          : []
 
       if (overlapping.length > 0) {
         const allDates = [
@@ -341,8 +401,58 @@ export default function App() {
         ].sort()
         const mergedStart = allDates[0]
         const mergedEnd = allDates[allDates.length - 1]
+
+        // Preserve data across the merge instead of discarding the overlapped
+        // entries' fields. Notes are concatenated (distinct, joined with " · "),
+        // hoursPerDay takes the MIN (most conservative), and most other fields
+        // prefer the incoming entry but fall back to any overlapped value.
+        const merged = [...overlapping, vacation]
+        const notes = Array.from(
+          new Set(
+            merged
+              .map((v) => v.note?.trim())
+              .filter((n): n is string => !!n),
+          ),
+        )
+        const mergedNote = notes.length > 0 ? notes.join(' · ') : undefined
+
+        const hoursPerDayValues = merged
+          .map((v) => v.hoursPerDay)
+          .filter((h): h is number => typeof h === 'number')
+        const mergedHoursPerDay =
+          hoursPerDayValues.length > 0 ? Math.min(...hoursPerDayValues) : undefined
+
+        // Keep a consistent hourSource: prefer the incoming entry's. If the
+        // overlapped entries used a different source, note it rather than
+        // silently dropping it.
+        const distinctSources = Array.from(new Set(merged.map((v) => v.hourSource)))
+        const sourceNote =
+          distinctSources.length > 1
+            ? `sources merged: ${distinctSources.join(', ')}`
+            : undefined
+        const finalNote =
+          sourceNote && mergedNote
+            ? `${mergedNote} · ${sourceNote}`
+            : sourceNote ?? mergedNote
+
+        const firstOverlap = overlapping[0]
+        const mergedEntry: PlannedVacation = {
+          ...firstOverlap,
+          ...vacation,
+          startDate: mergedStart,
+          endDate: mergedEnd,
+          kind: 'planned',
+          note: finalNote,
+          hoursPerDay: mergedHoursPerDay,
+          // Prefer incoming display/time fields, but keep an overlapped value
+          // when the incoming entry doesn't supply one.
+          timeOffStart: vacation.timeOffStart ?? firstOverlap.timeOffStart,
+          timeOffEnd: vacation.timeOffEnd ?? firstOverlap.timeOffEnd,
+          customEmoji: vacation.customEmoji ?? firstOverlap.customEmoji,
+        }
+
         const filtered = newVacations.filter((v) => !overlapping.includes(v))
-        filtered.push({ ...vacation, startDate: mergedStart, endDate: mergedEnd })
+        filtered.push(mergedEntry)
         setTimeout(() => {
           showToast({
             message:
@@ -364,8 +474,16 @@ export default function App() {
       if (!prev.state) return prev
       const entry = prev.state.plannedVacations.find((v) => v.id === id)
       if (entry && entry.kind === 'logged_past') {
-        const hrs = entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
-        const refunded = applyRefund(prev.state, hrs, entry.hourSource || 'any')
+        // Prefer the recorded per-pool breakdown so we credit back exactly the
+        // pools that were debited (bank → bank, not bank → vacation). Older
+        // entries lack debitedFrom, so fall back to the source-based refund.
+        const refunded = entry.debitedFrom
+          ? applyBreakdownRefund(prev.state, entry.debitedFrom)
+          : applyRefund(
+              prev.state,
+              entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay,
+              entry.hourSource || 'any',
+            )
         return {
           ...prev,
           state: {
@@ -393,18 +511,24 @@ export default function App() {
   const addPastAbsence = useCallback((vacation: PlannedVacation) => {
     setAppData((prev) => {
       if (!prev.state) return prev
-      const entry: PlannedVacation = { ...vacation, kind: 'logged_past' }
-      const hrs = entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
-      const debited = applyDebit(prev.state, hrs, entry.hourSource || 'sick')
+      const hrs = vacation.actualHoursUsed ?? vacation.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
+      const debited = applyDebit(prev.state, hrs, vacation.hourSource || 'sick')
+      // Record exactly which pools were drawn so a later delete/edit refunds
+      // the same buckets instead of dumping everything back into vacation.
+      const entry: PlannedVacation = {
+        ...vacation,
+        kind: 'logged_past',
+        debitedFrom: debited.drawn,
+      }
       return {
         ...prev,
         state: {
           ...prev.state,
           profile: {
             ...prev.state.profile,
-            currentVacationHours: debited.vacation,
-            currentSickHours: debited.sick,
-            currentBankHours: debited.bank,
+            currentVacationHours: debited.balances.vacation,
+            currentSickHours: debited.balances.sick,
+            currentBankHours: debited.balances.bank,
           },
           plannedVacations: [...prev.state.plannedVacations, entry],
         },
@@ -420,38 +544,49 @@ export default function App() {
       const entry = prev.state.plannedVacations.find((v) => v.id === id)
       if (!entry) return prev
 
-      const newEntries = prev.state.plannedVacations.map((v) =>
-        v.id === id ? { ...v, actualHoursUsed } : v,
-      )
-
       if (entry.kind !== 'logged_past') {
+        const newEntries = prev.state.plannedVacations.map((v) =>
+          v.id === id ? { ...v, actualHoursUsed } : v,
+        )
         return {
           ...prev,
           state: { ...prev.state, plannedVacations: newEntries },
         }
       }
 
-      const oldHrs = entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
-      const delta = actualHoursUsed - oldHrs
-      let pools = {
-        vacation: prev.state.profile.currentVacationHours,
-        sick: prev.state.profile.currentSickHours,
-        bank: prev.state.profile.currentBankHours,
+      // Fully unwind the original debit, then re-debit at the new hours. This
+      // keeps `debitedFrom` exactly consistent with the new total (regardless
+      // of whether hours went up or down) so a later delete refunds correctly.
+      // Older entries with no debitedFrom fall back to the source-based refund.
+      const refunded = entry.debitedFrom
+        ? applyBreakdownRefund(prev.state, entry.debitedFrom)
+        : applyRefund(
+            prev.state,
+            entry.actualHoursUsed ?? entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay,
+            entry.hourSource || 'sick',
+          )
+      const refundedState: AppState = {
+        ...prev.state,
+        profile: {
+          ...prev.state.profile,
+          currentVacationHours: refunded.vacation,
+          currentSickHours: refunded.sick,
+          currentBankHours: refunded.bank,
+        },
       }
-      if (delta > 0) {
-        pools = applyDebit(prev.state, delta, entry.hourSource || 'sick')
-      } else if (delta < 0) {
-        pools = applyRefund(prev.state, -delta, entry.hourSource || 'sick')
-      }
+      const debited = applyDebit(refundedState, actualHoursUsed, entry.hourSource || 'sick')
+      const newEntries = prev.state.plannedVacations.map((v) =>
+        v.id === id ? { ...v, actualHoursUsed, debitedFrom: debited.drawn } : v,
+      )
       return {
         ...prev,
         state: {
           ...prev.state,
           profile: {
             ...prev.state.profile,
-            currentVacationHours: pools.vacation,
-            currentSickHours: pools.sick,
-            currentBankHours: pools.bank,
+            currentVacationHours: debited.balances.vacation,
+            currentSickHours: debited.balances.sick,
+            currentBankHours: debited.balances.bank,
           },
           plannedVacations: newEntries,
         },
