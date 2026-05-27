@@ -48,8 +48,21 @@ export function SettingsModal({ onClose }: Props) {
 
   // Feature-detect file sharing (mobile Safari/Chrome) so the Share button
   // only appears where it actually works.
-  const canShareFiles =
+  //
+  // navigator.canShare({ files }) only validates the payload *shape*, not that
+  // a working OS share target exists. Desktop Chrome returns true here yet
+  // navigator.share() then rejects (no native share sheet for files), which is
+  // what surfaced the "Sharing was not available" error. The native share sheet
+  // only reliably works on phones/tablets, so also require a touch-primary /
+  // mobile context — desktop falls back to Export / Copy.
+  const isMobileShareDevice =
     typeof navigator !== 'undefined' &&
+    ((navigator as { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia?.('(pointer: coarse)').matches === true))
+
+  const canShareFiles =
+    isMobileShareDevice &&
     typeof navigator.share === 'function' &&
     typeof navigator.canShare === 'function' &&
     (() => {
