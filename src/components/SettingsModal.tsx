@@ -412,7 +412,11 @@ export function SettingsModal({ onClose }: Props) {
                     Export backup (JSON)
                   </button>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div
+                    className={`grid gap-2.5 ${
+                      canCopy && canShareFiles ? 'sm:grid-cols-2' : 'grid-cols-1'
+                    }`}
+                  >
                     {canCopy && (
                       <button
                         onClick={handleCopyBackup}
