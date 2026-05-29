@@ -34,3 +34,10 @@ logs
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# Local dev artifacts — must never be committed or deployed to the public site.
+# public/ is copied verbatim into the build, so anything left there ships to
+# GitHub Pages. Generated review/report HTML and scratch text files stay local.
+/public/fixes-summary.html
+/public/responsive-gallery.html
+/src/**/*.txt
