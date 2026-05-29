@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { differenceInDays, format, getDay, isBefore, parseISO, startOfDay } from 'date-fns'
 import {
+  differenceInDays,
+  endOfYear,
+  format,
+  getDay,
+  isBefore,
+  parseISO,
+  startOfDay,
+} from 'date-fns'
+import {
+  AlertTriangle,
   CalendarDays,
   CheckCircle,
   Lock,
@@ -125,8 +134,22 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
     ...state,
     plannedVacations: state.plannedVacations.filter((v) => v.id !== vacation.id),
   }
-  const impact = analyzeTripImpact(stateWithoutThis, vacation, end)
-  const affordable = impact.tripItselfShortfall === 0
+  // Project across this trip AND every later planned entry (forward horizon),
+  // so a trip that fits itself but pushes a LATER trip into deficit is not
+  // mislabeled "Affordable". Mirrors VacationPlanner's three-state logic.
+  const latestPlannedEnd = stateWithoutThis.plannedVacations.reduce<Date>(
+    (latest, v) => {
+      const e = parseISO(v.endDate)
+      return e > latest ? e : latest
+    },
+    end,
+  )
+  const horizon = endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
+  const impact = analyzeTripImpact(stateWithoutThis, vacation, horizon)
+  const affordable =
+    impact.tripItselfShortfall === 0 && impact.downstreamShortfall === 0
+  const conflictsLater =
+    impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
   const balanceOnStart = impact.balanceBeforeTrip
   const balanceAfterTrip = impact.balanceAfterTrip
   const replenishedDuringTrip = Math.max(
@@ -257,11 +280,15 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
                         ? `\n+${fmt(replenishedDuringTrip)} hrs added during trip (e.g. Jan 1 sick grant)`
                         : ''
                     }`
-                  : `Not enough\n${fmt(balanceOnStart)} hrs at start of ${format(start, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed (${fmt(impact.tripItselfShortfall)} short)`
+                  : conflictsLater
+                    ? `Fits, but leaves you short for a later trip\n${fmt(balanceAfterTrip)} hrs left after ${format(end, 'MMM d')}\n${fmt(impact.downstreamShortfall)} hrs short for a later planned trip`
+                    : `Not enough\n${fmt(balanceOnStart)} hrs at start of ${format(start, 'MMM d')}\n${fmt(hoursNeeded)} hrs needed (${fmt(impact.tripItselfShortfall)} short)`
               }
             >
               {affordable ? (
                 <CheckCircle className="w-4 h-4 text-emerald-500" />
+              ) : conflictsLater ? (
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
               ) : (
                 <XCircle className="w-4 h-4 text-red-500" />
               )}

@@ -12,6 +12,7 @@ import { Gift, TrendingUp } from 'lucide-react'
 import type { ElementType } from 'react'
 import { useAppState } from '../context'
 import { getNextPayday } from './projection'
+import { getNowInZone } from './timeUtils'
 import type { AppState, PlannedVacation } from './types'
 
 export type InfoEvent = {
@@ -28,7 +29,11 @@ export function useUpcomingItems(): {
   infoEvents: InfoEvent[]
 } {
   const { state } = useAppState()
-  const today = startOfDay(new Date())
+  // Anchor "today" to the profile timezone so payday/relative-day math matches
+  // projectBalance for a traveling user, instead of the browser's local clock.
+  const today = startOfDay(
+    parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate),
+  )
 
   const sortedVacations = useMemo(
     () =>
@@ -49,6 +54,7 @@ function computeInfoEvents(state: AppState, today: Date): InfoEvent[] {
   const nextPayday = getNextPayday(
     parseISO(state.profile.lastPaydayDate),
     state.policy.payPeriodLengthDays,
+    today,
   )
   const daysToPayday = differenceInDays(nextPayday, today)
   if (daysToPayday >= 0 && daysToPayday <= 30) {

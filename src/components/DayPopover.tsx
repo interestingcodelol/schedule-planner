@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
-import { format, subDays } from 'date-fns'
+import { format, parseISO, subDays } from 'date-fns'
 import { X, Clock, CalendarOff, CalendarCheck, Pencil, History } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
 import {
@@ -12,6 +12,7 @@ import {
 import { useFocusTrap } from '../lib/useFocusTrap'
 import { useAppState } from '../context'
 import {
+  countWorkDays,
   getEffectiveCurrentBalances,
   projectBalance,
 } from '../lib/projection'
@@ -80,9 +81,22 @@ export function DayPopover({
     existing?.hourSource ?? (mode === 'log_past' ? 'sick' : 'any'),
   )
   const [note, setNote] = useState(existing?.note ?? '')
-  const plannedHrs = existing
-    ? existing.hoursPerDay ?? hoursPerWorkDay
-    : hoursPerWorkDay
+  // An entry can span multiple work days; catch-up records actualHoursUsed as
+  // the TOTAL across the whole span (not per-day). The adjust UI must work in
+  // that same total, or it would clamp e.g. a 40h week down to an 8h/day cap
+  // and silently refund the difference. Count the span's work days so we can
+  // show/cap the total correctly.
+  const spanWorkDays = existing
+    ? Math.max(
+        1,
+        countWorkDays(parseISO(existing.startDate), parseISO(existing.endDate), state.policy),
+      )
+    : 1
+  const perDayHrs = existing ? existing.hoursPerDay ?? hoursPerWorkDay : hoursPerWorkDay
+  // Original total hours for the whole entry.
+  const plannedHrs = perDayHrs * spanWorkDays
+  // Ceiling when adjusting: a full work day per charged day.
+  const maxAdjustHrs = spanWorkDays * hoursPerWorkDay
   const [actualHours, setActualHours] = useState<number>(
     existing?.actualHoursUsed ?? plannedHrs,
   )
@@ -198,6 +212,22 @@ export function DayPopover({
 
   if (mode === 'adjust_past' && existing) {
     const diff = roundToQuarter(actualHours) - plannedHrs
+    // Name the pool(s) that actually move. A refund reverses the recorded
+    // per-pool debit (debitedFrom) — so a bank-funded 'any' absence refunds to
+    // bank, not vacation. A further deduction follows the bank → vacation →
+    // sick auto-drain order an 'any' entry uses.
+    const debited = existing.debitedFrom
+    const refundPoolLabel = (() => {
+      if (debited) {
+        const pools = (['bank', 'vacation', 'sick'] as const).filter(
+          (p) => debited[p] > 0,
+        )
+        if (pools.length > 0) return pools.join('/')
+      }
+      return existing.hourSource === 'any' ? 'vacation' : existing.hourSource
+    })()
+    const deductPoolLabel =
+      existing.hourSource === 'any' ? 'bank/vacation/sick' : existing.hourSource
     return (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
@@ -238,6 +268,11 @@ export function DayPopover({
                   Originally
                 </div>
                 <div className="text-lg font-bold tabular-nums mt-0.5">{fmt(plannedHrs)}h</div>
+                {spanWorkDays > 1 && (
+                  <div className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                    total · {spanWorkDays} work days
+                  </div>
+                )}
               </div>
               <div className="rounded-xl bg-blue-50 dark:bg-blue-950/30 px-3 py-2.5 border border-blue-200/50 dark:border-blue-800/30">
                 <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
@@ -263,13 +298,15 @@ export function DayPopover({
                   type="number"
                   step="0.25"
                   min="0"
-                  max={hoursPerWorkDay}
+                  max={maxAdjustHrs}
                   value={actualHours}
-                  onChange={(e) => setActualHours(Number(e.target.value) || 0)}
+                  onChange={(e) =>
+                    setActualHours(Math.min(maxAdjustHrs, Math.max(0, Number(e.target.value) || 0)))
+                  }
                   className="flex-1 px-3 py-2 text-center text-base font-bold tabular-nums bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
-                  onClick={() => setActualHours((h) => Math.min(hoursPerWorkDay, roundToQuarter(h + 0.25)))}
+                  onClick={() => setActualHours((h) => Math.min(maxAdjustHrs, roundToQuarter(h + 0.25)))}
                   className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700/60 text-sm font-bold"
                   aria-label="Increase by 15 minutes"
                 >
@@ -279,8 +316,8 @@ export function DayPopover({
               {existing.kind === 'logged_past' && diff !== 0 && (
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   {diff > 0
-                    ? `Will deduct ${fmt(diff)} more hour${Math.abs(diff) === 1 ? '' : 's'} from your ${existing.hourSource === 'any' ? 'sick/vacation/bank' : existing.hourSource} balance.`
-                    : `Will refund ${fmt(-diff)} hour${Math.abs(diff) === 1 ? '' : 's'} back to your ${existing.hourSource === 'any' ? 'vacation' : existing.hourSource} balance.`}
+                    ? `Will deduct ${fmt(diff)} more hour${Math.abs(diff) === 1 ? '' : 's'} from your ${deductPoolLabel} balance.`
+                    : `Will refund ${fmt(-diff)} hour${Math.abs(diff) === 1 ? '' : 's'} back to your ${refundPoolLabel} balance.`}
                 </p>
               )}
             </div>

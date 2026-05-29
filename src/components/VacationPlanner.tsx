@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useAppState } from '../context'
 import { showToast } from '../lib/toastBus'
+import { roundToQuarter } from '../lib/timeUtils'
 import {
   analyzeTripImpact,
   countWorkDays,
@@ -231,8 +232,22 @@ export function VacationPlanner() {
       return
     }
 
+    // Validate the typed per-day hours before constructing the entry. The HTML
+    // min/max/step attributes are only spinner hints — a typed value bypasses
+    // them. A negative value would otherwise persist and CREDIT the balance
+    // when the entry elapses (a negative deduction).
+    const rawHrs = whatIfHours ? Number(whatIfHours) : undefined
+    if (
+      rawHrs !== undefined &&
+      (!Number.isFinite(rawHrs) || rawHrs <= 0 || rawHrs > state.policy.hoursPerWorkDay)
+    ) {
+      setWhatIfError(
+        `Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}`,
+      )
+      return
+    }
     setWhatIfError('')
-    const hrsPerDay = whatIfHours ? Number(whatIfHours) : undefined
+    const hrsPerDay = rawHrs !== undefined ? roundToQuarter(rawHrs) : undefined
     addVacation({
       id: crypto.randomUUID(),
       startDate: whatIfStart,

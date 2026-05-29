@@ -36,14 +36,13 @@ function sameTier(a: AccrualTier, b: AccrualTier): boolean {
   return a.hoursPerPayPeriod === b.hoursPerPayPeriod && a.minYears === b.minYears
 }
 
-/** Build a UTC-midnight Date for a (y, m, d) triple. Avoids the local-timezone
- *  drift you get from `new Date(y, m-1, d)`, which silently shifts events
- *  onto the wrong calendar day for users whose browser timezone differs from
- *  their `profile.timezone`. */
+/** Build a LOCAL-midnight Date for a (y, m, d) civil-date triple. Every
+ *  date-only value is a civil date: constructed at local midnight and read
+ *  back with the LOCAL getters, so it round-trips exactly in any timezone.
+ *  (parseISO('YYYY-MM-DD') is also local midnight in date-fns v4, so streams
+ *  built from stored date strings share this basis.) */
 function isoMidnight(year: number, month: number, day: number): Date {
-  const mm = String(month).padStart(2, '0')
-  const dd = String(day).padStart(2, '0')
-  return parseISO(`${year}-${mm}-${dd}`)
+  return new Date(year, month - 1, day)
 }
 
 function applyDeduction(
@@ -81,8 +80,17 @@ function applyDeduction(
   }
 }
 
-function resolveDeductHours(v: PlannedVacation, hoursPerWorkDay: number): number {
-  if (v.actualHoursUsed !== undefined) return v.actualHoursUsed
+function resolveDeductHours(
+  v: PlannedVacation,
+  hoursPerWorkDay: number,
+  workDays: number,
+): number {
+  // `actualHoursUsed` is the ENTRY TOTAL across all work days (see types.ts);
+  // spread it to a per-work-day figure. Mirrors catchUp.ts so projection and
+  // the persisted balance stay in lockstep.
+  if (v.actualHoursUsed !== undefined) {
+    return workDays > 0 ? v.actualHoursUsed / workDays : v.actualHoursUsed
+  }
   if (v.hoursPerDay !== undefined) return v.hoursPerDay
   return hoursPerWorkDay
 }
@@ -107,14 +115,38 @@ export function getEffectiveCurrentBalances(state: AppState): {
 
   const tz = state.profile.timezone || DEFAULT_TZ
   const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
-  if (todayIsOver) {
-    const isoToday = getNowInZone(tz).isoDate
-    for (const v of state.plannedVacations) {
-      if (v.kind === 'logged_past') continue
-      if (v.startDate <= isoToday && v.endDate >= isoToday) {
-        const hrs = resolveDeductHours(v, state.policy.hoursPerWorkDay)
-        applyDeduction(hrs, v.hourSource || 'any', pools)
-      }
+  const isoToday = getNowInZone(tz).isoDate
+  for (const v of state.plannedVacations) {
+    if (v.kind === 'logged_past') continue
+    // Only entries that SPAN today need same-day handling. Fully-past entries
+    // are already booked into the stored balance by catch-up; fully-future
+    // ones don't affect today.
+    if (!(v.startDate <= isoToday && v.endDate >= isoToday)) continue
+
+    const vStart = parseISO(v.startDate)
+    const vEnd = parseISO(v.endDate)
+    // catch-up only books a vacation once it has FULLY ended, so for a
+    // multi-day entry that merely spans today the stored balance reflects NONE
+    // of its elapsed days. Deduct every elapsed work day (days before today are
+    // fully elapsed; today counts only once its work day is over) so the
+    // displayed balance matches what catch-up will book the next morning —
+    // instead of silently dropping by (elapsed days − 1) on the next reopen.
+    const holidays: Date[] = []
+    for (
+      let y = vStart.getFullYear();
+      y <= parseISO(isoToday).getFullYear();
+      y++
+    ) {
+      holidays.push(...computeHolidayDates(state.policy, y))
+    }
+    const entryWorkDays = countWorkDays(vStart, vEnd, state.policy)
+    const perDay = resolveDeductHours(v, state.policy.hoursPerWorkDay, entryWorkDays)
+    for (const day of eachDayOfInterval({ start: vStart, end: vEnd })) {
+      const dayIso = format(day, 'yyyy-MM-dd')
+      if (dayIso > isoToday) break
+      if (dayIso === isoToday && !todayIsOver) continue
+      if (!isWorkDay(day, state.policy, holidays)) continue
+      applyDeduction(perDay, v.hourSource || 'any', pools)
     }
   }
 
@@ -263,27 +295,28 @@ export function getCarryoverPayoutDate(
   return firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, anchor)
 }
 
-/** Same UTC calendar day? Holiday dates and day-stream dates are all built on
- *  the UTC-midnight basis (parseISO / isoMidnight / eachDayOfInterval over UTC
- *  anchors), so compare their UTC fields rather than using date-fns isSameDay,
- *  which compares LOCAL fields and would mis-match for users behind UTC. */
-function isSameUtcDay(a: Date, b: Date): boolean {
+/** Same civil calendar day? Holiday dates and day-stream dates are all built at
+ *  local midnight (parseISO / isoMidnight / eachDayOfInterval over local
+ *  anchors) and read with the LOCAL getters, so the civil date round-trips
+ *  correctly in any timezone — unlike the previous getUTC* reads, which only
+ *  matched at UTC/behind-UTC offsets. */
+function isSameCivilDay(a: Date, b: Date): boolean {
   return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   )
 }
 
 /**
  * Check if a date is a work day (in workDaysPerWeek and not a holiday).
- * Uses getUTCDay so weekday detection agrees with the UTC-midnight basis the
- * holiday dates and vacation day-streams are built on.
+ * Uses getDay (local) to match the local civil-date basis the holiday dates
+ * and vacation day-streams are built on.
  */
 function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean {
-  const dow = date.getUTCDay()
+  const dow = date.getDay()
   if (!policy.workDaysPerWeek.includes(dow)) return false
-  return !holidays.some((h) => isSameUtcDay(h, date))
+  return !holidays.some((h) => isSameCivilDay(h, date))
 }
 
 /**
@@ -362,22 +395,6 @@ export function projectBalance(
 
   const tz = state.profile.timezone || DEFAULT_TZ
   const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
-  const earliestDeductDay = todayIsOver ? today : addDays(today, 1)
-
-  if (state.bankHoursLog) {
-    for (const entry of state.bankHoursLog) {
-      // Only fold in entries that haven't already been credited to the stored
-      // balance. catch-up flips `appliedToBalance` to true once an entry's
-      // date passes; without this gate, an already-applied future entry would
-      // be double-counted by the projection. Mirrors catchUp.ts's
-      // `appliedToBalance !== false` gate (here we require strict false).
-      if (entry.appliedToBalance !== false) continue
-      const entryDate = parseISO(entry.date)
-      if (isAfter(entryDate, today) && !isAfter(entryDate, target)) {
-        bankBalance += entry.hours
-      }
-    }
-  }
 
   if (!isAfter(target, today)) {
     const eff = getEffectiveCurrentBalances(state)
@@ -408,12 +425,39 @@ export function projectBalance(
 
   type PendingEvent = {
     date: Date
-    type: 'accrual' | 'vacation_deduction' | 'carryover_adjustment' | 'bank_payout' | 'sick_grant'
+    type:
+      | 'accrual'
+      | 'vacation_deduction'
+      | 'carryover_adjustment'
+      | 'bank_payout'
+      | 'bank_credit'
+      | 'sick_grant'
     process: () => number
     label?: string
     hourSource?: 'vacation' | 'sick' | 'bank' | 'any'
   }
   const pendingEvents: PendingEvent[] = []
+
+  // Future-dated bank-log entries (e.g. a known upcoming overtime shift) are
+  // credited on their OWN date, in chronological order with the payouts — NOT
+  // folded in up-front. Folding them in early let a payout dated before the
+  // entry pay out hours that weren't banked yet, diverging from catch-up (which
+  // schedules each entry on entry.date). `appliedToBalance !== false` matches
+  // catch-up: only entries not yet credited to the stored balance are folded.
+  if (state.bankHoursLog) {
+    for (const entry of state.bankHoursLog) {
+      if (entry.appliedToBalance !== false) continue
+      const entryDate = parseISO(entry.date)
+      if (isAfter(entryDate, today) && !isAfter(entryDate, target)) {
+        pendingEvents.push({
+          date: entryDate,
+          type: 'bank_credit',
+          process: () => entry.hours,
+          label: entry.note ? `Bank adjustment — ${entry.note}` : 'Bank adjustment',
+        })
+      }
+    }
+  }
 
   for (let i = 0; i < paydays.length; i++) {
     const payday = paydays[i]
@@ -435,14 +479,26 @@ export function projectBalance(
   for (const vacation of futureVacations) {
     const vStart = parseISO(vacation.startDate)
     const vEnd = parseISO(vacation.endDate)
-    const rangeStart = isBefore(vStart, earliestDeductDay) ? earliestDeductDay : vStart
+    // Charge from the entry's true start (not from today): for an entry that
+    // SPANS today, its already-elapsed work days aren't in the stored balance
+    // yet (catch-up only books once fully past), so the projection must deduct
+    // them too — otherwise the projected balance is too high until the next
+    // reopen. Today itself is charged only once its work day is over.
     const rangeEnd = isAfter(vEnd, target) ? target : vEnd
+    if (isAfter(vStart, rangeEnd)) continue
 
-    if (isAfter(rangeStart, rangeEnd)) continue
-
-    const deductHours = resolveDeductHours(vacation, state.policy.hoursPerWorkDay)
-    const days = eachDayOfInterval({ start: rangeStart, end: rangeEnd })
+    // Spread an entry total (`actualHoursUsed`) over ALL the entry's work days,
+    // not just the ones inside this projection range.
+    const entryWorkDays = countWorkDays(vStart, vEnd, state.policy)
+    const deductHours = resolveDeductHours(
+      vacation,
+      state.policy.hoursPerWorkDay,
+      entryWorkDays,
+    )
+    const days = eachDayOfInterval({ start: vStart, end: rangeEnd })
     for (const day of days) {
+      // Skip today before the work-day cutoff (it hasn't been "taken" yet).
+      if (format(day, 'yyyy-MM-dd') === todayIso && !todayIsOver) continue
       if (isWorkDay(day, state.policy, allHolidays)) {
         pendingEvents.push({
           date: day,
@@ -479,27 +535,29 @@ export function projectBalance(
     }
   }
 
-  // Bank window can span the year boundary (e.g. Dec 15 → Feb 15). The payout
-  // fires ONCE per window, when the window OPENS (payoutStart). Iterating one
-  // extra year on each side captures a window-open that lands just inside the
-  // projection range from an adjacent calendar year.
-  const bankStartM = state.policy.bankHoursPayoutStart.month
+  // Bank hours pay out on the FIRST PAYDAY on/after EACH configured payout date
+  // — both the window-open (bankHoursPayoutStart, e.g. Dec 15) AND the
+  // window-close (bankHoursPayoutEnd, e.g. Feb 15). Between the two, bank hours
+  // can still be banked/used; each trigger zeroes whatever is banked as of its
+  // payday. Iterate one extra year each side to catch a payday from an adjacent
+  // year; dedup so a start/end pair resolving to the same payday pays once.
+  // Mirrors catchUp.ts exactly so projection and the persisted balance agree.
+  const bankAnchors = [
+    state.policy.bankHoursPayoutStart,
+    state.policy.bankHoursPayoutEnd,
+  ]
+  const bankPayoutPaydays = new Set<number>()
   for (let y = startYear - 1; y <= endYear + 1; y++) {
-    const windowOpen = isoMidnight(
-      y,
-      bankStartM,
-      state.policy.bankHoursPayoutStart.day,
-    )
-    // Bank hours are paid out via payroll on the FIRST PAYDAY on/after the
-    // window opens — not on the window-open calendar date, and not again at the
-    // window close (which would zero the bank a second time and wipe anything
-    // banked during the window). One payout per window, on a real pay date.
-    const payoutDate = firstPaydayOnOrAfter(
-      lastPayday,
-      state.policy.payPeriodLengthDays,
-      windowOpen,
-    )
-    if (isAfter(payoutDate, today) && !isAfter(payoutDate, target)) {
+    for (const anchor of bankAnchors) {
+      const triggerDate = isoMidnight(y, anchor.month, anchor.day)
+      const payoutDate = firstPaydayOnOrAfter(
+        lastPayday,
+        state.policy.payPeriodLengthDays,
+        triggerDate,
+      )
+      if (!isAfter(payoutDate, today) || isAfter(payoutDate, target)) continue
+      if (bankPayoutPaydays.has(payoutDate.getTime())) continue
+      bankPayoutPaydays.add(payoutDate.getTime())
       pendingEvents.push({
         date: payoutDate,
         type: 'bank_payout',
@@ -524,7 +582,14 @@ export function projectBalance(
   pendingEvents.sort((a, b) => {
     const dayDiff = differenceInCalendarDays(a.date, b.date)
     if (dayDiff !== 0) return dayDiff
-    const order = { sick_grant: 0, accrual: 1, vacation_deduction: 2, carryover_adjustment: 3, bank_payout: 4 }
+    const order = {
+      sick_grant: 0,
+      accrual: 1,
+      vacation_deduction: 2,
+      bank_credit: 3,
+      carryover_adjustment: 3,
+      bank_payout: 4,
+    }
     return order[a.type] - order[b.type]
   })
 
@@ -545,7 +610,9 @@ export function projectBalance(
           date: format(pe.date, 'yyyy-MM-dd'),
           type: 'sick_grant',
           delta: actualGrant - forfeited,
-          runningBalance: vacationBalance,
+          // This event mutates the SICK pool, so report the sick running
+          // balance (not vacation, which it doesn't touch).
+          runningBalance: sickBalance,
           label:
             forfeited > 0
               ? `${pe.label} (forfeited ${forfeited.toFixed(2)} hrs over carryover cap)`
@@ -583,6 +650,11 @@ export function projectBalance(
           label: `Bank hours paid out: ${payout.toFixed(2)} hrs`,
         })
       }
+    } else if (pe.type === 'bank_credit') {
+      // A future-dated bank-log entry reaching its date. Credit the bank pool
+      // chronologically so a payout earlier in the horizon doesn't pay out
+      // hours that aren't banked yet.
+      bankBalance += pe.process()
     } else if (pe.type === 'vacation_deduction') {
       const hours = Math.abs(pe.process())
       const source = pe.hourSource || 'any'
@@ -665,7 +737,25 @@ export function earliestAffordableDate(
 
   while (!isAfter(payday, maxDate)) {
     const result = projectBalance(state, payday)
-    if (result.totalAvailable >= hoursNeeded) return payday
+    if (result.totalAvailable >= hoursNeeded) {
+      // The payday walk overshoots: a non-payday event (Jan 1 sick grant,
+      // carryover/bank payout, a vacation ending) may have made the balance
+      // affordable BEFORE this payday. Refine to day precision by testing each
+      // such event date in [checkDate, payday) ascending and returning the
+      // first that already covers the need.
+      const candidates = Array.from(
+        new Set(
+          result.events
+            .map((e) => e.date)
+            .filter((iso) => iso >= format(checkDate, 'yyyy-MM-dd') && parseISO(iso) < payday),
+        ),
+      ).sort()
+      for (const iso of candidates) {
+        const d = parseISO(iso)
+        if (projectBalance(state, d).totalAvailable >= hoursNeeded) return d
+      }
+      return payday
+    }
     payday = addDays(payday, period)
   }
 
@@ -786,7 +876,24 @@ export function earliestAffordableTripStart(
   }
 
   while (!isAfter(payday, maxDate)) {
-    if (tryStart(payday)) return payday
+    if (tryStart(payday)) {
+      // Refine to day precision: a mid-period event may let the trip start
+      // earlier than this payday. Test each baseline event date in
+      // (initial, payday) ascending and return the first start that fits.
+      const baseline = projectBalance(state, payday)
+      const candidates = Array.from(
+        new Set(
+          baseline.events
+            .map((e) => e.date)
+            .filter((iso) => parseISO(iso) > initial && parseISO(iso) < payday),
+        ),
+      ).sort()
+      for (const iso of candidates) {
+        const d = parseISO(iso)
+        if (tryStart(d)) return d
+      }
+      return payday
+    }
     payday = addDays(payday, period)
   }
 
@@ -816,9 +923,15 @@ export function countWorkDays(
 /**
  * Get the next payday date after today.
  */
-export function getNextPayday(lastPayday: Date, periodDays: number): Date {
+export function getNextPayday(
+  lastPayday: Date,
+  periodDays: number,
+  // Anchor "today" to the caller's zoned today (parseISO(getNowInZone(tz).isoDate))
+  // so the next payday agrees with projectBalance for a traveling user whose
+  // browser timezone differs from profile.timezone. Defaults to local midnight.
+  today: Date = startOfDay(new Date()),
+): Date {
   const period = Math.max(1, periodDays)
-  const today = startOfDay(new Date())
   let next = addDays(lastPayday, period)
   while (!isAfter(next, today)) {
     next = addDays(next, period)

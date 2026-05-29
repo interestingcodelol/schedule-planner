@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { format, parseISO, endOfYear, differenceInYears } from 'date-fns'
+import { format, parseISO, endOfYear, differenceInYears, startOfDay } from 'date-fns'
 import { Clock, TrendingUp, Calendar, AlertTriangle, Wallet, Layers, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
 import {
@@ -8,6 +8,7 @@ import {
   computeAccrualTier,
   getEffectiveCurrentBalances,
 } from '../lib/projection'
+import { getNowInZone } from '../lib/timeUtils'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
@@ -63,8 +64,11 @@ export function StatusCards() {
       getNextPayday(
         parseISO(state.profile.lastPaydayDate),
         state.policy.payPeriodLengthDays,
+        startOfDay(
+          parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate),
+        ),
       ),
-    [state.profile.lastPaydayDate, state.policy.payPeriodLengthDays],
+    [state.profile.lastPaydayDate, state.policy.payPeriodLengthDays, state.profile.timezone],
   )
 
   const currentTier = useMemo(() => {

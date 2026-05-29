@@ -87,14 +87,14 @@ function foldLine(line: string): string {
   return parts.join('\r\n ')
 }
 
-/** Format an all-day DATE value (YYYYMMDD) in UTC. Every event date in this
- *  module is constructed at UTC midnight (parseISO / isoMidnight), matching the
- *  projection engine's convention. Formatting with local getters would render
- *  the previous day for any user behind UTC, so we read UTC components. */
+/** Format an all-day DATE value (YYYYMMDD). Every event date in this module is
+ *  a local-midnight civil date (parseISO / new Date), matching the projection
+ *  engine's convention, so read the LOCAL components — reading UTC would render
+ *  the previous day for any user east of UTC. */
 function formatDate(d: Date): string {
-  const y = d.getUTCFullYear()
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(d.getUTCDate()).padStart(2, '0')
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
   return `${y}${m}${day}`
 }
 

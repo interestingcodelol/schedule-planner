@@ -226,23 +226,22 @@ describe('projectBalance', () => {
   it('Test 6: Holiday observance — Independence Day on Saturday observed on Friday, Christmas on Sunday observed on Monday', () => {
     // 2026: July 4 is a Saturday -> observed Friday July 3
     // 2022: Christmas Dec 25 is a Sunday -> observed Monday Dec 26
-    // Holiday dates are constructed on the UTC-midnight basis, so read
-    // their calendar fields in UTC — otherwise a behind-UTC test runner would
-    // see the previous local day.
+    // Holiday dates are local-midnight civil dates, so read their fields with
+    // the LOCAL getters — this is correct in ANY runner timezone.
     const holidays2026 = computeHolidayDates(defaultPolicy, 2026)
     const july3 = holidays2026.find(
-      (d) => d.getUTCMonth() === 6 && d.getUTCDate() === 3,
+      (d) => d.getMonth() === 6 && d.getDate() === 3,
     )
     expect(july3).toBeDefined()
     // No July 4 in the observed list
     const july4 = holidays2026.find(
-      (d) => d.getUTCMonth() === 6 && d.getUTCDate() === 4,
+      (d) => d.getMonth() === 6 && d.getDate() === 4,
     )
     expect(july4).toBeUndefined()
 
     const holidays2022 = computeHolidayDates(defaultPolicy, 2022)
     const dec26 = holidays2022.find(
-      (d) => d.getUTCMonth() === 11 && d.getUTCDate() === 26,
+      (d) => d.getMonth() === 11 && d.getDate() === 26,
     )
     expect(dec26).toBeDefined()
   })
@@ -459,7 +458,7 @@ describe('carryover payout date snapping', () => {
     expect(Math.abs(dayDelta % 14)).toBe(0) // abs() avoids the -0 vs +0 quirk for negative deltas
 
     // And it is a February date, not May.
-    expect(result.getUTCMonth()).toBe(1) // Feb (0-indexed)
+    expect(result.getMonth()).toBe(1) // Feb (0-indexed)
   })
 
   it('getCarryoverPayoutDate on a demo-like state returns FEBRUARY, not May', () => {
@@ -481,8 +480,8 @@ describe('carryover payout date snapping', () => {
     const date = getCarryoverPayoutDate(state, 2026)
     expect(date).not.toBeNull()
     // The bug returned May 15; the fix must return a February date.
-    expect(date!.getUTCMonth()).toBe(1) // February
-    expect(date!.getUTCFullYear()).toBe(2026)
+    expect(date!.getMonth()).toBe(1) // February
+    expect(date!.getFullYear()).toBe(2026)
   })
 })
 
@@ -592,7 +591,7 @@ describe('computeHolidayDates', () => {
   it('correctly computes MLK Day 2025 (3rd Monday in January)', () => {
     const holidays = computeHolidayDates(defaultPolicy, 2025)
     const mlk = holidays.find(
-      (d) => d.getUTCMonth() === 0 && d.getUTCDate() === 20,
+      (d) => d.getMonth() === 0 && d.getDate() === 20,
     )
     expect(mlk).toBeDefined()
   })
@@ -600,7 +599,7 @@ describe('computeHolidayDates', () => {
   it('correctly computes Memorial Day 2025 (last Monday in May)', () => {
     const holidays = computeHolidayDates(defaultPolicy, 2025)
     const memorial = holidays.find(
-      (d) => d.getUTCMonth() === 4 && d.getUTCDate() === 26,
+      (d) => d.getMonth() === 4 && d.getDate() === 26,
     )
     expect(memorial).toBeDefined()
   })
@@ -608,7 +607,7 @@ describe('computeHolidayDates', () => {
   it('correctly computes Thanksgiving 2025 (4th Thursday in November)', () => {
     const holidays = computeHolidayDates(defaultPolicy, 2025)
     const thanksgiving = holidays.find(
-      (d) => d.getUTCMonth() === 10 && d.getUTCDate() === 27,
+      (d) => d.getMonth() === 10 && d.getDate() === 27,
     )
     expect(thanksgiving).toBeDefined()
   })
@@ -827,14 +826,11 @@ describe('returned balances are rounded to 2 decimals', () => {
   })
 })
 
-describe('holiday dates + isWorkDay are UTC-consistent regardless of runner TZ', () => {
+describe('holiday dates + isWorkDay are civil-date-consistent regardless of runner TZ', () => {
   it('a fixed holiday (July 4) and an nth-weekday holiday (Thanksgiving) have exact ISO dates', () => {
     const h2025 = computeHolidayDates(defaultPolicy, 2025)
-    const iso = (d: Date) =>
-      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(
-        d.getUTCDate(),
-      ).padStart(2, '0')}`
-    const isoDates = h2025.map(iso)
+    // format() reads local civil fields, matching the local-midnight basis.
+    const isoDates = h2025.map((d) => format(d, 'yyyy-MM-dd'))
 
     // July 4, 2025 is a Friday — no weekend shift, observed on the 4th.
     expect(isoDates).toContain('2025-07-04')
@@ -842,27 +838,32 @@ describe('holiday dates + isWorkDay are UTC-consistent regardless of runner TZ',
     expect(isoDates).toContain('2025-11-27')
   })
 
-  it('isWorkDay (via countWorkDays) excludes the holiday and weekend days, computed in UTC', () => {
-    // Range: Thu Jul 3 → Wed Jul 9, 2025, parsed as UTC midnight (same basis
-    // as the engine). Independence Day (Fri Jul 4) is a holiday.
-    // Calendar (getUTCDay): Jul 3 Thu, 4 Fri(holiday), 5 Sat, 6 Sun, 7 Mon,
+  it("includes New Year's Day in its own year (regression: dropped for UTC+ users)", () => {
+    // The old getUTCFullYear filter bucketed a UTC+ user's Jan 1 anchor into
+    // the PREVIOUS year and dropped it. With the civil-date basis, Jan 1 is
+    // present in its own year's holiday set in every timezone.
+    const isoDates = computeHolidayDates(defaultPolicy, 2026).map((d) =>
+      format(d, 'yyyy-MM-dd'),
+    )
+    // Jan 1 2026 is a Thursday — observed on the 1st (no weekend shift).
+    expect(isoDates).toContain('2026-01-01')
+  })
+
+  it('isWorkDay (via countWorkDays) excludes the holiday and weekend days', () => {
+    // Range: Thu Jul 3 → Wed Jul 9, 2025. Independence Day (Fri Jul 4) is a
+    // holiday. Calendar: Jul 3 Thu, 4 Fri(holiday), 5 Sat, 6 Sun, 7 Mon,
     // 8 Tue, 9 Wed → work days = Jul 3, 7, 8, 9 = 4.
     const start = parseISO('2025-07-03')
     const end = parseISO('2025-07-09')
 
-    // Expected work-day count computed independently via getUTCDay.
+    // Expected work-day count computed independently via local getDay.
     const holidays = computeHolidayDates(defaultPolicy, 2025)
-    const holidaySet = new Set(
-      holidays.map(
-        (d) => `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`,
-      ),
-    )
+    const holidaySet = new Set(holidays.map((d) => format(d, 'yyyy-MM-dd')))
     let expected = 0
     for (let i = 0; i < 7; i++) {
-      const day = parseISO('2025-07-03')
-      day.setUTCDate(day.getUTCDate() + i)
-      const dow = day.getUTCDay()
-      const key = `${day.getUTCFullYear()}-${day.getUTCMonth()}-${day.getUTCDate()}`
+      const day = addDays(parseISO('2025-07-03'), i)
+      const dow = day.getDay()
+      const key = format(day, 'yyyy-MM-dd')
       if (defaultPolicy.workDaysPerWeek.includes(dow) && !holidaySet.has(key)) {
         expected++
       }
@@ -999,5 +1000,67 @@ describe('payPeriodLengthDays is clamped to >= 1 (no infinite loop)', () => {
     expect(() =>
       earliestAffordableDate(state, 80, new Date('2025-06-15')),
     ).not.toThrow()
+  })
+})
+
+describe('getEffectiveCurrentBalances — multi-day spanning entry', () => {
+  it('deducts every elapsed work day of a vacation that spans today (not just one)', () => {
+    // Thu Jan 8 2026. Vacation Mon Jan 5 → Fri Jan 9 spans today. Mon/Tue/Wed
+    // are fully elapsed (3 work days × 8h = 24h); today (Thu) is before the
+    // 16:00 work-day cutoff at the mocked noon, so it isn't charged yet. The
+    // displayed balance must already reflect the 24h, not a single 8h — so it
+    // doesn't silently drop by 16h on the next reopen.
+    mockToday('2026-01-08')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 40,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-12',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'span',
+          startDate: '2026-01-05',
+          endDate: '2026-01-09',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+    expect(getEffectiveCurrentBalances(state).vacation).toBe(16)
+  })
+})
+
+describe('projectBalance — bank payout (both dates) + chronological credit', () => {
+  it('pays out at both window dates and does NOT pay out hours banked after the last payout', () => {
+    // Paydays from Nov 28: Dec 12, Dec 26, Jan 9, Jan 23, Feb 6, Feb 20.
+    // Dec 15 → Dec 26 payout; Feb 15 → Feb 20 payout. A +20 bank entry lands
+    // Feb 25 (AFTER both payouts). Folding it in up-front would let the Dec
+    // payout pay out hours not yet banked; chronologically it survives.
+    mockToday('2025-12-01')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 0,
+        currentSickHours: 0,
+        currentBankHours: 12,
+        lastPaydayDate: '2025-11-28',
+        timezone: 'America/New_York',
+      },
+      bankHoursLog: [
+        { id: 'late', date: '2026-02-25', hours: 20, appliedToBalance: false },
+      ],
+    })
+    const result = projectBalance(state, parseISO('2026-03-01'))
+    // Dec 26 pays out the starting 12; Feb 20 pays out 0; the +20 banked Feb 25
+    // survives because both payouts have already fired.
+    expect(result.bankPayout).toBe(12)
+    expect(result.bankBalance).toBe(20)
   })
 })

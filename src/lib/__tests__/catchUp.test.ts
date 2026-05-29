@@ -139,13 +139,14 @@ describe('catchUpState', () => {
     expect(result.state.profile.currentBankHours).toBe(0)
   })
 
-  it('bank payout fires once (next payday after window opens); hours banked later are NOT re-zeroed', () => {
-    // Window Dec 15 → Feb 15. lastPayday Dec 12 → payout payday Dec 26. lastSync
-    // Dec 14 2025, today Mar 1 2026 — the whole window is in the catch-up gap.
-    // Bank starts at 12. An unapplied bank-log entry of +20 lands Jan 10 2026
-    // (after the Dec 26 payout). Old code: payout at Dec 15 AND Feb 15 → the Feb
-    // 15 payout wiped the +20. Fix: only the Dec 26 payday payout fires, so the
-    // +20 survives.
+  it('bank payout fires at BOTH the window-open and window-close paydays; hours banked between them are paid out, not lost', () => {
+    // Window Dec 15 → Feb 15. lastPayday Dec 12 → payout paydays Dec 26 (after
+    // Dec 15) and Feb 20 (after Feb 15). lastSync Dec 14 2025, today Mar 1 2026
+    // — both payouts are in the catch-up gap. Bank starts at 12. An unapplied
+    // bank-log entry of +20 lands Jan 10 2026 (between the two payouts).
+    // Policy: pay out Dec → bank refills → pay out again Feb → zero. So the Dec
+    // payout zeroes the starting 12, the +20 banks Jan 10, and the Feb payout
+    // zeroes that 20. The +20 is paid out, never silently lost.
     mockToday('2026-03-01')
     const state = makeState({
       profile: {
@@ -164,11 +165,13 @@ describe('catchUpState', () => {
     })
     const result = catchUpState(state)
     const payouts = result.events.filter((e) => e.type === 'bank_payout' && e.delta < 0)
-    // Exactly one zeroing payout — on the Dec 26 payday.
-    expect(payouts).toHaveLength(1)
-    expect(payouts[0].date).toBe('2025-12-26')
-    // The 12 starting hrs were paid out Dec 26; the +20 banked Jan 10 remains.
-    expect(result.state.profile.currentBankHours).toBe(20)
+    // Two zeroing payouts — Dec 26 (the starting 12) and Feb 20 (the 20 banked
+    // mid-window).
+    expect(payouts).toHaveLength(2)
+    expect(payouts.map((p) => p.date)).toEqual(['2025-12-26', '2026-02-20'])
+    expect(payouts.map((p) => p.delta)).toEqual([-12, -20])
+    // Both payouts fired, so the bank ends empty.
+    expect(result.state.profile.currentBankHours).toBe(0)
   })
 
   it('deducts a fully-past planned vacation and marks it logged_past', () => {
@@ -209,6 +212,92 @@ describe('catchUpState', () => {
     const updated = result.state.plannedVacations.find((v) => v.id === 'past-1')
     expect(updated?.kind).toBe('logged_past')
     expect(updated?.actualHoursUsed).toBe(40)
+  })
+
+  it('records actualHoursUsed as the SPAN TOTAL, equal to the sum of debitedFrom (multi-day)', () => {
+    // Regression for the multi-day adjust corruption: catch-up must store the
+    // entry total (40 across 5 days), not a per-day figure, and that total must
+    // match the recorded per-pool draw so a later adjust/refund is exact.
+    mockToday('2026-01-12')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 100,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-12',
+        lastSyncDate: '2026-01-04',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'span',
+          startDate: '2026-01-05',
+          endDate: '2026-01-09',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+    const updated = catchUpState(state).state.plannedVacations.find(
+      (v) => v.id === 'span',
+    )
+    expect(updated?.actualHoursUsed).toBe(40)
+    const d = updated?.debitedFrom
+    expect(d).toBeDefined()
+    const sum = (d!.vacation ?? 0) + (d!.sick ?? 0) + (d!.bank ?? 0)
+    expect(sum).toBe(updated?.actualHoursUsed)
+  })
+
+  it('does not double-debit a day already covered by a logged_past entry', () => {
+    // A planned entry that overlaps an already-logged_past day must skip that
+    // day when it elapses, so the day is debited exactly once.
+    mockToday('2026-01-12')
+    const state = makeState({
+      profile: {
+        displayName: 'Test User',
+        hireDate: '2023-01-01',
+        currentVacationHours: 100,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-12-12',
+        lastSyncDate: '2026-01-04',
+        timezone: 'America/New_York',
+      },
+      plannedVacations: [
+        {
+          id: 'logged',
+          startDate: '2026-01-06',
+          endDate: '2026-01-06',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'logged_past',
+          actualHoursUsed: 8,
+          debitedFrom: { vacation: 8, sick: 0, bank: 0 },
+        },
+        {
+          id: 'planned',
+          startDate: '2026-01-05',
+          endDate: '2026-01-07',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    })
+    const result = catchUpState(state)
+    // The planned entry spans Jan 5-7 (3 work days) but Jan 6 is already
+    // logged, so only Jan 5 and Jan 7 are debited by it.
+    const plannedDeductions = result.events.filter(
+      (e) => e.type === 'vacation_deduction' && e.date !== '2026-01-06',
+    )
+    const jan6 = result.events.filter(
+      (e) => e.type === 'vacation_deduction' && e.date === '2026-01-06',
+    )
+    expect(plannedDeductions).toHaveLength(2)
+    expect(jan6).toHaveLength(0)
   })
 
   it('leaves an active vacation alone (endDate >= today)', () => {

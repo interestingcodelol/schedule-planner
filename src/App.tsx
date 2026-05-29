@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppState, BankHoursEntry, PlannedVacation } from './lib/types'
 import {
   loadState,
@@ -60,11 +60,26 @@ function migrateState(loaded: AppState): AppState {
       bankHoursPayoutStart: loaded.policy.bankHoursPayoutStart ?? { month: 12, day: 15 },
       bankHoursPayoutEnd: loaded.policy.bankHoursPayoutEnd ?? { month: 2, day: 15 },
     },
-    plannedVacations: loaded.plannedVacations.map((v) => ({
-      ...v,
-      hourSource: v.hourSource ?? ('any' as const),
-      kind: v.kind ?? ('planned' as const),
-    })),
+    plannedVacations: loaded.plannedVacations.map((v) => {
+      const hourSource = v.hourSource ?? ('any' as const)
+      const kind = v.kind ?? ('planned' as const)
+      // Backfill debitedFrom on legacy logged_past entries created before the
+      // field existed, so a later delete/edit refunds the exact pool(s) instead
+      // of dumping everything into vacation (see removeVacation). For an
+      // explicit source the split is exact; an 'any'-source legacy entry can't
+      // be reconstructed, so it's left undefined (the source-based fallback
+      // still applies).
+      let debitedFrom = v.debitedFrom
+      if (kind === 'logged_past' && !debitedFrom && hourSource !== 'any') {
+        const total = v.actualHoursUsed ?? v.hoursPerDay ?? loaded.policy.hoursPerWorkDay
+        debitedFrom = {
+          vacation: hourSource === 'vacation' ? total : 0,
+          sick: hourSource === 'sick' ? total : 0,
+          bank: hourSource === 'bank' ? total : 0,
+        }
+      }
+      return { ...v, hourSource, kind, debitedFrom }
+    }),
   }
 }
 
@@ -223,6 +238,12 @@ function getInitialState(): { state: AppState | null; isDemo: boolean } {
 
 export default function App() {
   const [{ state, isDemo }, setAppData] = useState(getInitialState)
+  // The last snapshot we've already persisted. Seeded with the initial state so
+  // the mount-time save effect does NOT re-stamp savedAt with a fresh timestamp
+  // on every app open (which would defeat loadStateAsync's savedAt arbitration
+  // and let a stale store win). Cross-tab updates also point this at the
+  // incoming snapshot to suppress an echo-save loop between tabs.
+  const lastPersistedRef = useRef<AppState | null>(state)
 
   useEffect(() => {
     loadStateAsync().then((idbState) => {
@@ -253,13 +274,20 @@ export default function App() {
         if (todayIso === lastSyncedDay) return prev
         lastSyncedDay = todayIso
         const result = catchUpState(prev.state)
-        if (!result.applied) return prev
-        setTimeout(() => {
-          showToast({
-            message: summarizeCatchUp(result.events),
-            duration: 6000,
-          })
-        }, 0)
+        // Always commit the reconciled state (appendCatchUpHistory returns
+        // result.state even when !applied). catch-up can flip an elapsed
+        // vacation to logged_past and advance lastSyncDate while emitting NO
+        // balance event (e.g. all pools empty); discarding result.state here
+        // would diverge from the cold-load path and re-process the vacation
+        // forever. Only the toast is gated on a balance-changing event.
+        if (result.applied) {
+          setTimeout(() => {
+            showToast({
+              message: summarizeCatchUp(result.events),
+              duration: 6000,
+            })
+          }, 0)
+        }
         return { ...prev, state: appendCatchUpHistory(prev.state, result) }
       })
     }
@@ -292,32 +320,50 @@ export default function App() {
   // state in so we don't blow away their changes on our next save.
   useEffect(() => {
     return subscribeToCrossTabUpdates((incoming) => {
+      // Run the incoming snapshot through the same migration every other
+      // ingestion path uses, so a payload missing a nested field migrateState
+      // would backfill (timezone, payout anchors, per-vacation kind, …) can't
+      // land raw and crash projection/catch-up. (No reconcile here — the
+      // writing tab already reconciled before saving.)
+      const migrated = migrateState(incoming)
       setAppData((prev) => {
         if (!prev.state) {
-          return { state: incoming, isDemo: incoming.profile.displayName === 'Demo User' }
+          lastPersistedRef.current = migrated
+          return { state: migrated, isDemo: migrated.profile.displayName === 'Demo User' }
         }
-        // Only toast when the change actually came from elsewhere — guard
-        // on a structural diff so saving back a no-op doesn't spam users.
+        // Only react when the change actually came from elsewhere — guard on a
+        // structural diff so an identical echo neither toasts nor triggers a
+        // save.
         const same =
-          JSON.stringify(prev.state.profile) === JSON.stringify(incoming.profile) &&
+          JSON.stringify(prev.state.profile) === JSON.stringify(migrated.profile) &&
           JSON.stringify(prev.state.plannedVacations) ===
-            JSON.stringify(incoming.plannedVacations) &&
-          JSON.stringify(prev.state.bankHoursLog) === JSON.stringify(incoming.bankHoursLog)
-        if (!same) {
-          setTimeout(() => {
-            showToast({
-              message: 'Updated from another tab',
-              duration: 5000,
-            })
-          }, 0)
-        }
-        return { ...prev, state: incoming }
+            JSON.stringify(migrated.plannedVacations) &&
+          JSON.stringify(prev.state.bankHoursLog) === JSON.stringify(migrated.bankHoursLog)
+        if (same) return prev
+        // Point lastPersistedRef at the incoming snapshot so the save effect
+        // does NOT write it straight back (which would re-stamp savedAt and
+        // start a localStorage→IDB ping-pong between the two tabs).
+        lastPersistedRef.current = migrated
+        setTimeout(() => {
+          showToast({
+            message: 'Updated from another tab',
+            duration: 5000,
+          })
+        }, 0)
+        return { ...prev, state: migrated }
       })
     })
   }, [])
 
   useEffect(() => {
-    if (state) {
+    // Only persist when the in-memory state actually changed since the last
+    // save. Skipping the no-op mount-time save keeps savedAt meaning "when the
+    // user last changed data", which loadStateAsync relies on to pick the newer
+    // of the localStorage / IndexedDB snapshots. (Cold-load catch-up results
+    // are idempotent, so deferring their persistence to the first real edit is
+    // safe.)
+    if (state && state !== lastPersistedRef.current) {
+      lastPersistedRef.current = state
       saveState(state)
     }
   }, [state])
@@ -356,7 +402,14 @@ export default function App() {
         // timezone change doesn't quietly suppress a pending catch-up.
         if (balancesChanged(prev.state.profile, nextProfile)) {
           const tz = nextProfile.timezone || 'America/New_York'
-          nextProfile.lastSyncDate = getNowInZone(tz).isoDate
+          const zonedToday = getNowInZone(tz).isoDate
+          // Never let a manual edit move lastSyncDate BACKWARD (a rewound clock
+          // or a TZ shift could make "today" earlier). Moving it back would let
+          // catch-up re-apply already-booked paydays/payouts — e.g. re-zeroing
+          // freshly-banked hours after a bank payout already fired this cycle.
+          const prevSync = prev.state.profile.lastSyncDate
+          nextProfile.lastSyncDate =
+            prevSync && prevSync > zonedToday ? prevSync : zonedToday
         }
         return { ...prev, state: { ...prev.state, profile: nextProfile } }
       })

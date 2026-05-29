@@ -10,11 +10,47 @@ import {
   addDays,
   getWeek,
 } from 'date-fns'
+import { differenceInYears } from 'date-fns'
 import { Lock, Unlock } from 'lucide-react'
+import type { PlannedVacation } from '../lib/types'
 import { useAppState } from '../context'
-import { getCarryoverPayoutDate, projectBalance } from '../lib/projection'
+import { computeAccrualTier, getCarryoverPayoutDate, projectBalance } from '../lib/projection'
 import { getHolidayName } from '../lib/holidays'
 import { formatTimeCompact, isWorkDayOverInZone } from '../lib/timeUtils'
+
+/** Pool a past/logged entry actually drew from. For an 'any'-source entry the
+ *  literal source tells us nothing (it drains bank → vacation → sick), so use
+ *  the recorded per-pool `debitedFrom` and pick the pool that supplied the most
+ *  hours. Returns null when there's no usable signal. */
+function dominantSource(v: PlannedVacation): 'vacation' | 'sick' | 'bank' | null {
+  if (v.hourSource && v.hourSource !== 'any') return v.hourSource
+  const d = v.debitedFrom
+  if (!d) return null
+  const entries: Array<['vacation' | 'sick' | 'bank', number]> = [
+    ['vacation', d.vacation],
+    ['sick', d.sick],
+    ['bank', d.bank],
+  ]
+  entries.sort((a, b) => b[1] - a[1])
+  return entries[0][1] > 0 ? entries[0][0] : null
+}
+
+/** Emoji for a past/logged entry. Honors a user-set customEmoji first, then the
+ *  pool the time off actually came from — so a passed *vacation* never renders
+ *  as a sick day. 🤒 is reserved for genuinely sick-sourced absences. */
+function pastEntryEmoji(v: PlannedVacation): string {
+  if (v.customEmoji) return v.customEmoji
+  switch (dominantSource(v)) {
+    case 'sick':
+      return '🤒'
+    case 'bank':
+      return '🏦'
+    case 'vacation':
+      return '🏖️'
+    default:
+      return '✓'
+  }
+}
 
 type Props = {
   date: Date
@@ -123,6 +159,12 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   }, [state, date, projection])
 
   const isLoggedPast = plannedVacation?.kind === 'logged_past'
+  // Emoji/style reflect the pool the time off came from, NOT whether catch-up
+  // happened to flip it to logged_past. A passed vacation must not look sick.
+  const pastEmoji = plannedVacation ? pastEntryEmoji(plannedVacation) : '✓'
+  const isSickSourced = plannedVacation
+    ? dominantSource(plannedVacation) === 'sick'
+    : false
   const deductHours =
     plannedVacation?.actualHoursUsed ??
     plannedVacation?.hoursPerDay ??
@@ -164,10 +206,11 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 
     if (isPayday && !isPast) {
       parts.push(`💰 Payday! +${fmt(state.policy.hoursPerWorkDay > 0 ? (() => {
-        const hd = parseISO(state.profile.hireDate)
-        const yos = Math.floor((date.getTime() - hd.getTime()) / (365.25 * 86400000))
-        const tier = state.policy.accrualTiers.find(t => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears))
-        return tier?.hoursPerPayPeriod ?? 0
+        // Use the same calendar-anniversary tenure + tier helpers as the
+        // projection that produces the balance line below, so the two tooltip
+        // figures can't disagree near a service anniversary.
+        const yos = differenceInYears(date, parseISO(state.profile.hireDate))
+        return computeAccrualTier(state.policy, yos).hoursPerPayPeriod
       })() : 0)} hrs vacation`)
     }
 
@@ -186,7 +229,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     if (isPlannedVacation && isPast) {
       const verb = isLoggedPast ? 'Logged absence' : 'Past time off'
       const noteSuffix = plannedVacation?.note ? ` (${plannedVacation.note})` : ''
-      parts.push(`${isLoggedPast ? '🤒' : '✓'} ${verb} — ${fmt(deductHours)}h${noteSuffix}`)
+      parts.push(`${pastEmoji} ${verb} — ${fmt(deductHours)}h${noteSuffix}`)
       if (
         plannedVacation?.actualHoursUsed !== undefined &&
         plannedVacation.hoursPerDay !== undefined &&
@@ -245,7 +288,12 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     bgClass = 'bg-gradient-to-br from-amber-50/60 to-orange-50/40 dark:from-amber-950/25 dark:to-orange-950/15'
   } else if (isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth) {
     if (isLoggedPast) {
-      bgClass = 'bg-rose-100/40 dark:bg-rose-900/15'
+      // Rose tint only for sick-sourced absences; other logged time off (passed
+      // vacation/bank) uses the neutral past-time-off blue so it doesn't read as
+      // a sick day.
+      bgClass = isSickSourced
+        ? 'bg-rose-100/40 dark:bg-rose-900/15'
+        : 'bg-blue-100/30 dark:bg-blue-900/10'
     } else if (isPast) {
       bgClass = 'bg-blue-100/30 dark:bg-blue-900/10'
     } else if (isUnaffordable) {
@@ -334,7 +382,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
           )}
           {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && isPast && (
             <span className="text-xs leading-none" title={isLoggedPast ? 'Logged absence' : 'Past time off'}>
-              {isLoggedPast ? '🤒' : '✓'}
+              {pastEmoji}
             </span>
           )}
         </div>

@@ -57,21 +57,22 @@ export type CatchUpResult = {
 
 type Pools = { vacation: number; sick: number; bank: number }
 
-/** Same UTC calendar day? See projection.ts for the rationale — holiday dates
- *  and the vacation day-stream are all UTC-midnight, so compare UTC fields
- *  rather than using date-fns isSameDay (which compares LOCAL fields). */
-function isSameUtcDay(a: Date, b: Date): boolean {
+/** Same civil calendar day? Every date-only value here is constructed at local
+ *  midnight (parseISO / isoMidnight) and read with LOCAL getters, so the civil
+ *  date round-trips correctly in any timezone. (Reading getUTC* — as before —
+ *  only matched the civil date at UTC/behind-UTC offsets.) */
+function isSameCivilDay(a: Date, b: Date): boolean {
   return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   )
 }
 
 function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean {
-  const dow = date.getUTCDay()
+  const dow = date.getDay()
   if (!policy.workDaysPerWeek.includes(dow)) return false
-  return !holidays.some((h) => isSameUtcDay(h, date))
+  return !holidays.some((h) => isSameCivilDay(h, date))
 }
 
 function computeCarryoverCap(policy: PolicyConfig, tier: AccrualTier): number | null {
@@ -87,8 +88,18 @@ function computeCarryoverCap(policy: PolicyConfig, tier: AccrualTier): number | 
   }
 }
 
-function resolveDeductHours(v: PlannedVacation, hoursPerWorkDay: number): number {
-  if (v.actualHoursUsed !== undefined) return v.actualHoursUsed
+function resolveDeductHours(
+  v: PlannedVacation,
+  hoursPerWorkDay: number,
+  workDays: number,
+): number {
+  // `actualHoursUsed` is the ENTRY TOTAL across every work day in the span (see
+  // types.ts). The per-day deduction loop needs a per-work-day figure, so spread
+  // the total evenly. `hoursPerDay` is already per-day; full days fall back to
+  // the policy work-day length.
+  if (v.actualHoursUsed !== undefined) {
+    return workDays > 0 ? v.actualHoursUsed / workDays : v.actualHoursUsed
+  }
   if (v.hoursPerDay !== undefined) return v.hoursPerDay
   return hoursPerWorkDay
 }
@@ -327,19 +338,32 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   }
 
   // --- Bank payouts ------------------------------------------------------
-  // Window can span the year boundary (e.g., Dec 15 → Feb 15). The payout fires
-  // ONCE per window, when the window OPENS (start). Iterate one year before
-  // startYear too, so a window-open that fell during the catch-up gap from an
-  // adjacent calendar year is correctly captured.
-  const bankStartM = state.policy.bankHoursPayoutStart.month
+  // Bank hours are paid out via payroll on the FIRST PAYDAY on/after EACH
+  // configured payout date — BOTH the window-open (bankHoursPayoutStart, e.g.
+  // Dec 15) AND the window-close (bankHoursPayoutEnd, e.g. Feb 15). Between the
+  // two dates bank hours can still be banked and used; each trigger zeroes
+  // whatever is banked as of its payday, so the cycle is: pay out in Dec → bank
+  // refills → pay out again in Feb → nothing until the next Dec. Iterate one
+  // year on each side so a payday that fell during the catch-up gap from an
+  // adjacent calendar year is captured. Dedup so a start/end pair that happens
+  // to resolve to the same payday only pays out once.
+  const bankAnchors = [
+    state.policy.bankHoursPayoutStart,
+    state.policy.bankHoursPayoutEnd,
+  ]
+  const bankPayoutPaydays = new Set<number>()
   for (let y = startYear - 1; y <= endYear + 1; y++) {
-    const windowOpen = isoMidnight(y, bankStartM, state.policy.bankHoursPayoutStart.day)
-    // Paid out via payroll on the FIRST PAYDAY on/after the window opens — once
-    // per window, on a real pay date (not the window-open calendar day, and not
-    // again at the window close, which would wipe hours banked mid-window).
-    const start = firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, windowOpen)
-    if (isAfter(start, lastSync) && !isAfter(start, today)) {
-      const pCopy = start
+    for (const anchor of bankAnchors) {
+      const triggerDate = isoMidnight(y, anchor.month, anchor.day)
+      const payday = firstPaydayOnOrAfter(
+        lastPayday,
+        state.policy.payPeriodLengthDays,
+        triggerDate,
+      )
+      if (!isAfter(payday, lastSync) || isAfter(payday, today)) continue
+      if (bankPayoutPaydays.has(payday.getTime())) continue
+      bankPayoutPaydays.add(payday.getTime())
+      const pCopy = payday
       pending.push({
         date: pCopy,
         order: 4,
@@ -407,7 +431,7 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   const earliestVacYear = state.plannedVacations.reduce<number>(
     (min, v) => {
       if (v.kind === 'logged_past') return min
-      const y = parseISO(v.startDate).getUTCFullYear()
+      const y = parseISO(v.startDate).getFullYear()
       return y < min ? y : min
     },
     startYear,
@@ -425,16 +449,45 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
     { vacation: number; sick: number; bank: number }
   > = {}
 
+  // Days already debited by an existing logged_past entry. A newly-elapsed
+  // planned entry that overlaps one of these must NOT debit it a second time.
+  const loggedPastDates = new Set<string>()
+  for (const v of state.plannedVacations) {
+    if (v.kind !== 'logged_past') continue
+    for (const d of eachDayOfInterval({
+      start: parseISO(v.startDate),
+      end: parseISO(v.endDate),
+    })) {
+      loggedPastDates.add(format(d, 'yyyy-MM-dd'))
+    }
+  }
+
   for (const vacation of state.plannedVacations) {
     if (vacation.kind === 'logged_past') continue
     const vEnd = parseISO(vacation.endDate)
     if (!isBefore(vEnd, today)) continue
     const vStart = parseISO(vacation.startDate)
     const days = eachDayOfInterval({ start: vStart, end: vEnd })
-    const deductHours = resolveDeductHours(vacation, state.policy.hoursPerWorkDay)
+    // Work days this entry will actually debit: real work days not already
+    // covered by a separate logged_past entry. The per-day deduction is the
+    // entry total spread across exactly these days.
+    const chargeableDays = days.filter(
+      (d) =>
+        isWorkDay(d, state.policy, allHolidays) &&
+        !loggedPastDates.has(format(d, 'yyyy-MM-dd')),
+    )
+    const workDays = chargeableDays.length
+    const deductHours = resolveDeductHours(
+      vacation,
+      state.policy.hoursPerWorkDay,
+      workDays,
+    )
+    // The entry's total intended hours across the charged days. Stored back as
+    // `actualHoursUsed` so the value is unambiguously a TOTAL (not per-day),
+    // matching what the adjust UI and refund logic expect.
+    const entryTotal = vacation.actualHoursUsed ?? deductHours * workDays
 
-    for (const day of days) {
-      if (!isWorkDay(day, state.policy, allHolidays)) continue
+    for (const day of chargeableDays) {
       const dayCopy = day
       pending.push({
         date: dayCopy,
@@ -461,8 +514,7 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
             })
           }
           processedVacationIds.add(vacation.id)
-          vacationActuals[vacation.id] =
-            (vacationActuals[vacation.id] ?? 0) + deductHours
+          vacationActuals[vacation.id] = entryTotal
         },
       })
     }
