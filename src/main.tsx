@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { startUpdateChecker } from './lib/updateChecker'
 
 /** Module-level flag flipped by the update checker. Components subscribe via
@@ -16,7 +17,9 @@ export function onUpdateChange(fn: () => void) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )
 

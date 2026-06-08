@@ -6,6 +6,7 @@ import {
   projectBalance,
   getNextPayday,
   computeAccrualTier,
+  getCarryoverOutlook,
   getEffectiveCurrentBalances,
 } from '../lib/projection'
 import { getNowInZone } from '../lib/timeUtils'
@@ -87,16 +88,10 @@ export function StatusCards() {
     [state, yearEnd],
   )
 
-  const carryoverCap = useMemo(() => {
-    if (state.policy.carryoverCapStrategy === 'unlimited') return null
-    if (state.policy.carryoverCapStrategy === 'fixed_hours')
-      return state.policy.carryoverFixedCap ?? 0
-    const periodsPerYear = Math.round(365 / state.policy.payPeriodLengthDays)
-    return currentTier.hoursPerPayPeriod * periodsPerYear
-  }, [state.policy, currentTier])
-
-  const exceedsCap =
-    carryoverCap !== null && yearEndProjection.vacationBalance > carryoverCap
+  // Tier-aware carry-over picture for the NEXT payout (correct cap + exact
+  // payout even when a service anniversary raises the cap before then).
+  const carryover = useMemo(() => getCarryoverOutlook(state), [state])
+  const exceedsCap = carryover.projectedPayout > 0
 
   const effective = useMemo(() => getEffectiveCurrentBalances(state), [state])
 
@@ -158,7 +153,7 @@ export function StatusCards() {
         value={`${fmt(yearEndProjection.totalAvailable)} hrs`}
         sub={
           exceedsCap
-            ? `Vac ${fmt(yearEndProjection.vacationBalance)} · cap ${Math.round(carryoverCap!)} · ${fmt(yearEndProjection.vacationBalance - carryoverCap!)}h will be paid out`
+            ? `Vac ${fmt(yearEndProjection.vacationBalance)} · cap ${Math.round(carryover.cap!)} · ${fmt(carryover.projectedPayout)}h will be paid out`
             : `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)} · Bank ${fmt(yearEndProjection.bankBalance)}`
         }
         accent={
@@ -169,7 +164,7 @@ export function StatusCards() {
         glow={exceedsCap ? 'glow-amber' : undefined}
         badge={
           exceedsCap ? (
-            <span className="text-amber-500" title={`Vacation exceeds ${fmt(carryoverCap!)} hr carryover cap — ${fmt(yearEndProjection.vacationBalance - carryoverCap!)} hrs will be paid out on the first pay date in February (if not used during January)`}>
+            <span className="text-amber-500" title={`Vacation exceeds ${fmt(carryover.cap!)} hr carry-over cap — ${fmt(carryover.projectedPayout)} hrs will be paid out on the first pay date in February (if not used during January)`}>
               <AlertTriangle className="w-4 h-4" />
             </span>
           ) : undefined

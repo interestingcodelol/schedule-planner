@@ -89,6 +89,30 @@ describe('storage savedAt stamping', () => {
   })
 })
 
+describe('downgrade safety', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    idbValue = null
+  })
+
+  it('a snapshot from a NEWER app version is loaded, not wiped to Setup', () => {
+    const s = makeState(123)
+    // Simulate a future schema version written by a newer deployed build.
+    ;(s as unknown as { version: number }).version = 2
+    s.profile.currentVacationHours = 55
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+    const loaded = loadState()
+    expect(loaded).not.toBeNull()
+    expect(loaded?.profile.currentVacationHours).toBe(55)
+  })
+
+  it('a structurally-broken snapshot is still rejected', () => {
+    // version present but no policy / plannedVacations → not a usable AppState.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, profile: {} }))
+    expect(loadState()).toBeNull()
+  })
+})
+
 describe('loadStateAsync arbitration', () => {
   beforeEach(() => {
     localStorage.clear()

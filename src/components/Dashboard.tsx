@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Settings, HelpCircle, CalendarClock, ChevronDown } from 'lucide-react'
 import { parseISO, isBefore, startOfDay, differenceInDays } from 'date-fns'
 import { useAppState } from '../context'
@@ -6,15 +6,24 @@ import { StatusCards } from './StatusCards'
 import { Insights } from './Insights'
 import { CalendarView } from './CalendarView'
 import { VacationPlanner } from './VacationPlanner'
-import { SettingsModal } from './SettingsModal'
 import { ThemeToggle } from './ThemeToggle'
-import { GuidedTour } from './GuidedTour'
 import { BankHoursWidget } from './BankHoursWidget'
-import { ChatAssistant } from './ChatAssistant'
 import { UpcomingMenu } from './UpcomingMenu'
 import { BalanceForecast } from './BalanceForecast'
 import { InlineToast } from './Toast'
 import { BackupNag } from './BackupNag'
+
+// Lazy-loaded: not needed for first paint (a modal, the tour, and the chat
+// panel), so they're code-split out of the initial bundle.
+const SettingsModal = lazy(() =>
+  import('./SettingsModal').then((m) => ({ default: m.SettingsModal })),
+)
+const GuidedTour = lazy(() =>
+  import('./GuidedTour').then((m) => ({ default: m.GuidedTour })),
+)
+const ChatAssistant = lazy(() =>
+  import('./ChatAssistant').then((m) => ({ default: m.ChatAssistant })),
+)
 
 export function Dashboard() {
   const { state, setShowTour, isDemo, resetToSetup } = useAppState()
@@ -177,9 +186,11 @@ export function Dashboard() {
         </div>
       </div>
 
-      <ChatAssistant />
-      <GuidedTour />
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <Suspense fallback={null}>
+        <ChatAssistant />
+        <GuidedTour />
+        {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      </Suspense>
     </div>
   )
 }

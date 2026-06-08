@@ -5,7 +5,9 @@ import { showToast } from './toastBus'
 const STORAGE_KEY = 'schedule-planner-state-v1'
 const LEGACY_STORAGE_KEY = 'leave-lens-state-v1'
 const LAST_EXPORT_KEY = 'schedule-planner-last-export'
-const CURRENT_VERSION = 1
+/** Current schema version. Imported by migrate.ts (the single owner of the
+ *  upgrade logic) so the constant lives in one place. */
+export const CURRENT_VERSION = 1
 const BACKUP_TYPE = 'schedule-planner-backup'
 
 declare const __BUILD_ID__: string
@@ -160,7 +162,13 @@ export async function loadStateAsync(): Promise<AppState | null> {
 function isPlausibleAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
-  if (v.version !== CURRENT_VERSION) return false
+  // Downgrade-safe: accept any structurally-valid versioned snapshot rather than
+  // requiring an exact version match. A stale cached build loading a snapshot
+  // written by a NEWER build (higher version) must NOT be rejected — that would
+  // wipe the user back to the Setup Wizard. migrateState normalizes the version
+  // and backfills any missing fields after load; schema changes here are
+  // additive, so a forward-version read is safe.
+  if (typeof v.version !== 'number' || v.version < 1) return false
   if (!v.profile || typeof v.profile !== 'object') return false
   if (!v.policy || typeof v.policy !== 'object') return false
   if (!Array.isArray(v.plannedVacations)) return false

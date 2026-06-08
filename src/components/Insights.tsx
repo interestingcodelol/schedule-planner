@@ -11,7 +11,13 @@ import {
 } from 'date-fns'
 import { Lightbulb } from 'lucide-react'
 import { useAppState } from '../context'
-import { projectBalance, computeAccrualTier, countWorkDays } from '../lib/projection'
+import {
+  projectBalance,
+  computeAccrualTier,
+  countWorkDays,
+  getCarryoverOutlook,
+  getSickOutlook,
+} from '../lib/projection'
 import { computeHolidayDates } from '../lib/holidays'
 
 function fmt(n: number): string {
@@ -55,23 +61,25 @@ export function Insights() {
       : 0
     const sickDaysBuffer = Math.floor(Math.max(0, projectedRemaining) / hoursPerDay)
 
-    const carryoverCap =
-      state.policy.carryoverCapStrategy === 'unlimited'
-        ? null
-        : state.policy.carryoverCapStrategy === 'fixed_hours'
-          ? (state.policy.carryoverFixedCap ?? 0)
-          : annualAccrual
+    // Tier-aware carry-over picture for the next payout (correct cap + exact
+    // payout even across a service anniversary), shared with StatusCards/forecast.
+    const carryover = getCarryoverOutlook(state)
+    const sickOutlook = getSickOutlook(state)
 
     const pool: Array<Insight | null> = []
 
-    if (carryoverCap !== null) {
-      const surplus = yearEndProj.vacationBalance - carryoverCap
-      if (surplus > 0) {
-        pool.push({
-          text: `Projected to exceed the ${Math.round(carryoverCap)}h carryover cap by **${fmt(surplus)} hrs** — excess is paid out on the first February pay date`,
-          type: 'warning',
-        })
-      }
+    if (carryover.cap !== null && carryover.projectedPayout > 0) {
+      pool.push({
+        text: `Projected to exceed the ${Math.round(carryover.cap)}h carry-over cap by **${fmt(carryover.projectedPayout)} hrs** — excess is paid out on the first February pay date`,
+        type: 'warning',
+      })
+    }
+
+    if (sickOutlook.projectedForfeit > 0) {
+      pool.push({
+        text: `Projected to forfeit **${fmt(sickOutlook.projectedForfeit)} hrs** of sick leave on Jan 1 — over the ${Math.round(sickOutlook.carryoverCap ?? 0)}h carry-over limit; sick time isn't paid out`,
+        type: 'warning',
+      })
     }
 
     if ((sickDaysBuffer < 1 || projectedShortfall > 0) && futureVacations.length > 0) {
@@ -101,11 +109,11 @@ export function Insights() {
       }
     })())
 
-    if (carryoverCap !== null) {
-      const surplus = yearEndProj.vacationBalance - carryoverCap
+    if (carryover.cap !== null) {
+      const surplus = yearEndProj.vacationBalance - carryover.cap
       if (surplus > -20 && surplus <= 0) {
         pool.push({
-          text: `Projected year-end vacation is **${fmt(yearEndProj.vacationBalance)} hrs**, under the ${Math.round(carryoverCap)}h carryover cap`,
+          text: `Projected year-end vacation is **${fmt(yearEndProj.vacationBalance)} hrs**, under the ${Math.round(carryover.cap)}h carry-over cap`,
           type: 'positive',
         })
       }

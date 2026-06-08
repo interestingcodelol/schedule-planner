@@ -2,15 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { addDays, format, subYears, previousFriday } from 'date-fns'
 import {
   analyzeTripImpact,
+  carryoverCapForDate,
   computeAccrualTier,
   countWorkDays,
   earliestAffordableDate,
   earliestAffordableTripStart,
   firstPaydayOnOrAfter,
+  getCarryoverOutlook,
   getCarryoverPayoutDate,
   getEffectiveCurrentBalances,
+  getSickOutlook,
   projectBalance,
 } from '../projection'
+import { catchUpState } from '../catchUp'
 import { computeHolidayDates } from '../holidays'
 import { defaultPolicy } from '../defaultPolicy'
 import { parseISO } from 'date-fns'
@@ -267,9 +271,9 @@ describe('projectBalance', () => {
   })
 })
 
-describe('getEffectiveCurrentBalances (timezone-aware EOD cutoff)', () => {
-  it('does NOT deduct same-day vacation before the local end-of-work-day', () => {
-    // Mock current time to 10:00 ET (before 4 PM cutoff)
+describe('getEffectiveCurrentBalances (same-day deduction)', () => {
+  it('deducts same-day vacation immediately in the morning (no end-of-day cutoff)', () => {
+    // 10 AM ET — an explicitly planned day off is reflected right away.
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2025-06-16T14:00:00Z')) // 10 AM ET in summer (UTC-4)
 
@@ -296,13 +300,12 @@ describe('getEffectiveCurrentBalances (timezone-aware EOD cutoff)', () => {
     })
 
     const eff = getEffectiveCurrentBalances(state)
-    // Before 4 PM ET — vacation balance should still be 40, not 32.
-    expect(eff.vacation).toBe(40)
-    expect(eff.total).toBe(60)
+    // The full day off comes off now (8h), not after a cutoff.
+    expect(eff.vacation).toBe(32)
+    expect(eff.total).toBe(52)
   })
 
-  it('DOES deduct same-day vacation after the local end-of-work-day', () => {
-    // Mock to 5 PM ET — past the 4 PM cutoff for an 8-hour day starting at 8 AM
+  it('also deducts the same-day vacation in the evening (time of day is irrelevant)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2025-06-16T21:00:00Z')) // 5 PM ET
 
@@ -333,9 +336,9 @@ describe('getEffectiveCurrentBalances (timezone-aware EOD cutoff)', () => {
     expect(eff.total).toBe(52)
   })
 
-  it('respects user timezone — PT user at 10 AM PT (1 PM ET) is still pre-cutoff', () => {
-    // 10 AM PT = 5 PM UTC = 1 PM ET. Both ET and PT users see "before 4 PM local",
-    // but specifically the PT user's clock should be honored.
+  it('uses the user timezone to identify "today" — PT user, morning', () => {
+    // 10 AM PT = 5 PM UTC. The entry dated 2025-06-16 is "today" in PT, so it
+    // deducts immediately.
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2025-06-16T17:00:00Z')) // 10 AM PT
 
@@ -362,8 +365,7 @@ describe('getEffectiveCurrentBalances (timezone-aware EOD cutoff)', () => {
     })
 
     const eff = getEffectiveCurrentBalances(state)
-    // Still pre-cutoff in PT — should not deduct
-    expect(eff.vacation).toBe(40)
+    expect(eff.vacation).toBe(32)
   })
 
   it('logged_past entries are NOT re-deducted (already mutated stored balances)', () => {
@@ -1004,12 +1006,10 @@ describe('payPeriodLengthDays is clamped to >= 1 (no infinite loop)', () => {
 })
 
 describe('getEffectiveCurrentBalances — multi-day spanning entry', () => {
-  it('deducts every elapsed work day of a vacation that spans today (not just one)', () => {
-    // Thu Jan 8 2026. Vacation Mon Jan 5 → Fri Jan 9 spans today. Mon/Tue/Wed
-    // are fully elapsed (3 work days × 8h = 24h); today (Thu) is before the
-    // 16:00 work-day cutoff at the mocked noon, so it isn't charged yet. The
-    // displayed balance must already reflect the 24h, not a single 8h — so it
-    // doesn't silently drop by 16h on the next reopen.
+  it('deducts every elapsed work day of a vacation that spans today, including today', () => {
+    // Thu Jan 8 2026. Vacation Mon Jan 5 → Fri Jan 9 spans today. Mon–Thu are
+    // charged immediately (4 work days × 8h = 32h); Fri (future) is not yet.
+    // 40 − 32 = 8.
     mockToday('2026-01-08')
     const state = makeState({
       profile: {
@@ -1032,7 +1032,7 @@ describe('getEffectiveCurrentBalances — multi-day spanning entry', () => {
         },
       ],
     })
-    expect(getEffectiveCurrentBalances(state).vacation).toBe(16)
+    expect(getEffectiveCurrentBalances(state).vacation).toBe(8)
   })
 })
 
@@ -1062,5 +1062,150 @@ describe('projectBalance — bank payout (both dates) + chronological credit', (
     // survives because both payouts have already fired.
     expect(result.bankPayout).toBe(12)
     expect(result.bankBalance).toBe(20)
+  })
+})
+
+describe('same-day time off is reflected immediately', () => {
+  it('a full day off TODAY deducts now, with no end-of-day cutoff', () => {
+    mockToday('2025-06-16') // Monday, a work day
+    const base = makeState() // currentVacationHours: 40
+    const withToday: AppState = {
+      ...base,
+      plannedVacations: [
+        {
+          id: 't',
+          startDate: '2025-06-16',
+          endDate: '2025-06-16',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    }
+    const effBase = getEffectiveCurrentBalances(base)
+    const effToday = getEffectiveCurrentBalances(withToday)
+    // 8h (one full work day) comes off immediately — not after a 4pm cutoff.
+    expect(effBase.vacation - effToday.vacation).toBe(8)
+    // projectBalance(today) mirrors the effective balance.
+    expect(projectBalance(withToday, parseISO('2025-06-16')).vacationBalance).toBeCloseTo(
+      effToday.vacation,
+      5,
+    )
+  })
+
+  it('a partial day off TODAY deducts exactly its hours immediately', () => {
+    mockToday('2025-06-16')
+    const base = makeState()
+    const withToday: AppState = {
+      ...base,
+      plannedVacations: [
+        {
+          id: 'p',
+          startDate: '2025-06-16',
+          endDate: '2025-06-16',
+          hoursPerDay: 3,
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    }
+    expect(
+      getEffectiveCurrentBalances(base).vacation -
+        getEffectiveCurrentBalances(withToday).vacation,
+    ).toBe(3)
+  })
+
+  it('next-day catch-up books a today-off entry exactly once (no double-count)', () => {
+    mockToday('2025-06-16')
+    const base = makeState()
+    const withToday: AppState = {
+      ...base,
+      plannedVacations: [
+        {
+          id: 't',
+          startDate: '2025-06-16',
+          endDate: '2025-06-16',
+          hourSource: 'vacation',
+          locked: false,
+          kind: 'planned',
+        },
+      ],
+    }
+    // Run catch-up "the next day" — the entry has fully ended.
+    const result = catchUpState(withToday, new Date('2025-06-17T12:00:00'))
+    expect(result.state.profile.currentVacationHours).toBe(32) // 40 - 8, no payday in window
+    const entry = result.state.plannedVacations.find((v) => v.id === 't')
+    expect(entry?.kind).toBe('logged_past')
+    // The booked state must NOT re-deduct via the effective-balance path.
+    expect(getEffectiveCurrentBalances(result.state).vacation).toBe(32)
+  })
+})
+
+describe('tier-aware carryover cap', () => {
+  function withHire(hireDate: string, overrides: Partial<AppState['profile']> = {}): AppState {
+    const base = makeState()
+    return { ...base, profile: { ...base.profile, hireDate, ...overrides } }
+  }
+
+  it('carryoverCapForDate steps up at the service anniversary', () => {
+    mockToday('2025-06-15')
+    // 5-year anniversary on 2025-08-01 → years 2–5 (cap ~80) before, 6–10 (~120) after.
+    const state = withHire('2020-08-01')
+    expect(carryoverCapForDate(state, parseISO('2025-07-01'))).toBeCloseTo(3.076 * 26, 0)
+    expect(carryoverCapForDate(state, parseISO('2025-09-01'))).toBeCloseTo(4.615 * 26, 0)
+  })
+
+  it('getCarryoverOutlook uses the cap at the next payout, not today\'s tier', () => {
+    mockToday('2025-06-15')
+    // Today (Jun 2025) the user is in years 2–5 (cap ~80), but by the next
+    // carryover payout (first Feb 2026 payday) they are in years 6–10 (cap ~120).
+    const state = withHire('2020-08-01', { currentVacationHours: 200 })
+    const outlook = getCarryoverOutlook(state)
+    expect(outlook.cap).toBeCloseTo(4.615 * 26, 0) // ~120, not ~80
+    expect(outlook.payoutDate).not.toBeNull()
+    expect(outlook.projectedPayout).toBeGreaterThan(0)
+  })
+
+  it('unlimited strategy reports no cap and no payout', () => {
+    mockToday('2025-06-15')
+    const base = makeState()
+    const state: AppState = {
+      ...base,
+      policy: { ...base.policy, carryoverCapStrategy: 'unlimited' },
+    }
+    const outlook = getCarryoverOutlook(state)
+    expect(outlook.cap).toBeNull()
+    expect(outlook.projectedPayout).toBe(0)
+  })
+})
+
+describe('sick leave outlook', () => {
+  function withSick(sick: number, capOverride?: number | 'unset'): AppState {
+    const base = makeState()
+    const policy =
+      capOverride === 'unset'
+        ? { ...base.policy, sickLeaveCarryoverCap: undefined }
+        : capOverride !== undefined
+          ? { ...base.policy, sickLeaveCarryoverCap: capOverride }
+          : base.policy
+    return { ...base, profile: { ...base.profile, currentSickHours: sick }, policy }
+  }
+
+  it('projects the Jan 1 forfeiture over the carry-over limit', () => {
+    mockToday('2025-06-15')
+    const outlook = getSickOutlook(withSick(70)) // default carryover cap 40
+    expect(outlook.projectedYearEnd).toBe(70) // sick is flat within the year
+    expect(outlook.projectedForfeit).toBe(30) // 70 - 40
+  })
+
+  it('no forfeiture when under the carry-over limit', () => {
+    mockToday('2025-06-15')
+    expect(getSickOutlook(withSick(30)).projectedForfeit).toBe(0)
+  })
+
+  it('no forfeiture when the carry-over cap is unset (unlimited)', () => {
+    mockToday('2025-06-15')
+    expect(getSickOutlook(withSick(70, 'unset')).projectedForfeit).toBe(0)
   })
 })

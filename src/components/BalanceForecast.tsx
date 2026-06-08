@@ -1,331 +1,275 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   addDays,
-  addMonths,
-  differenceInCalendarDays,
-  differenceInYears,
   endOfYear,
   format,
   parseISO,
   startOfDay,
-  startOfMonth,
 } from 'date-fns'
-import { TrendingUp, AlertTriangle } from 'lucide-react'
+import { TrendingUp, AlertTriangle, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
-import { computeAccrualTier, projectBalance } from '../lib/projection'
+import {
+  carryoverCapForDate,
+  getCarryoverOutlook,
+  getSickOutlook,
+  projectBalance,
+} from '../lib/projection'
+import { ForecastChart, type ThresholdLine } from './ForecastChart'
+
+type Mode = 'vacation' | 'sick'
+
+const ACCENT: Record<Mode, string> = {
+  vacation: '59, 130, 246', // blue-500
+  sick: '244, 63, 94', // rose-500
+}
+
+const fmtH = (n: number) =>
+  Number.isInteger(n) ? `${n}h` : `${(Math.round(n * 10) / 10).toFixed(1)}h`
+const fmtHRound = (n: number) => `${Math.round(n)}h`
 
 export function BalanceForecast() {
   const { state } = useAppState()
-  const svgRef = useRef<SVGSVGElement>(null)
-  const [hoverDate, setHoverDate] = useState<Date | null>(null)
+  const [mode, setMode] = useState<Mode>('vacation')
 
   const today = useMemo(() => startOfDay(new Date()), [])
   const yearEnd = useMemo(() => endOfYear(today), [today])
-  const totalDaysInRange = useMemo(
-    () => Math.max(1, differenceInCalendarDays(yearEnd, today)),
-    [today, yearEnd],
-  )
 
-  // The chart line and cap line must reference the same quantity for the
-  // "projected to exceed" warning to line up visually with what the user
-  // sees on the graph. The carryover cap applies to vacation only (not
-  // sick/bank), so the forecast series here tracks vacation balance —
-  // otherwise a user with lots of sick hours could see the total line above
-  // the cap without their vacation ever reaching it.
-  const samples = useMemo(() => {
-    const out: Array<{ date: Date; total: number; vacation: number }> = []
-    const first = projectBalance(state, today)
-    out.push({ date: today, total: first.totalAvailable, vacation: first.vacationBalance })
-    let cursor = addDays(today, 7)
-    while (cursor <= yearEnd) {
-      const p = projectBalance(state, cursor)
-      out.push({ date: cursor, total: p.totalAvailable, vacation: p.vacationBalance })
-      cursor = addDays(cursor, 7)
-    }
-    if (out[out.length - 1].date.getTime() !== yearEnd.getTime()) {
-      const p = projectBalance(state, yearEnd)
-      out.push({ date: yearEnd, total: p.totalAvailable, vacation: p.vacationBalance })
+  // Tier-boundary anniversaries inside the range — inserted as explicit sample
+  // x's so the vacation cap line steps crisply on the anniversary rather than
+  // snapping to the nearest weekly sample.
+  const anniversaries = useMemo(() => {
+    const hire = parseISO(state.profile.hireDate)
+    const out: Date[] = []
+    for (const tier of state.policy.accrualTiers) {
+      if (tier.minYears <= 0) continue
+      const anniv = new Date(
+        hire.getFullYear() + tier.minYears,
+        hire.getMonth(),
+        hire.getDate(),
+      )
+      if (anniv > today && anniv <= yearEnd) out.push(anniv)
     }
     return out
-  }, [state, today, yearEnd])
+  }, [state.profile.hireDate, state.policy.accrualTiers, today, yearEnd])
 
-  const carryoverCap = useMemo(() => {
-    if (state.policy.carryoverCapStrategy === 'unlimited') return null
-    if (state.policy.carryoverCapStrategy === 'fixed_hours') {
-      return state.policy.carryoverFixedCap ?? null
-    }
-    const yos = differenceInYears(new Date(), parseISO(state.profile.hireDate))
-    const tier = computeAccrualTier(state.policy, yos)
-    const periodsPerYear = Math.round(365 / state.policy.payPeriodLengthDays)
-    return tier.hoursPerPayPeriod * periodsPerYear
-  }, [state.policy, state.profile.hireDate])
+  // Sample the active series weekly (plus today, year-end, and any anniversaries
+  // for vacation). Only the selected mode is projected, so toggling is cheap.
+  const samples = useMemo(() => {
+    const pick = (d: Date) =>
+      mode === 'vacation'
+        ? projectBalance(state, d).vacationBalance
+        : projectBalance(state, d).sickBalance
 
-  const W = 320
-  const H = 84
-  const PAD_L = 6
-  const PAD_R = 6
-  const PAD_T = 8
-  const PAD_B = 16
-  const innerW = W - PAD_L - PAD_R
-  const innerH = H - PAD_T - PAD_B
-
-  const dataMax = Math.max(...samples.map((s) => s.vacation), carryoverCap ?? 0)
-  const yMin = 0
-  const yMax = Math.max(dataMax * 1.12, 1)
-  const yRange = yMax - yMin || 1
-
-  const xForDate = (date: Date) => {
-    const offset = differenceInCalendarDays(date, today)
-    const frac = Math.max(0, Math.min(1, offset / totalDaysInRange))
-    return PAD_L + frac * innerW
-  }
-  const xForIndex = (i: number) => xForDate(samples[i].date)
-  const yFor = (v: number) => PAD_T + innerH - ((v - yMin) / yRange) * innerH
-
-  const linePath = samples
-    .map(
-      (s, i) =>
-        `${i === 0 ? 'M' : 'L'} ${xForIndex(i).toFixed(2)} ${yFor(s.vacation).toFixed(2)}`,
-    )
-    .join(' ')
-  const baselineY = yFor(yMin)
-  const areaPath = `${linePath} L ${xForIndex(samples.length - 1).toFixed(2)} ${baselineY.toFixed(2)} L ${xForIndex(0).toFixed(2)} ${baselineY.toFixed(2)} Z`
-
-  const capY = carryoverCap !== null ? yFor(carryoverCap) : null
-  const yearEndVacation = samples[samples.length - 1].vacation
-  const todayVacation = samples[0].vacation
-  const yearEndDelta = yearEndVacation - todayVacation
-  // The Feb haircut compares vacation balance at the carryover event
-  // against the cap. Year-end vacation is a tight upper bound for what that
-  // balance will be when the haircut fires (Jan accruals are small and the
-  // event fires early Feb), so use it as the trigger.
-  const capExceeded =
-    carryoverCap !== null && yearEndVacation > carryoverCap
-  const capExcess = capExceeded ? yearEndVacation - (carryoverCap as number) : 0
-
-  const monthTicks = useMemo(() => {
-    const ticks: Array<{ x: number; label: string }> = []
-    let cursor = startOfMonth(addMonths(today, 1))
-    let idx = 0
+    const dates: Date[] = [today]
+    let cursor = addDays(today, 7)
     while (cursor <= yearEnd) {
-      const monthsRemaining = (yearEnd.getMonth() - cursor.getMonth() + 12) % 12
-      const shouldShow = monthsRemaining > 5 ? idx % 2 === 0 : true
-      if (shouldShow) {
-        const offset = differenceInCalendarDays(cursor, today)
-        const frac = Math.max(0, Math.min(1, offset / totalDaysInRange))
-        ticks.push({ x: PAD_L + frac * innerW, label: format(cursor, 'MMM') })
-      }
-      cursor = addMonths(cursor, 1)
-      idx++
+      dates.push(cursor)
+      cursor = addDays(cursor, 7)
     }
-    return ticks
-  }, [today, yearEnd, totalDaysInRange, innerW])
+    dates.push(yearEnd)
+    if (mode === 'vacation') dates.push(...anniversaries)
 
-  const hoverProjection = useMemo(() => {
-    if (!hoverDate) return null
-    const p = projectBalance(state, hoverDate)
-    return { vacation: p.vacationBalance, total: p.totalAvailable }
-  }, [state, hoverDate])
+    // Sort + dedup by ISO day.
+    const seen = new Set<string>()
+    const unique = dates
+      .sort((a, b) => a.getTime() - b.getTime())
+      .filter((d) => {
+        const iso = format(d, 'yyyy-MM-dd')
+        if (seen.has(iso)) return false
+        seen.add(iso)
+        return true
+      })
+    return unique.map((d) => ({ date: d, value: pick(d) }))
+  }, [state, mode, today, yearEnd, anniversaries])
 
-  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!svgRef.current) return
-    const rect = svgRef.current.getBoundingClientRect()
-    const scale = W / rect.width
-    const svgX = (e.clientX - rect.left) * scale
-    const frac = Math.max(0, Math.min(1, (svgX - PAD_L) / innerW))
-    const dayOffset = Math.round(frac * totalDaysInRange)
-    setHoverDate(addDays(today, dayOffset))
+  const valueAt = (d: Date) =>
+    mode === 'vacation'
+      ? projectBalance(state, d).vacationBalance
+      : projectBalance(state, d).sickBalance
+
+  const tooltipSecondary = (d: Date) => {
+    const p = projectBalance(state, d)
+    return mode === 'vacation'
+      ? `${fmtH(p.totalAvailable)} total available`
+      : `${fmtH(p.sickBalance)} of ${fmtHRound(state.policy.sickLeaveMaxBalance)} max`
   }
-  const onPointerLeave = () => setHoverDate(null)
 
-  const hoverX = hoverDate ? xForDate(hoverDate) : null
-  const hoverY = hoverProjection !== null ? yFor(hoverProjection.vacation) : null
-  // Clamp the tooltip's horizontal center so the whole pill stays inside
-  // the card even when the user hovers at the very start / end of the
-  // chart. The 2-line layout is ~120px wide; card SVG is ~320px, so half
-  // the tooltip is ~19% of the card width — 20/80 keeps a small margin.
-  const tooltipLeftPct =
-    hoverX !== null ? Math.max(20, Math.min(80, (hoverX / W) * 100)) : 50
+  const thresholds: ThresholdLine[] = useMemo(() => {
+    if (mode === 'vacation') {
+      // Tier-aware cap → stepped line (null when unlimited omits it entirely).
+      const sample = carryoverCapForDate(state, today)
+      if (sample === null && carryoverCapForDate(state, yearEnd) === null) return []
+      return [{ key: 'vac-cap', valueAt: (d) => carryoverCapForDate(state, d) }]
+    }
+    const lines: ThresholdLine[] = [
+      { key: 'sick-max', valueAt: () => state.policy.sickLeaveMaxBalance },
+    ]
+    if (state.policy.sickLeaveCarryoverCap !== undefined) {
+      lines.push({ key: 'sick-carry', valueAt: () => state.policy.sickLeaveCarryoverCap ?? null })
+    }
+    return lines
+  }, [mode, state, today, yearEnd])
 
-  const fmtH = (n: number) =>
-    Number.isInteger(n) ? `${n}h` : `${(Math.round(n * 10) / 10).toFixed(1)}h`
-  const fmtHRound = (n: number) => `${Math.round(n)}h`
+  const startVal = samples[0].value
+  const endVal = samples[samples.length - 1].value
+  const delta = endVal - startVal
+
+  const carryover = useMemo(() => getCarryoverOutlook(state), [state])
+  const sick = useMemo(() => getSickOutlook(state), [state])
+
+  // When the vacation cap rises before the next payout (an anniversary lands in
+  // between), surface the month so the higher cap on the chart makes sense.
+  const capRiseNote = useMemo(() => {
+    if (mode !== 'vacation' || carryover.cap === null) return null
+    const capToday = carryoverCapForDate(state, today)
+    if (capToday === null || capToday >= carryover.cap) return null
+    // The anniversary that raises the cap (first whose cap exceeds today's).
+    const riser = anniversaries.find(
+      (a) => (carryoverCapForDate(state, a) ?? 0) > capToday,
+    )
+    return riser
+      ? `cap rises to ${fmtHRound(carryover.cap)} after your ${format(riser, 'MMMM')} work anniversary`
+      : `cap rises to ${fmtHRound(carryover.cap)} at your next work anniversary`
+  }, [mode, carryover.cap, state, today, anniversaries])
+
+  const accent = ACCENT[mode]
+  const title = mode === 'vacation' ? 'Vacation Hours Forecast' : 'Sick Leave Forecast'
+  const Icon = mode === 'vacation' ? TrendingUp : HeartPulse
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
-      <div className="px-4 pt-3 pb-2 flex items-baseline gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <TrendingUp className="w-4 h-4 text-blue-500" />
-          <h3
-            className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300"
-            title="Projected vacation balance through year-end. Sick and bank hours are not shown because they aren't subject to the carryover cap."
-          >
-            Vacation Hours Forecast
+      <div className="px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Icon className={`w-4 h-4 ${mode === 'vacation' ? 'text-blue-500' : 'text-rose-500'}`} />
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 truncate">
+            {title}
           </h3>
         </div>
+
+        {/* Vacation / Sick toggle — one card, two charts. */}
+        <div
+          className="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-[11px] font-semibold"
+          role="tablist"
+          aria-label="Forecast type"
+        >
+          {(['vacation', 'sick'] as Mode[]).map((m) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => setMode(m)}
+              className={`px-2 py-0.5 rounded-md transition-colors ${
+                mode === m
+                  ? 'bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}
+            >
+              {m === 'vacation' ? 'Vacation' : 'Sick'}
+            </button>
+          ))}
+        </div>
+
         <div className="ml-auto flex items-baseline gap-2 text-sm tabular-nums">
-          <span className="font-bold text-gray-700 dark:text-gray-100">
-            {fmtH(todayVacation)}
-          </span>
+          <span className="font-bold text-gray-700 dark:text-gray-100">{fmtH(startVal)}</span>
           <span className="text-gray-400 dark:text-gray-500 text-xs">→ Dec 31</span>
-          <span className="font-bold text-gray-700 dark:text-gray-100">
-            {fmtH(yearEndVacation)}
-          </span>
+          <span className="font-bold text-gray-700 dark:text-gray-100">{fmtH(endVal)}</span>
           <span
             className={`text-sm font-bold inline-flex items-center gap-0.5 ${
-              yearEndDelta >= 0
+              delta >= 0
                 ? 'text-emerald-600 dark:text-emerald-400'
                 : 'text-red-600 dark:text-red-400'
             }`}
             aria-label={
-              yearEndDelta >= 0
-                ? `up ${fmtH(Math.abs(yearEndDelta))} from now`
-                : `down ${fmtH(Math.abs(yearEndDelta))} from now`
+              delta >= 0
+                ? `up ${fmtH(Math.abs(delta))} from now`
+                : `down ${fmtH(Math.abs(delta))} from now`
             }
           >
-            <span aria-hidden>{yearEndDelta >= 0 ? '▲' : '▼'}</span>
-            {fmtH(Math.abs(yearEndDelta))}
+            <span aria-hidden>{delta >= 0 ? '▲' : '▼'}</span>
+            {fmtH(Math.abs(delta))}
           </span>
         </div>
       </div>
 
-      <div className="px-3 pb-1">
-        <div className="relative">
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${W} ${H}`}
-            className="w-full h-auto cursor-crosshair touch-none text-gray-500 dark:text-gray-400"
-            onPointerMove={onPointerMove}
-            onPointerDown={onPointerMove}
-            onPointerLeave={onPointerLeave}
-            role="img"
-            aria-label="Projected vacation balance from today through end of year"
-          >
-            <defs>
-              <linearGradient id="forecastGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgb(59, 130, 246)" stopOpacity="0.38" />
-                <stop offset="100%" stopColor="rgb(59, 130, 246)" stopOpacity="0.02" />
-              </linearGradient>
-            </defs>
+      <ForecastChart
+        samples={samples}
+        thresholds={thresholds}
+        valueAt={valueAt}
+        today={today}
+        rangeEnd={yearEnd}
+        accentRgb={accent}
+        formatValue={fmtH}
+        tooltipSecondary={tooltipSecondary}
+        ariaLabel={
+          mode === 'vacation'
+            ? 'Projected vacation balance from today through end of year'
+            : 'Projected sick balance from today through end of year'
+        }
+      />
 
-            {capY !== null && (
-              <line
-                x1={PAD_L}
-                x2={W - PAD_R}
-                y1={capY}
-                y2={capY}
-                stroke="rgb(148, 163, 184)"
-                strokeWidth="0.75"
-                strokeDasharray="2 3"
-                strokeOpacity="0.6"
-              />
-            )}
-
-            <path d={areaPath} fill="url(#forecastGrad)" />
-            <path
-              d={linePath}
-              fill="none"
-              stroke="rgb(59, 130, 246)"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-
-            <circle
-              cx={xForIndex(0)}
-              cy={yFor(samples[0].vacation)}
-              r="2.25"
-              fill="rgb(59, 130, 246)"
-              stroke="white"
-              strokeWidth="1.25"
-            />
-
-            {monthTicks.map((t, i) => (
-              <text
-                key={i}
-                x={t.x}
-                y={H - 4}
-                textAnchor="middle"
-                fontSize="7.5"
-                fill="currentColor"
-                fillOpacity="0.5"
-              >
-                {t.label}
-              </text>
-            ))}
-
-            {hoverX !== null && hoverY !== null && (
-              <g pointerEvents="none">
-                <line
-                  x1={hoverX}
-                  x2={hoverX}
-                  y1={PAD_T}
-                  y2={H - PAD_B}
-                  stroke="currentColor"
-                  strokeOpacity="0.4"
-                  strokeDasharray="2 2"
-                />
-                <circle
-                  cx={hoverX}
-                  cy={hoverY}
-                  r="2.75"
-                  fill="rgb(59, 130, 246)"
-                  stroke="white"
-                  strokeWidth="1.5"
-                />
-              </g>
-            )}
-          </svg>
-
-          {hoverDate && hoverProjection !== null && (
-            <div
-              className="absolute pointer-events-none -translate-x-1/2 -translate-y-1 bg-gray-900 dark:bg-gray-800 text-white text-[11px] leading-tight px-2 py-1.5 rounded-lg shadow-lg whitespace-nowrap ring-1 ring-white/10"
-              style={{ left: `${tooltipLeftPct}%`, top: 0 }}
-            >
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-bold tabular-nums text-[13px]">
-                  {fmtH(hoverProjection.vacation)}
-                </span>
-                <span className="text-gray-400 text-[10px]">
-                  {format(hoverDate, 'MMM d')}
-                </span>
-              </div>
-              <div className="text-gray-400 text-[10px] tabular-nums mt-0.5">
-                {fmtH(hoverProjection.total)} total available
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {carryoverCap !== null && (
-        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 leading-snug">
-          {capExceeded ? (
+      {mode === 'vacation' && carryover.cap !== null && (
+        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug">
+          {carryover.projectedPayout > 0 ? (
             <>
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
               <span>
-                Vacation cap{' '}
+                Carry-over cap{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
-                  {fmtHRound(carryoverCap)}
+                  {fmtHRound(carryover.cap)}
                 </span>
-                {' '}— projected to reach{' '}
+                {' '}— about{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
-                  {fmtH(yearEndVacation)}
+                  {fmtH(carryover.projectedPayout)}
                 </span>
-                ; ~
-                <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
-                  {fmtH(capExcess)}
-                </span>
-                {' '}paid out at first Feb pay date if unused.
+                {' '}paid out on the first February pay date if unused
+                {capRiseNote ? ` (${capRiseNote})` : ''}.
               </span>
             </>
           ) : (
             <span>
-              Dashed line is your vacation carryover cap of{' '}
+              Dashed line is your vacation carry-over cap of{' '}
               <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
-                {fmtHRound(carryoverCap)}
+                {fmtHRound(carryover.cap)}
               </span>
-              .
+              {capRiseNote ? ` — ${capRiseNote}` : '.'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {mode === 'sick' && (
+        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug">
+          {sick.projectedForfeit > 0 ? (
+            <>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+              <span>
+                About{' '}
+                <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
+                  {fmtH(sick.projectedForfeit)}
+                </span>
+                {' '}forfeited on Jan 1 — over the{' '}
+                <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
+                  {fmtHRound(sick.carryoverCap ?? 0)}
+                </span>
+                {' '}carry-over limit. Sick time isn't paid out, so use it or lose it.
+              </span>
+            </>
+          ) : (
+            <span>
+              {sick.carryoverCap !== undefined && (
+                <>
+                  Carry-over limit{' '}
+                  <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
+                    {fmtHRound(sick.carryoverCap)}
+                  </span>
+                  {' · '}
+                </>
+              )}
+              Annual max{' '}
+              <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
+                {fmtHRound(sick.maxBalance)}
+              </span>
+              . Unused sick hours aren't paid out.
             </span>
           )}
         </div>

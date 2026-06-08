@@ -262,6 +262,11 @@ export function PolicyEditor({ policy, onChange }: Props) {
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
           Carryover Policy
         </h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          Vacation has no running maximum — it keeps accruing. Anything above the
+          carry-over cap that isn't used is paid out on the payout date below.
+          Choose "Unlimited" for no cap.
+        </p>
         <div className="space-y-3">
           <div>
             <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -295,7 +300,10 @@ export function PolicyEditor({ policy, onChange }: Props) {
                 onChange={(e) =>
                   onChange({
                     ...policy,
-                    carryoverFixedCap: Number(e.target.value),
+                    carryoverFixedCap: clampNonNegativeInt(
+                      Number(e.target.value),
+                      policy.carryoverFixedCap ?? 0,
+                    ),
                   })
                 }
                 className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -374,7 +382,10 @@ export function PolicyEditor({ policy, onChange }: Props) {
               onChange={(e) =>
                 onChange({
                   ...policy,
-                  sickLeaveAnnualGrant: Number(e.target.value),
+                  sickLeaveAnnualGrant: clampNonNegativeInt(
+                    Number(e.target.value),
+                    policy.sickLeaveAnnualGrant,
+                  ),
                 })
               }
               className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -392,12 +403,39 @@ export function PolicyEditor({ policy, onChange }: Props) {
               onChange={(e) =>
                 onChange({
                   ...policy,
-                  sickLeaveMaxBalance: Number(e.target.value),
+                  sickLeaveMaxBalance: clampNonNegativeInt(
+                    Number(e.target.value),
+                    policy.sickLeaveMaxBalance,
+                  ),
                 })
               }
               className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
+        </div>
+        <div className="mt-3">
+          <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+            Carry-over cap (hours)
+          </label>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={policy.sickLeaveCarryoverCap ?? 40}
+            onChange={(e) =>
+              onChange({
+                ...policy,
+                sickLeaveCarryoverCap: clampNonNegativeInt(
+                  Number(e.target.value),
+                  policy.sickLeaveCarryoverCap ?? 40,
+                ),
+              })
+            }
+            className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Sick hours above this amount carry into next year; the excess is forfeited on Jan 1 (sick time is never paid out). Set this equal to the max balance for no forfeiture.
+          </p>
         </div>
       </div>
 

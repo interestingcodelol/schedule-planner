@@ -19,7 +19,7 @@ import type {
   ProjectionResult,
 } from './types'
 import { computeHolidayDates } from './holidays'
-import { getNowInZone, isWorkDayOverInZone } from './timeUtils'
+import { getNowInZone } from './timeUtils'
 
 const DEFAULT_TZ = 'America/New_York'
 
@@ -114,7 +114,6 @@ export function getEffectiveCurrentBalances(state: AppState): {
   }
 
   const tz = state.profile.timezone || DEFAULT_TZ
-  const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
   const isoToday = getNowInZone(tz).isoDate
   for (const v of state.plannedVacations) {
     if (v.kind === 'logged_past') continue
@@ -127,10 +126,12 @@ export function getEffectiveCurrentBalances(state: AppState): {
     const vEnd = parseISO(v.endDate)
     // catch-up only books a vacation once it has FULLY ended, so for a
     // multi-day entry that merely spans today the stored balance reflects NONE
-    // of its elapsed days. Deduct every elapsed work day (days before today are
-    // fully elapsed; today counts only once its work day is over) so the
-    // displayed balance matches what catch-up will book the next morning —
-    // instead of silently dropping by (elapsed days − 1) on the next reopen.
+    // of its elapsed days. Deduct every elapsed work day up to AND INCLUDING
+    // today (today is charged as soon as the entry exists — an explicitly
+    // planned/logged day off is "spent" the moment it's scheduled, so the
+    // displayed balance must reflect it immediately rather than waiting for an
+    // end-of-day cutoff). catch-up books the whole entry once it fully ends and
+    // flips it to logged_past, which this loop skips, so there is no double-count.
     const holidays: Date[] = []
     for (
       let y = vStart.getFullYear();
@@ -144,7 +145,6 @@ export function getEffectiveCurrentBalances(state: AppState): {
     for (const day of eachDayOfInterval({ start: vStart, end: vEnd })) {
       const dayIso = format(day, 'yyyy-MM-dd')
       if (dayIso > isoToday) break
-      if (dayIso === isoToday && !todayIsOver) continue
       if (!isWorkDay(day, state.policy, holidays)) continue
       applyDeduction(perDay, v.hourSource || 'any', pools)
     }
@@ -322,7 +322,7 @@ function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean 
 /**
  * Compute the carryover cap in hours based on the policy strategy and current tier.
  */
-function computeCarryoverCap(
+export function computeCarryoverCap(
   policy: PolicyConfig,
   tier: AccrualTier,
 ): number | null {
@@ -335,6 +335,116 @@ function computeCarryoverCap(
       const periodsPerYear = Math.round(365 / policy.payPeriodLengthDays)
       return tier.hoursPerPayPeriod * periodsPerYear
     }
+  }
+}
+
+/**
+ * The vacation carryover cap that applies AT a given date — tier-aware, so it
+ * steps up when a service anniversary moves the user into a higher tier (e.g.
+ * 80h → 120h). Returns null when the policy has no cap (strategy = 'unlimited').
+ * This is the single source of truth for the cap shown in the UI; never derive
+ * the cap from "today's tier" in a component again.
+ */
+export function carryoverCapForDate(state: AppState, date: Date): number | null {
+  const yos = differenceInYears(date, parseISO(state.profile.hireDate))
+  return computeCarryoverCap(state.policy, computeAccrualTier(state.policy, yos))
+}
+
+export type CarryoverOutlook = {
+  /** Tier-aware cap that will apply at the next carryover payout, or null if unlimited. */
+  cap: number | null
+  /** Date the next carryover haircut fires (first payday on/after the anchor, after today). */
+  payoutDate: Date | null
+  /** Exact hours projected to be paid out at that haircut (0 if none). */
+  projectedPayout: number
+  /** Projected vacation balance at the payout date (post-haircut). */
+  projectedVacationAtPayout: number
+}
+
+/**
+ * The vacation carryover picture for the NEXT payout: when it fires, the cap
+ * that will apply then (tier-correct — accounts for an anniversary between now
+ * and the payout), and the exact hours that will be paid out. Reads the
+ * projection's own `carryover_adjustment` event so the payout figure is exact,
+ * replacing the old "year-end balance vs today's cap" approximation that the
+ * status card, insights, and forecast each computed inconsistently.
+ */
+export function getCarryoverOutlook(state: AppState): CarryoverOutlook {
+  if (state.policy.carryoverCapStrategy === 'unlimited') {
+    return { cap: null, payoutDate: null, projectedPayout: 0, projectedVacationAtPayout: 0 }
+  }
+  const tz = state.profile.timezone || DEFAULT_TZ
+  const today = parseISO(getNowInZone(tz).isoDate)
+  // Next payout strictly after today: the anchor recurs yearly, so check this
+  // year (may already be past) and next year, then take the earliest future one.
+  const payoutDate =
+    [
+      getCarryoverPayoutDate(state, today.getFullYear()),
+      getCarryoverPayoutDate(state, today.getFullYear() + 1),
+    ]
+      .filter((d): d is Date => d !== null && isAfter(d, today))
+      .sort((a, b) => a.getTime() - b.getTime())[0] ?? null
+
+  if (!payoutDate) {
+    return {
+      cap: carryoverCapForDate(state, today),
+      payoutDate: null,
+      projectedPayout: 0,
+      projectedVacationAtPayout: getEffectiveCurrentBalances(state).vacation,
+    }
+  }
+  const proj = projectBalance(state, payoutDate)
+  const event = proj.events.find(
+    (e) =>
+      e.type === 'carryover_adjustment' &&
+      e.date === format(payoutDate, 'yyyy-MM-dd'),
+  )
+  return {
+    cap: carryoverCapForDate(state, payoutDate),
+    payoutDate,
+    projectedPayout: event ? Math.abs(event.delta) : 0,
+    projectedVacationAtPayout: proj.vacationBalance,
+  }
+}
+
+export type SickOutlook = {
+  /** Effective current sick balance (today). */
+  current: number
+  /** Projected sick balance at Dec 31 of the current year (pre-forfeiture). */
+  projectedYearEnd: number
+  /** Hours over this carry into next year are forfeited on Jan 1; undefined = no limit. */
+  carryoverCap?: number
+  /** Max sick balance the policy allows. */
+  maxBalance: number
+  /** The next Jan 1, when any over-cap sick hours are forfeited. */
+  forfeitDate: Date
+  /** Hours projected to be forfeited at the next Jan 1 (0 if none / unlimited). */
+  projectedForfeit: number
+}
+
+/**
+ * The sick-leave picture for the year boundary. Sick is granted as a Jan-1 lump
+ * (not accrued per period), so the only year-in-range change is planned
+ * sick-sourced time off; the decision-relevant signal is the Jan-1 forfeiture of
+ * anything over the carry-over limit (sick is never paid out — use it or lose
+ * it). Sick doesn't change between Dec 31 and the Jan-1 forfeiture, so the Dec 31
+ * balance IS the pre-forfeiture balance.
+ */
+export function getSickOutlook(state: AppState): SickOutlook {
+  const tz = state.profile.timezone || DEFAULT_TZ
+  const today = parseISO(getNowInZone(tz).isoDate)
+  const yearEnd = isoMidnight(today.getFullYear(), 12, 31)
+  const projectedYearEnd = projectBalance(state, yearEnd).sickBalance
+  const carryoverCap = state.policy.sickLeaveCarryoverCap
+  const projectedForfeit =
+    carryoverCap !== undefined ? Math.max(0, projectedYearEnd - carryoverCap) : 0
+  return {
+    current: getEffectiveCurrentBalances(state).sick,
+    projectedYearEnd,
+    carryoverCap,
+    maxBalance: state.policy.sickLeaveMaxBalance,
+    forfeitDate: isoMidnight(today.getFullYear() + 1, 1, 1),
+    projectedForfeit: r2(projectedForfeit),
   }
 }
 
@@ -392,9 +502,6 @@ export function projectBalance(
   let totalCarryoverAdjustment = 0
   let totalBankPayout = 0
   let totalShortfall = 0
-
-  const tz = state.profile.timezone || DEFAULT_TZ
-  const todayIsOver = isWorkDayOverInZone(tz, state.policy.hoursPerWorkDay)
 
   if (!isAfter(target, today)) {
     const eff = getEffectiveCurrentBalances(state)
@@ -497,8 +604,11 @@ export function projectBalance(
     )
     const days = eachDayOfInterval({ start: vStart, end: rangeEnd })
     for (const day of days) {
-      // Skip today before the work-day cutoff (it hasn't been "taken" yet).
-      if (format(day, 'yyyy-MM-dd') === todayIso && !todayIsOver) continue
+      // Today is charged immediately: an explicitly planned/logged day off is
+      // "spent" the moment it's scheduled, so the projection reflects it now
+      // rather than waiting for an end-of-day cutoff. (Matches
+      // getEffectiveCurrentBalances; catch-up books the entry once it fully
+      // ends and flips it to logged_past, so there is no double-count.)
       if (isWorkDay(day, state.policy, allHolidays)) {
         pendingEvents.push({
           date: day,
