@@ -95,8 +95,8 @@ export function BankCard() {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-2 z-40 w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-3 animate-slide-up">
-          <div className="flex flex-col sm:flex-row gap-2">
+        <div className="absolute top-full left-0 mt-1.5 z-40 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up">
+          <div className="flex gap-1.5">
             <input
               type="number"
               step="0.25"
@@ -105,14 +105,13 @@ export function BankCard() {
               value={hours}
               onChange={(e) => setHours(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-              className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder-gray-400"
+              className="flex-1 min-w-0 px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder-gray-400"
             />
             <button
               onClick={handleAdd}
               disabled={!hours || Number(hours) <= 0}
-              className="shrink-0 px-3 py-2 text-sm font-medium bg-teal-600 hover:bg-teal-500 active:scale-95 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all flex items-center justify-center gap-1"
+              className="shrink-0 px-3 py-1.5 text-sm font-medium bg-teal-600 hover:bg-teal-500 active:scale-95 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-all"
             >
-              <Plus className="w-3.5 h-3.5" />
               Add
             </button>
           </div>
@@ -122,47 +121,48 @@ export function BankCard() {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            className="mt-2 w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            className="mt-1.5 w-full px-2.5 py-1.5 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
           />
 
           {entries.length > 0 && (
-            <div className="mt-3 border-t border-gray-200/60 dark:border-gray-700/40 -mx-3 px-1">
+            <div className="mt-2 border-t border-gray-200/60 dark:border-gray-700/40 -mx-2 px-2 pt-1">
               <div className="divide-y divide-gray-100 dark:divide-gray-800/60">
                 {entries.map((entry) => (
+                  // Items pack naturally from the left (amount · date), so with
+                  // no note they sit together; a note takes the flex-1 middle
+                  // and pushes the remove button to the right edge.
                   <div
                     key={entry.id}
-                    className="px-2 py-2.5 flex items-center justify-between gap-3 group"
+                    className="flex items-center gap-2 py-1.5 text-sm group"
                   >
-                    <div className="text-sm flex items-center gap-2 min-w-0">
-                      <span className="font-semibold text-teal-600 dark:text-teal-400 tabular-nums shrink-0">
-                        +{fmt(entry.hours)} hrs
+                    <span className="font-semibold text-teal-600 dark:text-teal-400 tabular-nums shrink-0">
+                      +{fmt(entry.hours)} hrs
+                    </span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
+                      {format(parseISO(entry.date), 'MMM d')}
+                    </span>
+                    {entry.note && (
+                      <span className="flex-1 min-w-0 truncate text-gray-600 dark:text-gray-300">
+                        {entry.note}
                       </span>
-                      {entry.note && (
-                        <span className="text-gray-700 dark:text-gray-200 truncate">
-                          {entry.note}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2.5 shrink-0">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {format(parseISO(entry.date), 'MMM d')}
-                      </span>
-                      <button
-                        onClick={() => {
-                          const deleted = { ...entry }
-                          removeBankHours(entry.id)
-                          showToast({
-                            message: `Removed ${fmt(entry.hours)} bank hrs`,
-                            action: { label: 'Undo', onClick: () => addBankHours(deleted) },
-                            duration: 5000,
-                          })
-                        }}
-                        className="p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors"
-                        title="Remove"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        const deleted = { ...entry }
+                        removeBankHours(entry.id)
+                        showToast({
+                          message: `Removed ${fmt(entry.hours)} bank hrs`,
+                          action: { label: 'Undo', onClick: () => addBankHours(deleted) },
+                          duration: 5000,
+                        })
+                      }}
+                      className={`shrink-0 p-0.5 rounded text-gray-400 hover:text-red-500 transition-colors ${
+                        entry.note ? '' : 'ml-1'
+                      }`}
+                      title="Remove"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>
