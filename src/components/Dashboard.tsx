@@ -1,7 +1,8 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
-import { Settings, HelpCircle, CalendarClock, ChevronDown } from 'lucide-react'
+import { Settings, HelpCircle, CalendarClock, ChevronDown, Sparkles } from 'lucide-react'
 import { parseISO, isBefore, startOfDay, differenceInDays } from 'date-fns'
 import { useAppState } from '../context'
+import { hasUnseenChangelog, markChangelogSeen } from '../lib/changelog'
 import { StatusCards } from './StatusCards'
 import { Insights } from './Insights'
 import { CalendarView } from './CalendarView'
@@ -24,11 +25,22 @@ const GuidedTour = lazy(() =>
 const ChatAssistant = lazy(() =>
   import('./ChatAssistant').then((m) => ({ default: m.ChatAssistant })),
 )
+const WhatsNew = lazy(() =>
+  import('./WhatsNew').then((m) => ({ default: m.WhatsNew })),
+)
 
 export function Dashboard() {
   const { state, setShowTour, isDemo, resetToSetup } = useAppState()
   const [showSettings, setShowSettings] = useState(false)
+  const [showWhatsNew, setShowWhatsNew] = useState(false)
+  const [changelogUnseen, setChangelogUnseen] = useState(hasUnseenChangelog)
   const today = startOfDay(new Date())
+
+  const openWhatsNew = () => {
+    setShowWhatsNew(true)
+    markChangelogSeen()
+    setChangelogUnseen(false)
+  }
 
   const nextTimeOff = useMemo(() => {
     const upcoming = state.plannedVacations
@@ -70,7 +82,7 @@ export function Dashboard() {
                 aria-label="View upcoming events"
                 title={`View all ${total} upcoming item${total === 1 ? '' : 's'}`}
                 className={`group flex items-center gap-3 pl-3 pr-3 py-2 rounded-r-xl hover:bg-blue-50/60 dark:hover:bg-blue-950/30 transition-colors min-w-0 ${
-                  hasUnaffordable ? 'bg-red-50/40 dark:bg-red-950/15' : ''
+                  hasUnaffordable ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''
                 }`}
               >
                 {nextTimeOff && daysUntilNext !== null && daysUntilNext >= 0 ? (
@@ -78,22 +90,19 @@ export function Dashboard() {
                     <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 dark:bg-blue-400/10 shrink-0">
                       <CalendarClock className="w-3.5 h-3.5 text-blue-500" />
                     </div>
-                    <div className="hidden sm:flex flex-col items-start min-w-0 leading-tight">
+                    {/* Fixed-width column so the header doesn't reflow as the
+                        relative time changes; the note now lives in the dropdown
+                        only (it was the main cause of the panel resizing). */}
+                    <div className="hidden sm:flex flex-col items-start leading-tight w-[88px]">
                       <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400 dark:text-gray-500">
                         Next time off
                       </span>
-                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 truncate max-w-[80px] sm:max-w-[260px]">
+                      <span className="text-sm font-semibold text-gray-700 dark:text-gray-200 whitespace-nowrap">
                         {daysUntilNext === 0
                           ? 'Today!'
                           : daysUntilNext === 1
                             ? 'Tomorrow'
                             : `in ${daysUntilNext} days`}
-                        {nextTimeOff.note && (
-                          <span className="text-gray-400 dark:text-gray-500 font-normal">
-                            {' · '}
-                            {nextTimeOff.note}
-                          </span>
-                        )}
                       </span>
                     </div>
                   </>
@@ -127,7 +136,7 @@ export function Dashboard() {
                   />
                   {hasUnaffordable && (
                     <span
-                      className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900"
+                      className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white dark:ring-gray-900"
                       aria-hidden
                     />
                   )}
@@ -139,6 +148,20 @@ export function Dashboard() {
         <div className="flex items-center gap-2 shrink-0" data-tour="settings">
           <BackupNag />
           <InlineToast />
+          <button
+            onClick={openWhatsNew}
+            className="relative p-2 rounded-xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
+            aria-label="What's new"
+            title="What's new"
+          >
+            <Sparkles className="w-[18px] h-[18px]" />
+            {changelogUnseen && (
+              <span
+                className="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900"
+                aria-hidden
+              />
+            )}
+          </button>
           <button
             onClick={() => setShowTour(true)}
             className="p-2 rounded-xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
@@ -176,9 +199,11 @@ export function Dashboard() {
             <div data-tour="planner" className="shrink-0">
               <VacationPlanner />
             </div>
-            <div data-tour="bank-hours" className="shrink-0">
-              <BankHoursWidget />
-            </div>
+            {!state.policy.hideBankHours && (
+              <div data-tour="bank-hours" className="shrink-0">
+                <BankHoursWidget />
+              </div>
+            )}
             <div className="shrink-0">
               <BalanceForecast />
             </div>
@@ -190,6 +215,7 @@ export function Dashboard() {
         <ChatAssistant />
         <GuidedTour />
         {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+        {showWhatsNew && <WhatsNew onClose={() => setShowWhatsNew(false)} />}
       </Suspense>
     </div>
   )

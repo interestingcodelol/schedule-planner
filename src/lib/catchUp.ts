@@ -16,7 +16,12 @@ import type {
   UserProfile,
 } from './types'
 import { computeHolidayDates } from './holidays'
-import { accrualForPeriod, computeAccrualTier, firstPaydayOnOrAfter } from './projection'
+import {
+  accrualForPeriod,
+  computeAccrualTier,
+  firstPaydayOnOrAfter,
+  newYearAccrualThrough,
+} from './projection'
 import { getNowInZone } from './timeUtils'
 
 const DEFAULT_TZ = 'America/New_York'
@@ -320,16 +325,28 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
             const yos = differenceInYears(payoutDateCopy, hireDate)
             const tier = computeAccrualTier(state.policy, yos)
             const cap = computeCarryoverCap(state.policy, tier)
-            if (cap !== null && pools.vacation > cap) {
-              const paidOut = pools.vacation - cap
-              pools.vacation = cap
-              events.push({
-                date: format(payoutDateCopy, 'yyyy-MM-dd'),
-                type: 'carryover_payout',
-                pool: 'vacation',
-                delta: -paidOut,
-                label: `Carryover cap ${cap.toFixed(2)} hrs — ${paidOut.toFixed(2)} hrs paid out`,
-              })
+            if (cap !== null) {
+              // Pay out only the prior year's carried-over excess over the cap;
+              // this year's accruals (paychecks since Jan 1) carry on. Mirrors
+              // projection.ts exactly so the stored balance never drifts.
+              const newYearAccr = newYearAccrualThrough(
+                state.policy,
+                hireDate,
+                lastPayday,
+                payoutDateCopy.getFullYear(),
+                payoutDateCopy,
+              )
+              const paidOut = pools.vacation - newYearAccr - cap
+              if (paidOut > 0) {
+                pools.vacation -= paidOut
+                events.push({
+                  date: format(payoutDateCopy, 'yyyy-MM-dd'),
+                  type: 'carryover_payout',
+                  pool: 'vacation',
+                  delta: -paidOut,
+                  label: `Carry-over cap ${cap.toFixed(2)} hrs — ${paidOut.toFixed(2)} hrs over the cap paid out`,
+                })
+              }
             }
           },
         })

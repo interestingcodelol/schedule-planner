@@ -119,7 +119,7 @@ export function Insights() {
       }
     }
 
-    if (state.profile.currentBankHours > 0) {
+    if (state.profile.currentBankHours > 0 && !state.policy.hideBankHours) {
       const payoutMonth = state.policy.bankHoursPayoutStart.month
       const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
       pool.push({

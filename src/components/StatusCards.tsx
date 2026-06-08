@@ -22,6 +22,7 @@ function Card({
   sub,
   accent,
   glow,
+  iconClass,
   badge,
   className,
 }: {
@@ -31,6 +32,7 @@ function Card({
   sub: React.ReactNode
   accent?: string
   glow?: string
+  iconClass?: string
   badge?: React.ReactNode
   className?: string
 }) {
@@ -44,7 +46,7 @@ function Card({
       />
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 text-xs sm:text-sm font-medium">
-          <Icon className="w-3.5 h-3.5 shrink-0" />
+          <Icon className={`w-3.5 h-3.5 shrink-0 ${iconClass ?? ''}`} />
           <span className="truncate">{label}</span>
         </div>
         {badge}
@@ -94,16 +96,24 @@ export function StatusCards() {
   const exceedsCap = carryover.projectedPayout > 0
 
   const effective = useMemo(() => getEffectiveCurrentBalances(state), [state])
+  const showBank = !state.policy.hideBankHours
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-4">
+    <div
+      className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${
+        showBank ? 'xl:grid-cols-7' : 'xl:grid-cols-6'
+      } gap-3 sm:gap-4`}
+    >
       <Card
         icon={Layers}
         label="Total Available"
         value={`${fmt(effective.total)} hrs`}
-        sub={`Vac: ${fmt(effective.vacation)} · Sick: ${fmt(effective.sick)} · Bank: ${fmt(effective.bank)}`}
-        accent="bg-gradient-to-r from-emerald-500 to-teal-500"
-        glow="glow-green"
+        sub={
+          showBank
+            ? `Vac: ${fmt(effective.vacation)} · Sick: ${fmt(effective.sick)} · Bank: ${fmt(effective.bank)}`
+            : `Vac: ${fmt(effective.vacation)} · Sick: ${fmt(effective.sick)}`
+        }
+        iconClass="text-emerald-500"
         className="col-span-2 sm:col-span-3 md:col-span-2 xl:col-span-1"
       />
 
@@ -112,7 +122,7 @@ export function StatusCards() {
         label="Vacation"
         value={`${fmt(effective.vacation)} hrs`}
         sub={`Accruing ${fmt(currentTier.hoursPerPayPeriod)} hrs/period`}
-        accent="bg-gradient-to-r from-blue-500 to-sky-500"
+        iconClass="text-blue-500"
       />
 
       <Card
@@ -120,23 +130,24 @@ export function StatusCards() {
         label="Sick"
         value={`${fmt(effective.sick)} hrs`}
         sub={`Max: ${fmt(state.policy.sickLeaveMaxBalance)} hrs`}
-        accent="bg-gradient-to-r from-rose-500 to-pink-500"
+        iconClass="text-rose-500"
       />
 
-      <Card
-        icon={Wallet}
-        label="Bank Hours"
-        value={`${fmt(effective.bank)} hrs`}
-        sub="Extra hours worked"
-        accent="bg-gradient-to-r from-teal-500 to-cyan-500"
-      />
+      {showBank && (
+        <Card
+          icon={Wallet}
+          label="Bank Hours"
+          value={`${fmt(effective.bank)} hrs`}
+          sub="Extra hours worked"
+          iconClass="text-teal-500"
+        />
+      )}
 
       <Card
         icon={TrendingUp}
         label="Accrual Rate"
         value={`${Math.round(annualHours)} hrs/yr`}
         sub={`${fmt(currentTier.hoursPerPayPeriod)} hrs/period · ${currentTier.label}`}
-        accent="bg-gradient-to-r from-cyan-500 to-blue-500"
       />
 
       <Card
@@ -144,7 +155,6 @@ export function StatusCards() {
         label="Next Payday"
         value={format(nextPayday, 'MMM d')}
         sub={`+${fmt(currentTier.hoursPerPayPeriod)} hrs vacation`}
-        accent="bg-gradient-to-r from-green-500 to-emerald-500"
       />
 
       <Card
@@ -154,7 +164,9 @@ export function StatusCards() {
         sub={
           exceedsCap
             ? `Vac ${fmt(yearEndProjection.vacationBalance)} · cap ${Math.round(carryover.cap!)} · ${fmt(carryover.projectedPayout)}h will be paid out`
-            : `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)} · Bank ${fmt(yearEndProjection.bankBalance)}`
+            : showBank
+              ? `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)} · Bank ${fmt(yearEndProjection.bankBalance)}`
+              : `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)}`
         }
         accent={
           exceedsCap

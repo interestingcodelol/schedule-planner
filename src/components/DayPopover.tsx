@@ -511,7 +511,7 @@ export function DayPopover({
                   <>
                     <option value="sick">Sick</option>
                     <option value="vacation">Vacation</option>
-                    <option value="bank">Bank</option>
+                    {!state.policy.hideBankHours && <option value="bank">Bank</option>}
                     <option value="any">Auto (best available)</option>
                   </>
                 ) : (
@@ -519,7 +519,7 @@ export function DayPopover({
                     <option value="any">Auto (best available)</option>
                     <option value="vacation">Vacation</option>
                     <option value="sick">Sick</option>
-                    <option value="bank">Bank</option>
+                    {!state.policy.hideBankHours && <option value="bank">Bank</option>}
                   </>
                 )}
               </select>

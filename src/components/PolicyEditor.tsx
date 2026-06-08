@@ -439,14 +439,29 @@ export function PolicyEditor({ policy, onChange }: Props) {
         </div>
       </div>
 
-      {/* Bank Hours Payout */}
+      {/* Bank Hours */}
       <div>
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-          Bank Hours Payout Window
+          Bank Hours
         </h3>
+        <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={!policy.hideBankHours}
+            onChange={(e) =>
+              onChange({ ...policy, hideBankHours: !e.target.checked })
+            }
+            className="w-4 h-4 rounded accent-blue-600"
+          />
+          <span className="text-xs text-gray-600 dark:text-gray-300">
+            Show bank hours
+          </span>
+        </label>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-          Bank hours are paid out during this window. Outside this period, they can be used for time off.
+          Turn this off if your plan doesn't include bank hours — it removes all
+          bank-hours cards and references from the app.
         </p>
+        {policy.hideBankHours ? null : (
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -541,6 +556,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Holidays */}

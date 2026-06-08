@@ -93,7 +93,7 @@ describe('catchUpState', () => {
     expect(result.state.profile.currentSickHours).toBeCloseTo(80, 2)
   })
 
-  it('caps vacation on the carryover payout date', () => {
+  it('pays out the prior-year carry-over excess and keeps new-year accruals', () => {
     // First payday on/after Feb 1 2026 anchored on a 2025-12-12 lastPayday
     // is Feb 6 2026 (biweekly).
     mockToday('2026-02-07')
@@ -113,8 +113,11 @@ describe('catchUpState', () => {
     const payouts = result.events.filter((e) => e.type === 'carryover_payout')
     expect(payouts).toHaveLength(1)
     expect(payouts[0].date).toBe('2026-02-06')
-    // Cap = 4.615 * 26 = 119.99 ≈ 120; 200 → ~120.
-    expect(result.state.profile.currentVacationHours).toBeCloseTo(119.99, 1)
+    expect(payouts[0].delta).toBeLessThan(0)
+    // The balance is NOT reset down to the cap: this year's accruals (the
+    // Jan 9, Jan 23 and Feb 6 paychecks = 3 × 4.615) carry on TOP of the cap.
+    const cap = 4.615 * 26
+    expect(result.state.profile.currentVacationHours).toBeCloseTo(cap + 4.615 * 3, 1)
   })
 
   it('zeros bank hours when crossing the bank payout payday', () => {

@@ -122,7 +122,7 @@ describe('projectBalance', () => {
     })
   })
 
-  it('Test 3: Employee whose projected balance would exceed carryover cap — verify Feb 1 haircut', () => {
+  it('Test 3: Employee whose projected balance would exceed carryover cap — only the prior-year excess is paid out', () => {
     // Employee with a lot of hours, projection past Feb 1
     const state = makeState({
       profile: {
@@ -135,24 +135,25 @@ describe('projectBalance', () => {
       },
     })
 
-    const targetDate = new Date('2026-03-01') // Past Feb 1
-    const result = projectBalance(state, targetDate)
+    const cap = 4.615 * 26 // ~120, annual accrual at the 5–10yr tier
+    // Balance at Dec 31 2025 is what "carries over" — the payout is the amount
+    // of THAT balance over the cap. New-year (Jan/early-Feb) accruals carry on
+    // and must NOT be swept into the payout.
+    const dec31Vac = projectBalance(state, new Date('2025-12-31')).vacationBalance
 
-    // The carryover cap with "annual_accrual" strategy and 5-10yr tier (4.62 hrs/pp):
-    // periods per year = round(365/14) = 26
-    // cap = 4.62 * 26 = 120.12
-    // So balance of 150+ should be capped to ~120.12 on Feb 1
-
+    const result = projectBalance(state, new Date('2026-03-01'))
     const carryoverEvents = result.events.filter(
       (e) => e.type === 'carryover_adjustment',
     )
     expect(carryoverEvents.length).toBe(1)
-    // lastPaydayDate is 2025-06-13 (Friday); biweekly paydays put the first
-    // payday on/after Feb 1, 2026 at Feb 6, 2026.
+    // lastPaydayDate is 2025-06-13 (Friday); the first payday on/after Feb 1,
+    // 2026 is Feb 6, 2026.
     expect(carryoverEvents[0].date).toBe('2026-02-06')
-    expect(carryoverEvents[0].delta).toBeLessThan(0) // It's a reduction
-    // After the haircut, balance should be at cap
-    expect(carryoverEvents[0].runningBalance).toBeCloseTo(120.12, 0)
+    // Payout = year-end vacation over the cap (NOT the Feb-payday balance).
+    expect(Math.abs(carryoverEvents[0].delta)).toBeCloseTo(dec31Vac - cap, 1)
+    // After the haircut the balance is cap + this year's accruals so far —
+    // strictly above the cap, because new-year accruals are preserved.
+    expect(carryoverEvents[0].runningBalance).toBeGreaterThan(cap)
   })
 
   it('Test 4: Planned vacation spanning a weekend and a holiday — verify only actual work days are deducted', () => {
@@ -1207,5 +1208,69 @@ describe('sick leave outlook', () => {
   it('no forfeiture when the carry-over cap is unset (unlimited)', () => {
     mockToday('2025-06-15')
     expect(getSickOutlook(withSick(70, 'unset')).projectedForfeit).toBe(0)
+  })
+})
+
+describe('carry-over payout (only prior-year excess paid; new-year accruals kept)', () => {
+  const carryoutPayout = (events: { type: string; delta: number }[]) =>
+    Math.abs(events.find((e) => e.type === 'carryover_adjustment')?.delta ?? 0)
+
+  function highBalanceState(vac: number) {
+    const base = makeState()
+    return {
+      ...base,
+      profile: {
+        ...base.profile,
+        hireDate: '2020-01-01', // 5–10yr tier → cap ≈ 120
+        currentVacationHours: vac,
+        currentSickHours: 0,
+        currentBankHours: 0,
+        lastPaydayDate: '2025-11-28', // Friday before the mocked "today"
+      },
+    }
+  }
+
+  it("matches the user's expectation: payout = year-end vacation over the cap (not the Feb-payday balance)", () => {
+    mockToday('2025-12-01')
+    const state = highBalanceState(140)
+    const cap = 4.615 * 26
+    const dec31 = projectBalance(state, new Date('2025-12-31')).vacationBalance
+    const result = projectBalance(state, new Date('2026-03-01'))
+    // Payout reflects the carried-over (Dec 31) excess, NOT the inflated
+    // Feb-payday balance that includes January accruals.
+    expect(carryoutPayout(result.events)).toBeCloseTo(dec31 - cap, 1)
+  })
+
+  it('January vacation use reduces the payout by the hours used', () => {
+    mockToday('2025-12-01')
+    const state = highBalanceState(150)
+    const noUse = carryoutPayout(projectBalance(state, new Date('2026-03-01')).events)
+    const withJan = {
+      ...state,
+      plannedVacations: [
+        {
+          id: 'jan',
+          startDate: '2026-01-15', // a January work day
+          endDate: '2026-01-15',
+          hourSource: 'vacation' as const,
+          locked: false,
+          kind: 'planned' as const,
+        },
+      ],
+    }
+    const used = carryoutPayout(projectBalance(withJan, new Date('2026-03-01')).events)
+    expect(used).toBeLessThan(noUse)
+    expect(noUse - used).toBeCloseTo(8, 1) // one 8h work day used in January
+  })
+
+  it('projection and catch-up agree on the post-carryover balance', () => {
+    mockToday('2025-12-01')
+    const state = highBalanceState(160)
+    const projected = projectBalance(state, new Date('2026-02-28')).vacationBalance
+    const reconciled = catchUpState(
+      { ...state, profile: { ...state.profile, lastSyncDate: '2025-12-01' } },
+      new Date('2026-02-28T12:00:00'),
+    )
+    expect(reconciled.state.profile.currentVacationHours).toBeCloseTo(projected, 1)
   })
 })

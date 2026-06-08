@@ -350,6 +350,35 @@ export function carryoverCapForDate(state: AppState, date: Date): number | null 
   return computeCarryoverCap(state.policy, computeAccrualTier(state.policy, yos))
 }
 
+/**
+ * Vacation accrued on paydays from Jan 1 of `year` up to AND INCLUDING
+ * `throughPayday`. The carry-over payout only pays out the PRIOR year's excess
+ * over the cap — new-year accruals (the paychecks landing in Jan/early Feb)
+ * carry on and must be excluded from the payout. Because
+ *   balanceAtPayday = yearStartBalance − januaryUsage + newYearAccruals,
+ * we have  yearStartBalance − januaryUsage = balanceAtPayday − newYearAccruals,
+ * so the payout (excess of the carried-over, not-used-in-January amount over the
+ * cap) = max(0, balanceAtPayday − newYearAccruals − cap) — computable here with
+ * no balance history, and identical in projection and catch-up.
+ */
+export function newYearAccrualThrough(
+  policy: PolicyConfig,
+  hireDate: Date,
+  lastPayday: Date,
+  year: number,
+  throughPayday: Date,
+): number {
+  const period = Math.max(1, policy.payPeriodLengthDays)
+  const jan1 = isoMidnight(year, 1, 1)
+  let payday = firstPaydayOnOrAfter(lastPayday, period, jan1)
+  let total = 0
+  while (!isAfter(payday, throughPayday)) {
+    total += accrualForPeriod(policy, hireDate, addDays(payday, -period), payday)
+    payday = addDays(payday, period)
+  }
+  return total
+}
+
 export type CarryoverOutlook = {
   /** Tier-aware cap that will apply at the next carryover payout, or null if unlimited. */
   cap: number | null
@@ -734,18 +763,30 @@ export function projectBalance(
       const tier = computeAccrualTier(state.policy, yos)
       const cap = computeCarryoverCap(state.policy, tier)
 
-      if (cap !== null && vacationBalance > cap) {
-        const adjustment = cap - vacationBalance
-        const paidOut = Math.abs(adjustment)
-        totalCarryoverAdjustment += paidOut
-        vacationBalance = cap
-        events.push({
-          date: format(pe.date, 'yyyy-MM-dd'),
-          type: 'carryover_adjustment',
-          delta: adjustment,
-          runningBalance: vacationBalance,
-          label: `Carryover cap ${cap.toFixed(2)} hrs — ${paidOut.toFixed(2)} hrs paid out`,
-        })
+      if (cap !== null) {
+        // Only the PRIOR year's carried-over excess over the cap is paid out —
+        // exclude this year's accruals (paychecks since Jan 1) so they carry on
+        // instead of being swept into the payout. January usage is accounted for
+        // implicitly (it's already reflected in vacationBalance).
+        const newYearAccr = newYearAccrualThrough(
+          state.policy,
+          hireDate,
+          lastPayday,
+          pe.date.getFullYear(),
+          pe.date,
+        )
+        const paidOut = vacationBalance - newYearAccr - cap
+        if (paidOut > 0) {
+          totalCarryoverAdjustment += paidOut
+          vacationBalance -= paidOut
+          events.push({
+            date: format(pe.date, 'yyyy-MM-dd'),
+            type: 'carryover_adjustment',
+            delta: -paidOut,
+            runningBalance: vacationBalance,
+            label: `Carry-over cap ${cap.toFixed(2)} hrs — ${paidOut.toFixed(2)} hrs over the cap paid out`,
+          })
+        }
       }
     } else if (pe.type === 'bank_payout') {
       if (bankBalance > 0) {

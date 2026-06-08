@@ -212,17 +212,26 @@ export function BalanceForecast() {
           {carryover.projectedPayout > 0 ? (
             <>
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+              {/* Reconciling breakdown: year-end balance → cap → amount paid out.
+                  Only the over-the-cap amount is paid; new-year accruals carry on. */}
               <span>
-                Carry-over cap{' '}
-                <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
+                Year-end{' '}
+                <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
+                  {fmtH(endVal)}
+                </span>
+                {' → cap '}
+                <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
                   {fmtHRound(carryover.cap)}
                 </span>
-                {' '}— about{' '}
+                {' → '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtH(carryover.projectedPayout)}
                 </span>
-                {' '}paid out on the first February pay date if unused
-                {capRiseNote ? ` (${capRiseNote})` : ''}.
+                {' paid out'}
+                {carryover.payoutDate
+                  ? ` ${format(carryover.payoutDate, 'MMM d')}`
+                  : ' on the first February pay date'}{' '}
+                if unused{capRiseNote ? ` (${capRiseNote})` : ''}.
               </span>
             </>
           ) : (

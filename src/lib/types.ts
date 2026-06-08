@@ -54,6 +54,10 @@ export type PolicyConfig = {
   holidays: HolidayRule[]
   bankHoursPayoutStart: { month: number; day: number } // When bank hours get paid out (start)
   bankHoursPayoutEnd: { month: number; day: number } // When bank hours payout period ends
+  /** When true, hide all bank-hours UI for users whose plan has no such
+   *  benefit. Display-only — balances still work (bank simply stays 0).
+   *  Undefined/false means bank hours are shown. */
+  hideBankHours?: boolean
 }
 
 export type BankHoursEntry = {

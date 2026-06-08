@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { X, ArrowRight, ArrowLeft } from 'lucide-react'
 import { useAppState } from '../context'
 
@@ -9,7 +9,7 @@ type TourStep = {
   placement: 'bottom' | 'top' | 'left' | 'right'
 }
 
-const steps: TourStep[] = [
+const ALL_STEPS: TourStep[] = [
   {
     target: '[data-tour="status-cards"]',
     title: 'Your Balances at a Glance',
@@ -51,6 +51,16 @@ type Rect = { top: number; left: number; width: number; height: number }
 
 export function GuidedTour() {
   const { state, setShowTour } = useAppState()
+  // Drop the bank-hours step when bank hours are hidden, so the tour doesn't
+  // spotlight a non-existent target.
+  const steps = useMemo(
+    () =>
+      ALL_STEPS.filter(
+        (s) =>
+          s.target !== '[data-tour="bank-hours"]' || !state.policy.hideBankHours,
+      ),
+    [state.policy.hideBankHours],
+  )
   const [currentStep, setCurrentStep] = useState(0)
   const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 })
   const [spotlightRect, setSpotlightRect] = useState<Rect | null>(null)
@@ -106,7 +116,7 @@ export function GuidedTour() {
     top = Math.max(12, Math.min(top, vh - TOOLTIP_H - 12))
 
     setTooltipPos({ top, left })
-  }, [active, currentStep])
+  }, [active, currentStep, steps])
 
   useEffect(() => {
     if (!active) return
@@ -139,7 +149,10 @@ export function GuidedTour() {
 
   if (!active) return null
 
+  // Guard against currentStep landing out of range if the step list shrank
+  // (e.g. bank hours hidden while the tour was open).
   const step = steps[currentStep]
+  if (!step) return null
   const isLast = currentStep === steps.length - 1
 
   const vw = window.innerWidth
