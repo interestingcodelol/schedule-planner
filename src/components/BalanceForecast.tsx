@@ -137,8 +137,8 @@ export function BalanceForecast() {
   const Icon = mode === 'vacation' ? TrendingUp : HeartPulse
 
   return (
-    <div className="glass-card rounded-2xl overflow-hidden">
-      <div className="px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap">
+    <div className="glass-card rounded-2xl overflow-hidden flex flex-col h-full">
+      <div className="px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           <Icon className={`w-4 h-4 ${mode === 'vacation' ? 'text-blue-500' : 'text-rose-500'}`} />
           <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 truncate">
@@ -200,6 +200,7 @@ export function BalanceForecast() {
         accentRgb={accent}
         formatValue={fmtH}
         tooltipSecondary={tooltipSecondary}
+        fill
         ariaLabel={
           mode === 'vacation'
             ? 'Projected vacation balance from today through end of year'
@@ -208,7 +209,7 @@ export function BalanceForecast() {
       />
 
       {mode === 'vacation' && carryover.cap !== null && (
-        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug">
+        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug shrink-0">
           {carryover.projectedPayout > 0 ? (
             <>
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
@@ -247,7 +248,7 @@ export function BalanceForecast() {
       )}
 
       {mode === 'sick' && (
-        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug">
+        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug shrink-0">
           {sick.projectedForfeit > 0 ? (
             <>
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />

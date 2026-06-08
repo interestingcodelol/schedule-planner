@@ -332,7 +332,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={`
-        group relative p-1.5 min-h-[58px] lg:min-h-0 border-r border-b
+        group relative p-1.5 min-h-[58px] lg:min-h-[5rem] border-r border-b
         ${borderClass}
         ${bgClass}
         ${!isCurrentMonth ? 'opacity-[0.08]' : ''}

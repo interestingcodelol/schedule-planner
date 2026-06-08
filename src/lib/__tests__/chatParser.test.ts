@@ -224,6 +224,43 @@ describe('chat: date-range year-roll edge cases', () => {
   })
 })
 
+describe('chat: vague "a week in <month>" phrasing (suggestion chips)', () => {
+  it('"Can I afford a week in August?" resolves to the first full week, not the fallback', () => {
+    // Regression: "a" was captured as the ordinal word, which blocked the
+    // generic "a week in <month>" fallback and produced the "couldn\'t figure
+    // out the dates" reply for a built-in suggestion chip.
+    const state = makeState()
+    const r = processChat('Can I afford a week in August?', state)
+    expect(r.text).not.toMatch(/couldn't figure out/i)
+    // Aug 2026: first Monday is the 3rd → Mon–Fri Aug 3–7.
+    expect(r.action?.startDate).toBe('2026-08-03')
+    expect(r.action?.endDate).toBe('2026-08-07')
+  })
+
+  it('"schedule a week in July" also resolves (advertised example)', () => {
+    const state = makeState()
+    const r = processChat('schedule a week in July', state)
+    expect(r.text).not.toMatch(/couldn't figure out/i)
+    expect(r.action?.startDate).toBe('2026-07-06')
+    expect(r.action?.endDate).toBe('2026-07-10')
+  })
+
+  it('explicit ordinals still win: "first week of December"', () => {
+    const state = makeState()
+    const r = processChat('plan the first week of December', state)
+    expect(r.action?.startDate).toBe('2026-12-07')
+    expect(r.action?.endDate).toBe('2026-12-11')
+  })
+
+  it('"week of July 14" routes to that specific week, not the first week of July', () => {
+    const state = makeState()
+    const r = processChat('book a week of July 14', state)
+    // July 14 2026 is a Tuesday → its Mon–Fri week is July 13–17.
+    expect(r.action?.startDate).toBe('2026-07-13')
+    expect(r.action?.endDate).toBe('2026-07-17')
+  })
+})
+
 describe('chat: balance + help + greetings', () => {
   it('greeting returns balance summary and does not crash', () => {
     const state = makeState()

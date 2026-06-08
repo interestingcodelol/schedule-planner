@@ -266,11 +266,11 @@ export function VacationPlanner() {
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40">
+      <div className="px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40">
         <h2 className="text-lg font-semibold">Time Off Planner</h2>
       </div>
 
-      <div className="px-5 py-4 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
+      <div className="px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 font-semibold">
             <CalendarSearch className="w-4 h-4 text-white" />

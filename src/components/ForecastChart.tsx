@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   addMonths,
   differenceInCalendarDays,
@@ -32,16 +32,19 @@ type Props = {
   /** Optional second tooltip line for the hovered date. */
   tooltipSecondary?: (date: Date) => string | null
   ariaLabel: string
+  /** When true, the chart grows to fill its flex parent's height (the viewBox
+   *  height tracks the container's pixel aspect ratio so it scales uniformly —
+   *  no distortion). When false, it keeps a fixed compact aspect. */
+  fill?: boolean
 }
 
 const W = 320
-const H = 84
+const DEFAULT_H = 84
 const PAD_L = 6
 const PAD_R = 6
 const PAD_T = 8
 const PAD_B = 16
 const innerW = W - PAD_L - PAD_R
-const innerH = H - PAD_T - PAD_B
 
 /**
  * Presentational sparkline shared by the vacation and sick forecasts: filled
@@ -59,9 +62,30 @@ export function ForecastChart({
   formatValue,
   tooltipSecondary,
   ariaLabel,
+  fill = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
   const [hoverDate, setHoverDate] = useState<Date | null>(null)
+  const [chartH, setChartH] = useState(DEFAULT_H)
+
+  // In fill mode, match the viewBox height to the container's pixel aspect so
+  // preserveAspectRatio="none" scales x and y by the same factor (no stretch).
+  useEffect(() => {
+    if (!fill) return
+    const el = boxRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth
+      const h = el.clientHeight
+      if (w > 0 && h > 0) setChartH(Math.max(DEFAULT_H, Math.round((W * h) / w)))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [fill])
+
+  const H = fill ? chartH : DEFAULT_H
+  const innerH = H - PAD_T - PAD_B
 
   const totalDaysInRange = Math.max(1, differenceInCalendarDays(rangeEnd, today))
 
@@ -159,12 +183,13 @@ export function ForecastChart({
   const gradId = `forecastGrad-${accentRgb.replace(/[^0-9]/g, '')}`
 
   return (
-    <div className="px-3 pb-1">
-      <div className="relative">
+    <div className={`px-3 pb-1 ${fill ? 'min-h-[110px] lg:flex-1 lg:min-h-0' : ''}`}>
+      <div ref={boxRef} className={`relative ${fill ? 'h-full' : ''}`}>
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          className="w-full h-auto cursor-crosshair touch-none text-gray-500 dark:text-gray-400"
+          preserveAspectRatio={fill ? 'none' : 'xMidYMid meet'}
+          className={`w-full ${fill ? 'h-full' : 'h-auto'} cursor-crosshair touch-none text-gray-500 dark:text-gray-400`}
           onPointerMove={onPointerMove}
           onPointerDown={onPointerMove}
           onPointerLeave={onPointerLeave}

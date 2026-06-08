@@ -41,3 +41,6 @@ pnpm-debug.log*
 /public/fixes-summary.html
 /public/responsive-gallery.html
 /src/**/*.txt
+
+# Serena MCP local index/cache — editor tooling, not project source.
+/.serena/

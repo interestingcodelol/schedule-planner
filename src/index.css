@@ -2,21 +2,13 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Mobile/tablet: let the document scroll naturally so stacked content below
- * the fold (calendar, planner, forecast) is reachable. The desktop "fixed app
- * shell" (full-height, no page scroll, inner panels scroll) only kicks in at
- * lg+, matching App.tsx's `lg:h-screen lg:overflow-hidden`. Without this gate,
- * a global overflow:hidden froze the whole page on phones and made everything
- * past the first viewport unreachable. */
+/* The whole document scrolls naturally as ONE at every screen size — no
+ * nested/inner scroll panels. (Previously lg+ used a fixed full-height app
+ * shell with inner-scrolling panels, which produced an inner scrollbar on the
+ * right column.) Content sizes to its natural height and the page scrolls if it
+ * exceeds the viewport. */
 html, body, #root {
   min-height: 100%;
-}
-
-@media (min-width: 1024px) {
-  html, body, #root {
-    height: 100%;
-    overflow: hidden;
-  }
 }
 
 body {
@@ -30,6 +22,17 @@ body {
 ::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+/* Belt-and-suspenders no-scrollbar (covers Firefox + legacy Edge, which the
+ * webkit rule above doesn't). Used on horizontally-scrollable rows so they
+ * never show a scrollbar on any browser. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Glass card effect */

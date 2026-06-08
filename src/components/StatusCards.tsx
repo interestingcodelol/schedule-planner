@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { format, parseISO, endOfYear, differenceInYears, startOfDay } from 'date-fns'
-import { Clock, TrendingUp, Calendar, AlertTriangle, Wallet, Layers, HeartPulse } from 'lucide-react'
+import { Clock, TrendingUp, Calendar, AlertTriangle, Layers, HeartPulse } from 'lucide-react'
+import { BankCard } from './BankCard'
 import { useAppState } from '../context'
 import {
   projectBalance,
@@ -133,15 +134,7 @@ export function StatusCards() {
         iconClass="text-rose-500"
       />
 
-      {showBank && (
-        <Card
-          icon={Wallet}
-          label="Bank Hours"
-          value={`${fmt(effective.bank)} hrs`}
-          sub="Extra hours worked"
-          iconClass="text-teal-500"
-        />
-      )}
+      {showBank && <BankCard />}
 
       <Card
         icon={TrendingUp}

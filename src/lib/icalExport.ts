@@ -317,6 +317,18 @@ export function buildIcalString(
   const now = new Date()
   const dtstamp =
     format(now, "yyyyMMdd'T'HHmmss") + 'Z'
+  // Monotonically-increasing revision number: seconds since a fixed epoch. Every
+  // re-export happens later in time, so SEQUENCE strictly increases — which is
+  // what makes Outlook / Google / Apple APPLY the update to an existing event
+  // (matched by its stable UID) instead of ignoring the re-import as an
+  // unchanged duplicate. Combined with stable per-entry UIDs, a corrected date
+  // or detail overwrites the original event IN PLACE (the old one moves, no
+  // duplicate); events the user created themselves have different UIDs and are
+  // never touched, and a re-import never deletes anything.
+  const sequence = Math.max(
+    0,
+    Math.floor((now.getTime() - Date.UTC(2020, 0, 1)) / 1000),
+  )
   const reminderDays = opts.reminderDaysBeforeTimeOff ?? 0
 
   const lines: string[] = []
@@ -360,7 +372,7 @@ export function buildIcalString(
     // Per-event lifecycle metadata so re-imports update cleanly rather than
     // duplicating, and clients can reason about the event state.
     lines.push('STATUS:CONFIRMED')
-    lines.push('SEQUENCE:0')
+    lines.push(`SEQUENCE:${sequence}`)
     lines.push('CLASS:PUBLIC')
     lines.push(`CREATED:${dtstamp}`)
     lines.push(`LAST-MODIFIED:${dtstamp}`)

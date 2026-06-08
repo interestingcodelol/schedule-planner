@@ -23,6 +23,7 @@ import {
   computeAccrualTier,
   countWorkDays,
   earliestAffordableTripStart,
+  getSickOutlook,
   projectBalance,
 } from './projection'
 
@@ -176,23 +177,30 @@ function extractDateRange(
   }
 
   // --- Nth week of month ---
-  // "second week of December", "the 2nd week in July", "last week of October"
+  // "second week of December", "the 2nd week in July", "last week of October".
+  // Only counts as resolved when the leading word is a REAL ordinal — otherwise
+  // a filler word like "a" in "a week in August" matches (\w+) and must not
+  // block the generic "a week in <month>" fallback below.
   const nthWeekMonth = lower.match(
     /(?:the\s+)?(\w+)\s+week\s+(?:of|in)\s+(\w+)/i,
   )
+  let nthWeekResolved = false
   if (nthWeekMonth) {
     const ord = ORDINAL_MAP[nthWeekMonth[1].toLowerCase()]
     const month = MONTH_MAP[nthWeekMonth[2].toLowerCase()]
     if (ord !== undefined && month !== undefined) {
+      nthWeekResolved = true
       const year = new Date(thisYear, month, 1) < today ? thisYear + 1 : thisYear
       const { start, end } = getNthWeekOfMonth(month, ord, year)
       return { start, end }
     }
   }
 
-  // "week of December" / "a week in July" (defaults to first full week)
-  const weekInMonth = lower.match(/(?:a\s+)?week\s+(?:of|in|during)\s+(\w+)/i)
-  if (weekInMonth && !nthWeekMonth) {
+  // "week of December" / "a week in July" (defaults to first full week). The
+  // (?!\s+\d) guard skips a specific date like "week of July 14", which the
+  // dedicated "week of <date>" handler below resolves to that exact week.
+  const weekInMonth = lower.match(/(?:a\s+)?week\s+(?:of|in|during)\s+([a-z]+)\b(?!\s+\d)/i)
+  if (weekInMonth && !nthWeekResolved) {
     const month = MONTH_MAP[weekInMonth[1].toLowerCase()]
     if (month !== undefined) {
       const year = new Date(thisYear, month, 1) < today ? thisYear + 1 : thisYear
@@ -517,6 +525,19 @@ export function processChat(input: string, state: AppState): ChatResponse {
 
   // --- Sick days ---
   if (/\bsick\b/.test(lower)) {
+    // Forfeiture / carry-over question — "will I lose sick hours?"
+    if (/\b(lose|losing|forfeit|carry.?over|expire|roll\s*over|use\s+it\s+or\s+lose)\b/.test(lower)) {
+      const o = getSickOutlook(state)
+      if (o.projectedForfeit > 0) {
+        return {
+          text: `Heads up — you're projected to **forfeit ${fmt(o.projectedForfeit)} sick hrs** on Jan 1. Sick hours above the **${fmt(o.carryoverCap ?? 0)}h** carry-over limit don't roll over and aren't paid out, so try to use them before year-end.`,
+        }
+      }
+      return {
+        text: `You're on track — your projected year-end sick balance (**${fmt(o.projectedYearEnd)} hrs**) is within the **${fmt(o.carryoverCap ?? o.maxBalance)}h** carry-over limit, so nothing would be forfeited on Jan 1.`,
+      }
+    }
+
     const total = state.profile.currentVacationHours + state.profile.currentSickHours + state.profile.currentBankHours
     const plannedHours = state.plannedVacations
       .filter((v) => parseISO(v.endDate) >= today)

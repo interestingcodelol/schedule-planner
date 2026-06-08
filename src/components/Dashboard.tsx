@@ -1,14 +1,13 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
-import { Settings, HelpCircle, CalendarClock, ChevronDown, Sparkles } from 'lucide-react'
+import { Settings, HelpCircle, CalendarClock, ChevronDown, Sparkles, MessageCircle } from 'lucide-react'
 import { parseISO, isBefore, startOfDay, differenceInDays } from 'date-fns'
 import { useAppState } from '../context'
 import { hasUnseenChangelog, markChangelogSeen } from '../lib/changelog'
+import { computeHolidayDates } from '../lib/holidays'
 import { StatusCards } from './StatusCards'
 import { Insights } from './Insights'
 import { CalendarView } from './CalendarView'
 import { VacationPlanner } from './VacationPlanner'
-import { ThemeToggle } from './ThemeToggle'
-import { BankHoursWidget } from './BankHoursWidget'
 import { UpcomingMenu } from './UpcomingMenu'
 import { BalanceForecast } from './BalanceForecast'
 import { InlineToast } from './Toast'
@@ -33,6 +32,7 @@ export function Dashboard() {
   const { state, setShowTour, isDemo, resetToSetup } = useAppState()
   const [showSettings, setShowSettings] = useState(false)
   const [showWhatsNew, setShowWhatsNew] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
   const [changelogUnseen, setChangelogUnseen] = useState(hasUnseenChangelog)
   const today = startOfDay(new Date())
 
@@ -42,19 +42,26 @@ export function Dashboard() {
     setChangelogUnseen(false)
   }
 
-  const nextTimeOff = useMemo(() => {
-    const upcoming = state.plannedVacations
-      .filter((v) => !isBefore(parseISO(v.endDate), today))
-      .sort((a, b) => a.startDate.localeCompare(b.startDate))
-    return upcoming[0] || null
-  }, [state.plannedVacations, today])
+  // "Next time off" counts BOTH planned time off and upcoming paid holidays —
+  // whichever comes first is the next day you're actually off work.
+  const nextDayOff = useMemo(() => {
+    const vac = state.plannedVacations
+      .filter((v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today))
+      .sort((a, b) => a.startDate.localeCompare(b.startDate))[0]
+    const vacDate = vac ? parseISO(vac.startDate) : null
+    const y = today.getFullYear()
+    const holDate =
+      [...computeHolidayDates(state.policy, y), ...computeHolidayDates(state.policy, y + 1)]
+        .filter((h) => !isBefore(h, today))
+        .sort((a, b) => a.getTime() - b.getTime())[0] ?? null
+    if (vacDate && holDate) return vacDate <= holDate ? vacDate : holDate
+    return vacDate ?? holDate
+  }, [state.plannedVacations, state.policy, today])
 
-  const daysUntilNext = nextTimeOff
-    ? differenceInDays(parseISO(nextTimeOff.startDate), today)
-    : null
+  const daysUntilNext = nextDayOff ? differenceInDays(nextDayOff, today) : null
 
   return (
-    <div className="h-full flex flex-col lg:overflow-hidden">
+    <div className="flex-1 flex flex-col">
       <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 sm:px-6 py-3 shrink-0">
         <div className="glass-card rounded-xl flex items-stretch min-w-0">
           <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 shrink-0">
@@ -85,7 +92,7 @@ export function Dashboard() {
                   hasUnaffordable ? 'bg-amber-50/40 dark:bg-amber-950/15' : ''
                 }`}
               >
-                {nextTimeOff && daysUntilNext !== null && daysUntilNext >= 0 ? (
+                {daysUntilNext !== null && daysUntilNext >= 0 ? (
                   <>
                     <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 dark:bg-blue-400/10 shrink-0">
                       <CalendarClock className="w-3.5 h-3.5 text-blue-500" />
@@ -148,6 +155,17 @@ export function Dashboard() {
         <div className="flex items-center gap-2 shrink-0" data-tour="settings">
           <BackupNag />
           <InlineToast />
+          {/* Primary assistant entry point — a labeled button in the header so
+              it's discoverable instead of a floating corner FAB. */}
+          <button
+            onClick={() => setChatOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-medium bg-blue-600/10 text-blue-600 dark:text-blue-400 hover:bg-blue-600/20 transition-colors"
+            aria-label="Plan time off with the assistant"
+            title="Plan time off with the assistant"
+          >
+            <MessageCircle className="w-4 h-4 shrink-0" />
+            <span className="hidden sm:inline">Plan with chat</span>
+          </button>
           <button
             onClick={openWhatsNew}
             className="relative p-2 rounded-xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
@@ -170,7 +188,6 @@ export function Dashboard() {
           >
             <HelpCircle className="w-[18px] h-[18px]" />
           </button>
-          <ThemeToggle />
           <button
             onClick={() => setShowSettings(true)}
             className="p-2 rounded-xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
@@ -182,29 +199,26 @@ export function Dashboard() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 flex flex-col lg:overflow-hidden px-4 sm:px-6 pb-4 gap-3">
-        <div className="shrink-0" data-tour="status-cards">
+      <div className="flex-1 flex flex-col px-4 sm:px-6 pb-4 gap-3">
+        <div data-tour="status-cards">
           <StatusCards />
         </div>
 
-        <div className="shrink-0">
+        <div>
           <Insights />
         </div>
 
-        <div className="flex-1 min-h-[480px] lg:min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4 pb-24 lg:pb-0">
-          <div className="lg:col-span-8 min-h-[520px] lg:min-h-0 flex flex-col" data-tour="calendar">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-1 lg:min-h-0">
+          <div className="lg:col-span-8 flex flex-col lg:min-h-0" data-tour="calendar">
             <CalendarView />
           </div>
-          <div className="lg:col-span-4 lg:min-h-0 flex flex-col gap-4 lg:overflow-y-auto scroll-panel pb-24 lg:pr-1">
+          <div className="lg:col-span-4 flex flex-col gap-3 lg:min-h-0">
             <div data-tour="planner" className="shrink-0">
               <VacationPlanner />
             </div>
-            {!state.policy.hideBankHours && (
-              <div data-tour="bank-hours" className="shrink-0">
-                <BankHoursWidget />
-              </div>
-            )}
-            <div className="shrink-0">
+            {/* Grows to fill the rest of the column so the forecast's bottom is
+                flush with the calendar's bottom on lg+ (clean aligned edges). */}
+            <div className="lg:flex-1 lg:min-h-0">
               <BalanceForecast />
             </div>
           </div>
@@ -212,7 +226,7 @@ export function Dashboard() {
       </div>
 
       <Suspense fallback={null}>
-        <ChatAssistant />
+        {chatOpen && <ChatAssistant onClose={() => setChatOpen(false)} />}
         <GuidedTour />
         {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
         {showWhatsNew && <WhatsNew onClose={() => setShowWhatsNew(false)} />}

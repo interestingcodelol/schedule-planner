@@ -219,15 +219,11 @@ export default function App() {
     }
   }, [state])
 
+  // Dark mode only — light mode was removed. Always apply the dark class
+  // regardless of any previously-stored theme value.
   useEffect(() => {
-    if (state) {
-      if (state.theme === 'dark') {
-        document.documentElement.classList.add('dark')
-      } else {
-        document.documentElement.classList.remove('dark')
-      }
-    }
-  }, [state])
+    document.documentElement.classList.add('dark')
+  }, [])
 
   const setState = useCallback((newState: AppState) => {
     setAppData((prev) => ({ ...prev, state: newState }))
@@ -617,11 +613,9 @@ export default function App() {
         resetToSetup,
       }}
     >
-      <div className="min-h-screen lg:h-screen flex flex-col lg:overflow-hidden">
+      <div className="min-h-screen flex flex-col">
         <UpdateBanner />
-        <div className="flex-1 min-h-0">
-          <Dashboard />
-        </div>
+        <Dashboard />
       </div>
     </AppContext.Provider>
   )

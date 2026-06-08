@@ -16,6 +16,33 @@ export type ChangelogEntry = {
  */
 export const changelog: ChangelogEntry[] = [
   {
+    id: '2026-06-08-2',
+    date: 'June 2026',
+    title: 'A cleaner, faster dashboard',
+    changes: [
+      {
+        type: 'new',
+        text: 'Add and manage bank hours right from the Bank Hours card — no separate side panel.',
+      },
+      {
+        type: 'improved',
+        text: 'A cleaner full-height layout: the page scrolls as one, with no inner scrollbars on the panels.',
+      },
+      {
+        type: 'improved',
+        text: '"Next time off" now counts upcoming paid holidays, not just your planned trips.',
+      },
+      {
+        type: 'improved',
+        text: 'Dark mode is now the default throughout the app.',
+      },
+      {
+        type: 'fixed',
+        text: 'Re-exporting your calendar (.ics) now updates corrected events in place instead of creating duplicates, and never touches events you added yourself.',
+      },
+    ],
+  },
+  {
     id: '2026-06-08',
     date: 'June 2026',
     title: 'Sick-leave forecast & a cleaner dashboard',

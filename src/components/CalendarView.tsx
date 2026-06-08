@@ -319,7 +319,7 @@ export function CalendarView() {
 
       <div
         className="grid grid-cols-7 flex-1 min-h-0 border-l border-t border-gray-300/60 dark:border-gray-600/40"
-        style={{ gridTemplateRows: `auto repeat(6, 1fr)` }}
+        style={{ gridTemplateRows: `auto repeat(6, minmax(5rem, 1fr))` }}
       >
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
           <div

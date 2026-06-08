@@ -240,15 +240,20 @@ export function Insights() {
   }
 
   return (
-    <div className="glass-card rounded-xl px-3 py-2 sm:px-4 sm:py-3 flex items-start gap-2 sm:gap-3">
-      <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-      <div className="flex flex-wrap gap-x-4 sm:gap-x-6 gap-y-1 sm:gap-y-1.5">
+    <div className="glass-card rounded-xl px-3 py-2 sm:px-4 sm:py-3 flex items-center gap-2 sm:gap-3">
+      <Lightbulb className="w-4 h-4 text-amber-500 shrink-0" />
+      {/* Responsive, scrollbar-free at every width:
+       *  - Mobile/tablet: wraps into a tidy multi-line block (no horizontal
+       *    scroll, so no scrollbar) — text wraps so nothing overflows.
+       *  - lg+: a single row; if the tips don't all fit they scroll
+       *    horizontally with the scrollbar hidden (never grows to two rows). */}
+      <div className="flex flex-wrap lg:flex-nowrap items-start lg:items-center gap-x-4 sm:gap-x-6 gap-y-1.5 lg:overflow-x-auto no-scrollbar flex-1 min-w-0">
         {insights.map((insight, i) => (
           <div
             key={i}
-            className={`flex items-start gap-1.5 ${i >= 2 ? 'hidden lg:flex' : ''}`}
+            className="flex items-start lg:items-center gap-1.5 shrink-0 whitespace-normal lg:whitespace-nowrap"
           >
-            <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 mt-1.5 sm:mt-1 rounded-full shrink-0 ${dotMap[insight.type]}`} />
+            <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 mt-1 lg:mt-0 rounded-full shrink-0 ${dotMap[insight.type]}`} />
             {/* Base text is a calm muted gray; only the key value(s) wrapped in
              *  **…** get the semantic accent color, so each tip highlights what
              *  matters without flooding the row with color. */}

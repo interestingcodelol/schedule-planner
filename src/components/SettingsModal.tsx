@@ -378,7 +378,7 @@ export function SettingsModal({ onClose }: Props) {
                   )}
                 </select>
                 <p className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
-                  Used so same-day time off doesn't deduct from your available hours until after your local end-of-work-day.
+                  Used to determine your current day for accruals, paydays, and projections.
                 </p>
               </div>
             </div>
