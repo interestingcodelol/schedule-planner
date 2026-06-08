@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   addMonths,
   differenceInCalendarDays,
@@ -65,26 +65,14 @@ export function ForecastChart({
   fill = false,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const boxRef = useRef<HTMLDivElement>(null)
   const [hoverDate, setHoverDate] = useState<Date | null>(null)
-  const [chartH, setChartH] = useState(DEFAULT_H)
 
-  // In fill mode, match the viewBox height to the container's pixel aspect so
-  // preserveAspectRatio="none" scales x and y by the same factor (no stretch).
-  useEffect(() => {
-    if (!fill) return
-    const el = boxRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      const w = el.clientWidth
-      const h = el.clientHeight
-      if (w > 0 && h > 0) setChartH(Math.max(DEFAULT_H, Math.round((W * h) / w)))
-    })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [fill])
-
-  const H = fill ? chartH : DEFAULT_H
+  // Fixed, width-driven aspect (h-auto): the rendered height follows the card
+  // WIDTH, never the viewport height — so the sparkline can't balloon on a
+  // tall/fullscreen screen (that was the production bug). In fill mode the card
+  // stretches to sit flush with the calendar and the chart is centered in it,
+  // keeping the page short enough to avoid a scrollbar at maximized heights.
+  const H = DEFAULT_H
   const innerH = H - PAD_T - PAD_B
 
   const totalDaysInRange = Math.max(1, differenceInCalendarDays(rangeEnd, today))
@@ -183,13 +171,12 @@ export function ForecastChart({
   const gradId = `forecastGrad-${accentRgb.replace(/[^0-9]/g, '')}`
 
   return (
-    <div className={`px-3 pb-1 ${fill ? 'min-h-[110px] lg:flex-1 lg:min-h-0' : ''}`}>
-      <div ref={boxRef} className={`relative ${fill ? 'h-full' : ''}`}>
+    <div className={`px-3 pb-1 ${fill ? 'lg:flex-1 lg:min-h-0 flex flex-col justify-center' : ''}`}>
+      <div className="relative w-full">
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio={fill ? 'none' : 'xMidYMid meet'}
-          className={`w-full ${fill ? 'h-full' : 'h-auto'} cursor-crosshair touch-none text-gray-500 dark:text-gray-400`}
+          className="w-full h-auto cursor-crosshair touch-none text-gray-500 dark:text-gray-400"
           onPointerMove={onPointerMove}
           onPointerDown={onPointerMove}
           onPointerLeave={onPointerLeave}
