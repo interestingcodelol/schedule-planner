@@ -25,14 +25,19 @@ import { subscribeToCalendarNav } from '../lib/calendarNav'
 import { showToast } from '../lib/toastBus'
 
 export function CalendarView() {
-  const { state, addVacation, removeVacation, updateVacation, addPastAbsence, removePastAbsence, adjustActualHours } = useAppState()
+  const {
+    state,
+    addVacation,
+    removeVacation,
+    updateVacation,
+    addPastAbsence,
+    removePastAbsence,
+    adjustActualHours,
+  } = useAppState()
   const today = parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate)
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(today))
 
-  useEffect(
-    () => subscribeToCalendarNav((date) => setCurrentMonth(startOfMonth(date))),
-    [],
-  )
+  useEffect(() => subscribeToCalendarNav((date) => setCurrentMonth(startOfMonth(date))), [])
 
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentMonth)
@@ -63,12 +68,13 @@ export function CalendarView() {
       const isWorkDay = state.policy.workDaysPerWeek.includes(dow)
       const isHol = isHoliday(state.policy, d)
       if (!isWorkDay || isHol) continue
-      const v = state.plannedVacations.find(
-        (x) => dateStr >= x.startDate && dateStr <= x.endDate,
-      )
+      const v = state.plannedVacations.find((x) => dateStr >= x.startDate && dateStr <= x.endDate)
       if (!v) continue
       const hrs =
-        (v.actualHoursUsed !== undefined ? v.actualHoursUsed / Math.max(1, countWorkDays(parseISO(v.startDate), parseISO(v.endDate), state.policy)) : undefined) ??
+        (v.actualHoursUsed !== undefined
+          ? v.actualHoursUsed /
+            Math.max(1, countWorkDays(parseISO(v.startDate), parseISO(v.endDate), state.policy))
+          : undefined) ??
         v.hoursPerDay ??
         state.policy.hoursPerWorkDay
       if (hrs >= state.policy.hoursPerWorkDay) fullDays++
@@ -82,7 +88,8 @@ export function CalendarView() {
   const monthLabel = (() => {
     const { fullDays, partialDays, totalHours } = monthStats
     if (fullDays === 0 && partialDays === 0) return 'No planned time off this month'
-    const fmtH = (h: number) => (Number.isInteger(h) ? String(h) : (Math.round(h * 100) / 100).toString())
+    const fmtH = (h: number) =>
+      Number.isInteger(h) ? String(h) : (Math.round(h * 100) / 100).toString()
     const totalDays = fullDays + partialDays
     if (partialDays === 0) {
       return `${fullDays} full day${fullDays === 1 ? '' : 's'} off · ${fmtH(totalHours)}h`
@@ -150,7 +157,10 @@ export function CalendarView() {
     if (popoverExisting) {
       updateVacation(popoverExisting.id, {
         hoursPerDay: config.hoursPerDay,
-        actualHoursUsed: config.hoursPerDay === popoverExisting.hoursPerDay ? popoverExisting.actualHoursUsed : undefined,
+        actualHoursUsed:
+          config.hoursPerDay === popoverExisting.hoursPerDay
+            ? popoverExisting.actualHoursUsed
+            : undefined,
         timeOffStart: config.timeOffStart,
         timeOffEnd: config.timeOffEnd,
         hourSource: config.hourSource,
@@ -265,7 +275,8 @@ export function CalendarView() {
               <div className="grid grid-cols-3 gap-1">
                 {Array.from({ length: 12 }, (_, i) => {
                   const isActive = currentMonth.getMonth() === i
-                  const isCurrent = today.getMonth() === i && currentMonth.getFullYear() === today.getFullYear()
+                  const isCurrent =
+                    today.getMonth() === i && currentMonth.getFullYear() === today.getFullYear()
                   return (
                     <button
                       key={i}
@@ -319,7 +330,7 @@ export function CalendarView() {
 
       <div
         className="grid grid-cols-7 flex-1 min-h-0 border-l border-t border-gray-300/60 dark:border-gray-600/40"
-        style={{ gridTemplateRows: `auto repeat(6, minmax(5rem, 1fr))` }}
+        style={{ gridTemplateRows: `auto repeat(6, minmax(var(--calendar-row-min, 5rem), 1fr))` }}
       >
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
           <div

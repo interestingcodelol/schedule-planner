@@ -285,6 +285,10 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
       }
     })
     measurements.push({ name: size.name, ...dimensions })
+    await writeFile(
+      info.outputPath('viewport-measurements.json'),
+      JSON.stringify(measurements, null, 2),
+    )
     expect(dimensions.documentWidth, `${size.name} horizontal overflow`).toBeLessThanOrEqual(
       size.width + 1,
     )

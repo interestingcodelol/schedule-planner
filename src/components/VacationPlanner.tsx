@@ -9,13 +9,7 @@ import {
   getDay,
   subDays,
 } from 'date-fns'
-import {
-  Plus,
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  CalendarSearch,
-} from 'lucide-react'
+import { Plus, AlertTriangle, CheckCircle, XCircle, CalendarSearch } from 'lucide-react'
 import { useAppState } from '../context'
 import { showToast } from '../lib/toastBus'
 import { roundToQuarter, getNowInZone } from '../lib/timeUtils'
@@ -33,7 +27,9 @@ function fmt(n: number): string {
 
 export function VacationPlanner() {
   const { state, addVacation } = useAppState()
-  const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
+  const today = startOfDay(
+    parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate),
+  )
 
   const [whatIfStart, setWhatIfStart] = useState('')
   const [whatIfEnd, setWhatIfEnd] = useState('')
@@ -48,14 +44,16 @@ export function VacationPlanner() {
     const end = parseISO(whatIfEnd)
 
     if (isBefore(end, start)) return { error: 'End date must be on or after start date' }
-    if (isBefore(start, today)) return { error: 'Choose today or a future date. Use the calendar to log past absences.' }
+    if (isBefore(start, today))
+      return { error: 'Choose today or a future date. Use the calendar to log past absences.' }
 
     const daySpan = differenceInDays(end, start)
     if (daySpan > 365) return { error: 'Vacation cannot exceed 1 year' }
 
     const workDays = countWorkDays(start, end, state.policy)
     const rawHours = whatIfHours ? Number(whatIfHours) : state.policy.hoursPerWorkDay
-    if (!Number.isFinite(rawHours) || rawHours < 0.25 || rawHours > state.policy.hoursPerWorkDay) return { error: `Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}` }
+    if (!Number.isFinite(rawHours) || rawHours < 0.25 || rawHours > state.policy.hoursPerWorkDay)
+      return { error: `Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}` }
     const hrsPerDay = roundToQuarter(rawHours)
     const hoursNeeded = workDays * hrsPerDay
     const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
@@ -83,8 +81,7 @@ export function VacationPlanner() {
     const impact = analyzeTripImpact(state, hypotheticalTrip, horizon)
 
     const affordable = impact.tripItselfShortfall === 0 && impact.downstreamShortfall === 0
-    const conflictsLater =
-      impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
+    const conflictsLater = impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
 
     // Walk existing entries chronologically and find the FIRST one whose
     // own affordability goes from OK → short once the proposed trip is
@@ -104,11 +101,7 @@ export function VacationPlanner() {
         plannedVacations: [...state.plannedVacations, hypotheticalTrip],
       }
       const futureExisting = state.plannedVacations
-        .filter(
-          (v) =>
-            v.kind !== 'logged_past' &&
-            !isBefore(parseISO(v.endDate), today),
-        )
+        .filter((v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today))
         .sort((a, b) => a.startDate.localeCompare(b.startDate))
       for (const v of futureExisting) {
         const vStart = parseISO(v.startDate)
@@ -248,9 +241,7 @@ export function VacationPlanner() {
       rawHrs !== undefined &&
       (!Number.isFinite(rawHrs) || rawHrs < 0.25 || rawHrs > state.policy.hoursPerWorkDay)
     ) {
-      setWhatIfError(
-        `Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}`,
-      )
+      setWhatIfError(`Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}`)
       return
     }
     setWhatIfError('')
@@ -277,19 +268,23 @@ export function VacationPlanner() {
         <h2 className="text-lg font-semibold">Time Off Planner</h2>
       </div>
 
-      <div className="px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
+      <div className="planner-form px-5 py-3 border-b border-gray-200/60 dark:border-gray-700/40 space-y-3">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 font-semibold">
             <CalendarSearch className="w-4 h-4 text-white" />
             Preview time off
           </div>
           <p className="text-xs text-gray-400 dark:text-gray-500 leading-snug">
-            Pick a date range to see if you have enough hours — nothing is added to your calendar until you click <span className="font-semibold">Add to calendar</span>.
+            Pick a date range to see if you have enough hours — nothing is added to your calendar
+            until you click <span className="font-semibold">Add to calendar</span>.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="planner-start" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label
+              htmlFor="planner-start"
+              className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium"
+            >
               Start
             </label>
             <input
@@ -302,7 +297,10 @@ export function VacationPlanner() {
             />
           </div>
           <div>
-            <label htmlFor="planner-end" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label
+              htmlFor="planner-end"
+              className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium"
+            >
               End
             </label>
             <input
@@ -319,7 +317,10 @@ export function VacationPlanner() {
         {/* Hour source + partial day */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="sm:col-span-2">
-            <label htmlFor="planner-source" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label
+              htmlFor="planner-source"
+              className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium"
+            >
               Use hours from
             </label>
             <select
@@ -335,7 +336,10 @@ export function VacationPlanner() {
             </select>
           </div>
           <div>
-            <label htmlFor="planner-hours" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label
+              htmlFor="planner-hours"
+              className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium"
+            >
               Hrs/day
             </label>
             <input
@@ -365,7 +369,7 @@ export function VacationPlanner() {
         {whatIfError && <p className="text-red-400 text-sm">{whatIfError}</p>}
 
         {!whatIfResult && !whatIfError && (
-          <div className="rounded-xl border border-dashed border-gray-300/60 dark:border-gray-700/60 px-4 py-3.5 text-center">
+          <div className="planner-empty-preview rounded-xl border border-dashed border-gray-300/60 dark:border-gray-700/60 px-4 py-3.5 text-center">
             <div className="text-xs text-gray-400 dark:text-gray-500">
               Preview appears here once you pick a start and end date.
             </div>
@@ -403,7 +407,10 @@ export function VacationPlanner() {
                     whatIfResult.replenishedDuringTrip > 0 &&
                     whatIfResult.balanceOnStart < whatIfResult.hoursNeeded && (
                       <div className="text-xs font-normal opacity-90 mt-1 leading-snug">
-                        Includes <span className="font-semibold">+{fmt(whatIfResult.replenishedDuringTrip)} hrs</span>{' '}
+                        Includes{' '}
+                        <span className="font-semibold">
+                          +{fmt(whatIfResult.replenishedDuringTrip)} hrs
+                        </span>{' '}
                         added during the trip (e.g. Jan 1 sick grant or a payday).
                       </div>
                     )}
@@ -415,8 +422,8 @@ export function VacationPlanner() {
                   {whatIfResult.conflictsLater && whatIfResult.firstConflict && (
                     <div className="text-xs font-normal opacity-90 mt-1 leading-snug">
                       Adding this would leave your{' '}
-                      <span className="font-semibold">{whatIfResult.firstConflict.label}</span>{' '}
-                      time off{' '}
+                      <span className="font-semibold">{whatIfResult.firstConflict.label}</span> time
+                      off{' '}
                       <span className="font-semibold">
                         {fmt(whatIfResult.firstConflict.shortBy)} hr
                         {whatIfResult.firstConflict.shortBy === 1 ? '' : 's'} short
@@ -456,9 +463,7 @@ export function VacationPlanner() {
                   <div className="font-semibold tabular-nums">
                     {fmt(whatIfResult.balanceOnStart)} hrs
                   </div>
-                  <div className="text-[10px] font-normal opacity-70">
-                    of trip
-                  </div>
+                  <div className="text-[10px] font-normal opacity-70">of trip</div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider font-bold opacity-70">
@@ -467,20 +472,20 @@ export function VacationPlanner() {
                   <div className="font-semibold tabular-nums">
                     {fmt(whatIfResult.balanceAfterTrip)} hrs
                   </div>
-                  <div className="text-[10px] font-normal opacity-70">
-                    remaining
-                  </div>
+                  <div className="text-[10px] font-normal opacity-70">remaining</div>
                 </div>
               </div>
 
-              {!whatIfResult.affordable && !whatIfResult.conflictsLater && whatIfResult.suggestion && (
-                <div className="mt-3 pt-2.5 border-t border-current/15 text-xs">
-                  <span className="opacity-70">Earliest affordable: </span>
-                  <span className="font-bold">
-                    {format(whatIfResult.suggestion, 'EEE, MMM d, yyyy')}
-                  </span>
-                </div>
-              )}
+              {!whatIfResult.affordable &&
+                !whatIfResult.conflictsLater &&
+                whatIfResult.suggestion && (
+                  <div className="mt-3 pt-2.5 border-t border-current/15 text-xs">
+                    <span className="opacity-70">Earliest affordable: </span>
+                    <span className="font-bold">
+                      {format(whatIfResult.suggestion, 'EEE, MMM d, yyyy')}
+                    </span>
+                  </div>
+                )}
 
               {whatIfResult.autoSplit &&
                 whatIfResult.affordable &&
@@ -554,4 +559,3 @@ export function VacationPlanner() {
     </div>
   )
 }
-

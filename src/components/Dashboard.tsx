@@ -67,7 +67,7 @@ export function Dashboard() {
   const daysUntilNext = nextDayOff ? differenceInDays(nextDayOff, today) : null
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="planner-dashboard flex-1 flex flex-col">
       <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 sm:px-6 py-3 shrink-0">
         <div className="glass-card rounded-xl flex items-stretch min-w-0">
           <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 shrink-0">
@@ -208,7 +208,7 @@ export function Dashboard() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col px-4 sm:px-6 pb-5 gap-4">
+      <main className="flex-1 flex flex-col px-4 sm:px-6 pb-2 gap-3">
         <div data-tour="status-cards">
           <StatusCards />
         </div>

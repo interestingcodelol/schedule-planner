@@ -14,7 +14,12 @@ import { differenceInYears } from 'date-fns'
 import { Lock, Unlock } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
 import { useAppState } from '../context'
-import { computeAccrualTier, countWorkDays, getCarryoverPayoutDate, projectBalance } from '../lib/projection'
+import {
+  computeAccrualTier,
+  countWorkDays,
+  getCarryoverPayoutDate,
+  projectBalance,
+} from '../lib/projection'
 import { getHolidayName } from '../lib/holidays'
 import { formatTimeCompact, getNowInZone } from '../lib/timeUtils'
 
@@ -64,7 +69,7 @@ const HOLIDAY_EMOJI: Record<string, string> = {
   'Martin Luther King Jr. Day': '✊',
   "Presidents' Day": '🏛️',
   'Memorial Day': '⭐',
-  'Juneteenth': '✊',
+  Juneteenth: '✊',
   'Independence Day': '🎇',
   'Labor Day': '⚒️',
   'Veterans Day': '🎖️',
@@ -80,7 +85,9 @@ function getHolidayEmoji(name: string): string {
 
 export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   const { state, updateVacation } = useAppState()
-  const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
+  const today = startOfDay(
+    parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate),
+  )
   const isToday = isSameDay(date, today)
   const isCurrentMonth = isSameMonth(date, currentMonth)
   // Today stays editable as planned time off for the entire profile-local day.
@@ -90,21 +97,18 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   const weekNum = getWeek(date)
   const isEvenWeek = weekNum % 2 === 0
 
-  const holidayName = useMemo(
-    () => getHolidayName(state.policy, date),
-    [state.policy, date],
-  )
+  const holidayName = useMemo(() => getHolidayName(state.policy, date), [state.policy, date])
   const isHolidayDay = !!holidayName
 
   const plannedVacation = useMemo(() => {
     const dateStr = format(date, 'yyyy-MM-dd')
-    return state.plannedVacations.find(
-      (v) => dateStr >= v.startDate && dateStr <= v.endDate,
-    )
+    return state.plannedVacations.find((v) => dateStr >= v.startDate && dateStr <= v.endDate)
   }, [date, state.plannedVacations])
   const isPlannedVacation = !!plannedVacation
 
-  const isPartialDay = plannedVacation?.hoursPerDay !== undefined && plannedVacation.hoursPerDay < state.policy.hoursPerWorkDay
+  const isPartialDay =
+    plannedVacation?.hoursPerDay !== undefined &&
+    plannedVacation.hoursPerDay < state.policy.hoursPerWorkDay
 
   const isPayday = useMemo(() => {
     const lastPayday = parseISO(state.profile.lastPaydayDate)
@@ -160,19 +164,24 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   // Emoji/style reflect the pool the time off came from, NOT whether catch-up
   // happened to flip it to logged_past. A passed vacation must not look sick.
   const pastEmoji = plannedVacation ? pastEntryEmoji(plannedVacation) : '✓'
-  const isSickSourced = plannedVacation
-    ? dominantSource(plannedVacation) === 'sick'
-    : false
+  const isSickSourced = plannedVacation ? dominantSource(plannedVacation) === 'sick' : false
   const deductHours =
     (plannedVacation?.actualHoursUsed !== undefined
-      ? plannedVacation.actualHoursUsed / Math.max(1, countWorkDays(parseISO(plannedVacation.startDate), parseISO(plannedVacation.endDate), state.policy))
+      ? plannedVacation.actualHoursUsed /
+        Math.max(
+          1,
+          countWorkDays(
+            parseISO(plannedVacation.startDate),
+            parseISO(plannedVacation.endDate),
+            state.policy,
+          ),
+        )
       : undefined) ??
     plannedVacation?.hoursPerDay ??
     state.policy.hoursPerWorkDay
   // Pools floor at zero, so shortfall must come from the projection ledger.
   const isUnaffordable =
-    isPlannedVacation && !isWeekend && !isHolidayDay &&
-    (projection?.shortfall ?? 0) > 0.001
+    isPlannedVacation && !isWeekend && !isHolidayDay && (projection?.shortfall ?? 0) > 0.001
 
   const isLocked = !!plannedVacation?.locked
   const canPlanNew = !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
@@ -200,13 +209,19 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     }
 
     if (isPayday && !isPast) {
-      parts.push(`💰 Payday! +${fmt(state.policy.hoursPerWorkDay > 0 ? (() => {
-        // Use the same calendar-anniversary tenure + tier helpers as the
-        // projection that produces the balance line below, so the two tooltip
-        // figures can't disagree near a service anniversary.
-        const yos = differenceInYears(date, parseISO(state.profile.hireDate))
-        return computeAccrualTier(state.policy, yos).hoursPerPayPeriod
-      })() : 0)} hrs vacation`)
+      parts.push(
+        `💰 Payday! +${fmt(
+          state.policy.hoursPerWorkDay > 0
+            ? (() => {
+                // Use the same calendar-anniversary tenure + tier helpers as the
+                // projection that produces the balance line below, so the two tooltip
+                // figures can't disagree near a service anniversary.
+                const yos = differenceInYears(date, parseISO(state.profile.hireDate))
+                return computeAccrualTier(state.policy, yos).hoursPerPayPeriod
+              })()
+            : 0,
+        )} hrs vacation`,
+      )
     }
 
     if (carryoverPayout && !isPast) {
@@ -239,22 +254,33 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 
     if (isPlannedVacation && !isPast) {
       if (isPartialDay) {
-        parts.push(`⏰ Partial day off (${fmt(deductHours)} hrs) — ${plannedVacation?.note || 'appointment'}`)
+        parts.push(
+          `⏰ Partial day off (${fmt(deductHours)} hrs) — ${plannedVacation?.note || 'appointment'}`,
+        )
       } else if (dow === 5) {
         parts.push('🎉 Friday off — long weekend!')
       } else if (dow === 1) {
         parts.push('😎 Monday off — extended weekend!')
       } else {
-        parts.push(`🏖️ Planned time off${plannedVacation?.note ? ` — ${plannedVacation.note}` : ''}`)
+        parts.push(
+          `🏖️ Planned time off${plannedVacation?.note ? ` — ${plannedVacation.note}` : ''}`,
+        )
       }
       // Multi-day streak context
       if (plannedVacation && plannedVacation.startDate !== plannedVacation.endDate) {
-        const days = Math.round((parseISO(plannedVacation.endDate).getTime() - parseISO(plannedVacation.startDate).getTime()) / 86400000) + 1
+        const days =
+          Math.round(
+            (parseISO(plannedVacation.endDate).getTime() -
+              parseISO(plannedVacation.startDate).getTime()) /
+              86400000,
+          ) + 1
         if (days >= 7) parts.push('🌴 A full week+ vacation!')
         else if (days >= 4) parts.push('✨ Mini vacation!')
       }
       if (isUnaffordable) {
-        parts.push(`⚠️ Not enough hours — ${fmt(projection?.shortfall ?? 0)} hrs of planned time off cannot be covered by this date`)
+        parts.push(
+          `⚠️ Not enough hours — ${fmt(projection?.shortfall ?? 0)} hrs of planned time off cannot be covered by this date`,
+        )
       }
     }
 
@@ -280,7 +306,8 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   // Cell background
   let bgClass = ''
   if (isHolidayDay && isCurrentMonth) {
-    bgClass = 'bg-gradient-to-br from-amber-50/60 to-orange-50/40 dark:from-amber-950/25 dark:to-orange-950/15'
+    bgClass =
+      'bg-gradient-to-br from-amber-50/60 to-orange-50/40 dark:from-amber-950/25 dark:to-orange-950/15'
   } else if (isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth) {
     if (isLoggedPast) {
       // Rose tint only for sick-sourced absences; other logged time off (passed
@@ -292,16 +319,20 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     } else if (isPast) {
       bgClass = 'bg-blue-100/30 dark:bg-blue-900/10'
     } else if (isUnaffordable) {
-      bgClass = 'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
+      bgClass =
+        'bg-gradient-to-br from-red-50 to-red-100/50 dark:from-red-950/30 dark:to-red-900/20'
     } else if (isPartialDay) {
-      bgClass = 'bg-gradient-to-br from-blue-50/50 to-sky-50/30 dark:from-blue-950/20 dark:to-sky-950/10'
+      bgClass =
+        'bg-gradient-to-br from-blue-50/50 to-sky-50/30 dark:from-blue-950/20 dark:to-sky-950/10'
     } else {
       bgClass = 'bg-blue-50 dark:bg-blue-950/30'
     }
   } else if (carryoverPayout && carryoverPayout.amount > 0 && isCurrentMonth && !isPast) {
-    bgClass = 'bg-gradient-to-br from-amber-50/40 to-yellow-50/30 dark:from-amber-950/20 dark:to-yellow-950/15'
+    bgClass =
+      'bg-gradient-to-br from-amber-50/40 to-yellow-50/30 dark:from-amber-950/20 dark:to-yellow-950/15'
   } else if (isPayday && isCurrentMonth && !isPast) {
-    bgClass = 'bg-gradient-to-br from-emerald-50/30 to-green-50/20 dark:from-emerald-950/15 dark:to-green-950/10'
+    bgClass =
+      'bg-gradient-to-br from-emerald-50/30 to-green-50/20 dark:from-emerald-950/15 dark:to-green-950/10'
   } else if (isWeekend && isCurrentMonth) {
     bgClass = 'bg-gray-100/50 dark:bg-white/[0.02]'
   } else if (isEvenWeek && isCurrentMonth) {
@@ -327,7 +358,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={`
-        group relative p-1.5 min-h-[64px] lg:min-h-[5rem] border-r border-b
+        calendar-day group relative p-1.5 min-h-[64px] lg:min-h-[5rem] border-r border-b
         ${borderClass}
         ${bgClass}
         ${!isCurrentMonth ? 'opacity-[0.08]' : ''}
@@ -376,7 +407,10 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
             />
           )}
           {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && isPast && (
-            <span className="text-xs leading-none" title={isLoggedPast ? 'Logged absence' : 'Past time off'}>
+            <span
+              className="text-xs leading-none"
+              title={isLoggedPast ? 'Logged absence' : 'Past time off'}
+            >
               {pastEmoji}
             </span>
           )}
@@ -404,22 +438,30 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 
       {/* Time-off indicator — centered in cell */}
       {isPlannedVacation && !isWeekend && !isHolidayDay && isCurrentMonth && !isPast && (
-        <div className="absolute inset-x-2 top-7 sm:top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
+        <div className="calendar-time-indicator absolute inset-x-2 top-7 sm:top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
           {isPartialDay ? (
             <>
-              <div className={`hidden sm:block text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
+              <div
+                className={`calendar-time-detail hidden sm:block text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}
+              >
                 {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
                   ? `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`
                   : `${fmt(deductHours)}h`}
               </div>
-              <div className={`hidden sm:block w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`} />
-              <div className={`text-[10px] sm:text-xs mt-0.5 font-bold whitespace-nowrap ${isUnaffordable ? 'text-red-400' : 'text-sky-300'}`}>
+              <div
+                className={`calendar-time-detail hidden sm:block w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`}
+              />
+              <div
+                className={`text-[10px] sm:text-xs mt-0.5 font-bold whitespace-nowrap ${isUnaffordable ? 'text-red-400' : 'text-sky-300'}`}
+              >
                 {fmt(deductHours)}h<span className="hidden sm:inline"> off</span>
               </div>
             </>
           ) : (
             <>
-              <div className={`w-6 h-[3px] rounded-full ${isUnaffordable ? 'bg-red-400' : 'bg-blue-400'}`} />
+              <div
+                className={`w-6 h-[3px] rounded-full ${isUnaffordable ? 'bg-red-400' : 'bg-blue-400'}`}
+              />
             </>
           )}
         </div>

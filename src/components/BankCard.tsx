@@ -117,7 +117,7 @@ export function BankCard({ embedded = false }: { embedded?: boolean }) {
 
       {open && (
         <div
-          className={`absolute top-full mt-1.5 z-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up ${embedded ? 'left-0 md:left-auto md:right-0 xl:left-0 xl:right-auto w-[min(20rem,calc(100vw-2rem))]' : 'left-0 w-full'}`}
+          className={`absolute top-full mt-1.5 z-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up ${embedded ? 'left-0 sm:left-auto sm:right-0 md:left-0 md:right-auto w-[min(20rem,calc(100vw-2rem))]' : 'left-0 w-full'}`}
         >
           <div className="flex gap-1.5">
             <input
