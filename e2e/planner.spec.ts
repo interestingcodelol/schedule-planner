@@ -269,6 +269,7 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await expect(page.getByRole('table')).toBeVisible()
     const breakdownBounds = await page.getByRole('table').locator('..').boundingBox()
     expect(breakdownBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(breakdownBounds!.y).toBeGreaterThanOrEqual(0)
     expect(breakdownBounds!.x + breakdownBounds!.width).toBeLessThanOrEqual(size.width + 1)
     expect(breakdownBounds!.y + breakdownBounds!.height).toBeLessThanOrEqual(size.height + 1)
     await page.screenshot({
