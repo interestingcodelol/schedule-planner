@@ -275,6 +275,9 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
       path: info.outputPath(`${size.name}-balance-details.png`),
       animations: 'disabled',
     })
+    await page.getByRole('region', { name: 'Balance breakdown', exact: true }).focus()
+    await page.keyboard.press('End')
+    await expect(page.getByText(/Sick leave limit:/)).toBeInViewport()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('table')).not.toBeVisible()
     await expect(balanceToggle).toBeFocused()

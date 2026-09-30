@@ -109,6 +109,9 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
             </div>
           </summary>
           <div
+            role="region"
+            aria-label="Balance breakdown"
+            tabIndex={0}
             style={{ maxHeight: detailsMaxHeight }}
             className="absolute left-0 top-full mt-1 w-[min(40rem,calc(100vw-2rem))] max-h-[min(70dvh,calc(100dvh-12rem))] overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-xl"
           >
