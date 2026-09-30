@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 import { X, Clock, CalendarOff, CalendarCheck, Pencil, History } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
@@ -163,6 +164,9 @@ export function DayPopover({
 
   useEffect(() => {
     modalRef.current?.focus()
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previousOverflow }
   }, [])
 
   const handleSave = () => {
@@ -241,7 +245,7 @@ export function DayPopover({
     })()
     const deductPoolLabel =
       existing.hourSource === 'any' ? 'bank/vacation/sick' : existing.hourSource
-    return (
+    return createPortal(
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
         onKeyDown={stopArrowPropagation}
@@ -355,11 +359,12 @@ export function DayPopover({
             </div>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body,
     )
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onKeyDown={stopArrowPropagation}
@@ -618,6 +623,7 @@ export function DayPopover({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

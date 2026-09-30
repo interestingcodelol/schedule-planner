@@ -16,7 +16,8 @@ function fixture(): AppState {
   }
 }
 async function capture(page: Page, info: TestInfo, name: string) {
-  await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true, animations: 'disabled' })
+  const viewportOnly = /dialog|chat|settings/.test(name)
+  await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: !viewportOnly, animations: 'disabled' })
   const widths = await page.evaluate(() => ({ content: document.documentElement.scrollWidth, viewport: window.innerWidth }))
   expect(widths.content, `${name} must not overflow horizontally`).toBeLessThanOrEqual(widths.viewport + 1)
 }
@@ -48,6 +49,9 @@ test('balance, editing, dialog, bank, planner and chat visual smoke', async ({ p
     const bounds = await page.getByLabel('Off from', {exact:true}).boundingBox()
     expect(bounds?.width).toBeGreaterThan(200)
   }
+  const editorBounds = await editor.boundingBox()
+  expect(editorBounds?.y).toBeGreaterThanOrEqual(0)
+  expect((editorBounds?.y ?? 0) + (editorBounds?.height ?? 0)).toBeLessThanOrEqual(page.viewportSize()!.height)
   await capture(page, info, '03-partial-day-dialog')
   await editor.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(editor).not.toBeVisible()
