@@ -4,6 +4,7 @@ import {
   hasV2MigrationInIdb,
   loadLegacyStateFromIdb,
   loadStateFromIdb,
+  preserveStateForRecoveryInIdb,
   saveStateToIdb,
 } from '../indexedDb'
 import type { AppState } from '../types'
@@ -21,6 +22,7 @@ beforeEach(() => {
   records.clear()
   vi.stubGlobal('indexedDB', {
     open: vi.fn(() => request({
+      close: vi.fn(),
       objectStoreNames: { contains: () => true },
       transaction: () => {
         const tx = {
@@ -65,5 +67,40 @@ describe('IndexedDB schema isolation', () => {
     expect(await hasV2MigrationInIdb()).toBe(true)
     records.set('app-state', { version: 1 }) // stale tab writes after reset
     expect(await hasV2MigrationInIdb()).toBe(true)
+  })
+
+  it('retains separate exact recovery values without overwriting the active or earlier recovery record', async () => {
+    const broken = { version: 2, plannedVacations: [null], preserved: 'first' }
+    const another = { version: 2, preserved: 'second' }
+    records.set('app-state-v2', broken)
+    await preserveStateForRecoveryInIdb(broken)
+    await preserveStateForRecoveryInIdb(another)
+    expect(records.get('app-state-v2')).toEqual(broken)
+    expect([...records.entries()].filter(([key]) => key.startsWith('app-state-v2-recovery-')).map(([, value]) => value)).toEqual([broken, another])
+  })
+
+  it('rejects unavailable database reads instead of reporting a missing record', async () => {
+    const error = new DOMException('Database unavailable', 'UnknownError')
+    vi.stubGlobal('indexedDB', { open: () => {
+      const req = { error, onerror: null as (() => void) | null }
+      queueMicrotask(() => req.onerror?.())
+      return req
+    } })
+    await expect(loadStateFromIdb()).rejects.toBe(error)
+    await expect(loadLegacyStateFromIdb()).rejects.toBe(error)
+    await expect(hasV2MigrationInIdb()).rejects.toBe(error)
+  })
+
+  it('rejects a failed record request instead of reporting a missing record', async () => {
+    const error = new DOMException('Read interrupted', 'UnknownError')
+    vi.stubGlobal('indexedDB', { open: () => request({
+      close: vi.fn(),
+      transaction: () => ({ objectStore: () => ({ get: () => {
+        const req = { error, onerror: null as (() => void) | null }
+        queueMicrotask(() => req.onerror?.())
+        return req
+      } }) }),
+    }) })
+    await expect(loadLegacyStateFromIdb()).rejects.toBe(error)
   })
 })

@@ -15,7 +15,7 @@ function versionPlugin(): Plugin {
       const outDir = options.dir || 'dist'
       writeFileSync(
         resolve(outDir, 'version.json'),
-        JSON.stringify({ v: BUILD_ID }),
+        JSON.stringify({ v: BUILD_ID, commit: process.env.GITHUB_SHA ?? null }),
       )
     },
   }

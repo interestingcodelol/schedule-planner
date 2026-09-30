@@ -106,9 +106,12 @@ describe('App balance lifecycle', () => {
  })
  it('syncs policy-only changes from another tab without echo-saving', async () => {
    await mount()
-   const incoming = {...context.state,policy:{...context.state.policy,hoursPerWorkDay:7.5}}
+   const incoming = {...context.state,savedAt:Date.now()+1,policy:{...context.state.policy,hoursPerWorkDay:7.5}}
+   // A real storage event arrives after the other tab has written the key.
+   localStorage.setItem('schedule-planner-state-v2',JSON.stringify(incoming))
    act(() => window.dispatchEvent(new StorageEvent('storage',{key:'schedule-planner-state-v2',newValue:JSON.stringify(incoming)})))
    expect(context.state.policy.hoursPerWorkDay).toBe(7.5)
+   expect(JSON.parse(localStorage.getItem('schedule-planner-state-v2')!).savedAt).toBe(incoming.savedAt)
  })
 
  it('Undo of a finalized shortage restores its actual draw without creating debt', async () => {

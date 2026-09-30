@@ -74,3 +74,13 @@ Screenshots cover the dashboard, balance details, partial-day editor, bank manag
 | Help/update | Changelog open/close; tour Next/Previous/Skip | Release notes updated; deployment/update-banner end-to-end not exercised |
 
 No real PTO records were accessed. Clear-all and production update/deployment were not executed. The final modified-build desktop/mobile screenshots were reviewed after the fixes above. Production publication still requires the user to approve this preview.
+
+### Release preservation checks
+
+The v2 release waits for both browser stores before opening an editable planner or setup. An unavailable database is an error, not an empty dataset: loading pauses with a retry screen. This prevents an older local copy from being permanently selected during a temporary IndexedDB failure. Invalid nested records are rejected before arbitration; an unknown future schema blocks downgrade loading. Unreadable copies are preserved separately before any repair, and repair is withheld if the preservation write fails.
+
+The original v1 localStorage keys and IndexedDB record remain untouched during upgrade. Current records, custom policy, notes, locked plans, absence history, bank entries and backup preferences migrate from the newest valid snapshot. Synthetic browser tests exercise both timestamp directions, reload, original preservation, unreadable-data recovery and manual legacy-backup import. Pages deployment verifies its exact commit and repeats these tests in disposable browser contexts against the published app.
+
+Refresh older open tabs before editing after the upgrade. Old builds write their isolated v1 records; they cannot safely participate in the v2 daily ledger. Their records remain available, but edits in old and new builds are not automatically merged. A code rollback to the pre-v2 app likewise shows its retained v1 snapshot, not later v2 edits. The v2 stores must be retained for forward recovery; do not clear storage or downgrade a v2 backup to bypass its schema guard.
+
+Browser/device storage deletion, browser eviction and simultaneous conflicting edits cannot be guaranteed against by a static app. Exported backups remain the portable recovery mechanism. No real user records are used for release verification.

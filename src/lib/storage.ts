@@ -1,5 +1,5 @@
 import type { AppState } from './types'
-import { loadStateFromIdb, loadLegacyStateFromIdb, hasV2MigrationInIdb, saveStateToIdb, clearIdbState } from './indexedDb'
+import { loadStateFromIdb, loadLegacyStateFromIdb, hasV2MigrationInIdb, preserveStateForRecoveryInIdb, saveStateToIdb, clearIdbState } from './indexedDb'
 import { showToast } from './toastBus'
 
 const STORAGE_KEY = 'schedule-planner-state-v2'
@@ -10,6 +10,15 @@ const LAST_EXPORT_KEY = 'schedule-planner-last-export'
  *  upgrade logic) so the constant lives in one place. */
 export const CURRENT_VERSION = 2
 const BACKUP_TYPE = 'schedule-planner-backup'
+
+/** The browser may still contain data, so setup must not overwrite it. A retry
+ * can recover from transient storage errors without committing a migration. */
+export class StorageRecoveryError extends Error {
+  constructor(message = 'Saved data could not be safely loaded. Retry before making changes.') {
+    super(message)
+    this.name = 'StorageRecoveryError'
+  }
+}
 
 declare const __BUILD_ID__: string
 
@@ -42,6 +51,14 @@ function readLocal(key: string): string | null {
   } catch {
     warnStorageFailure('unavailable')
     return null
+  }
+}
+
+function readLocalForHydration(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    throw new StorageRecoveryError('Browser storage is unavailable. Restore storage access, then retry loading your data.')
   }
 }
 
@@ -84,7 +101,9 @@ function newest(states: (AppState | null)[]): AppState | null {
 export function saveState(state: AppState): void {
   // The current code owns the v2 ledger semantics, even when setup or import
   // supplied a legacy version number. Never write to either legacy store.
-  const stamped: AppState = { ...state, version: CURRENT_VERSION, savedAt: Date.now() }
+  const current = parseStoredState(readLocal(STORAGE_KEY))
+  const savedAt = Math.max(Date.now(), (current?.savedAt ?? 0) + 1)
+  const stamped: AppState = { ...state, version: CURRENT_VERSION, savedAt }
   writeLocalSnapshot(stamped)
   saveStateToIdb(stamped).catch(() => {})
 }
@@ -106,53 +125,103 @@ export function clearState(): void {
  * once, only while neither v2 store nor migration/reset marker exists. A stale
  * pre-ledger tab can keep writing v1 without overwriting or re-importing v2. */
 export async function loadStateAsync(): Promise<AppState | null> {
+  try {
+    return await loadStateForHydration()
+  } catch (error) {
+    if (error instanceof StorageRecoveryError) throw error
+    throw new StorageRecoveryError('The browser database could not be read. Close other Schedule Planner tabs, then retry loading your data.')
+  }
+}
+
+async function loadStateForHydration(): Promise<AppState | null> {
   const idbRaw = await loadStateFromIdb()
-  const localRaw = readLocal(STORAGE_KEY)
+  const localRaw = readLocalForHydration(STORAGE_KEY)
+  // A newer app's schema is not a damaged copy to repair from an older one.
+  // Preserve both stores until compatible code can interpret that snapshot.
+  if (hasUnsupportedVersion(idbRaw) || hasUnsupportedStoredVersion(localRaw)) {
+    throw new StorageRecoveryError('Saved data was created by a newer Schedule Planner version. Update the app before loading it.')
+  }
   const localState = parseStoredState(localRaw)
   const idbState = idbRaw && isPlausibleAppState(idbRaw) ? idbRaw : null
   const current = newest([localState, idbState])
   if (current) {
+    if (localRaw !== null && !localState) preserveLocalForRecovery(localRaw)
+    if (idbRaw !== null && !idbState) {
+      await preserveStateForRecoveryInIdb(idbRaw)
+      if (readLocalForHydration(STORAGE_KEY) !== localRaw) return loadStateAsync()
+    }
     if (current !== localState) writeLocalSnapshot(current)
+    const selectedLocalRaw = readLocalForHydration(STORAGE_KEY)
     if (!idbState || current !== idbState &&
       (current.savedAt ?? 0) > (idbState.savedAt ?? 0)) {
       await saveStateToIdb(current)
+      if (readLocalForHydration(STORAGE_KEY) !== selectedLocalRaw) return loadStateAsync()
     }
     return current
   }
   // Even an unreadable/unsupported v2 record must not silently restore v1.
-  if (localRaw !== null || idbRaw !== null || readLocal(MIGRATION_KEY) !== null ||
-      await hasV2MigrationInIdb()) return null
+  if (localRaw !== null || idbRaw !== null) {
+    throw new StorageRecoveryError('Saved data could not be read safely. Your stored copies have been kept for recovery.')
+  }
+  if (readLocalForHydration(MIGRATION_KEY) !== null || await hasV2MigrationInIdb()) return null
 
   const legacyIdbRaw = await loadLegacyStateFromIdb()
+  const legacyLocalRaw = LEGACY_STORAGE_KEYS.map(readLocalForHydration)
   const legacyIdb = legacyIdbRaw && isPlausibleAppState(legacyIdbRaw) ? legacyIdbRaw : null
   const legacy = newest([
-    ...LEGACY_STORAGE_KEYS.map((key) => parseStoredState(readLocal(key))),
+    ...legacyLocalRaw.map(parseStoredState),
     legacyIdb,
   ])
-  if (!legacy) return null
+  if (!legacy) {
+    if (legacyIdbRaw !== null || legacyLocalRaw.some((raw) => raw !== null)) {
+      throw new StorageRecoveryError('Existing saved data could not be read safely. Your original data has been kept for recovery.')
+    }
+    return null
+  }
 
   // Another tab may have initialized v2 while the legacy IDB read was pending.
-  if (readLocal(STORAGE_KEY) !== null || readLocal(MIGRATION_KEY) !== null ||
-      await hasV2MigrationInIdb()) return loadStateAsync()
+  const migratedWhileReading = await hasV2MigrationInIdb()
+  if (migratedWhileReading || readLocalForHydration(STORAGE_KEY) !== null ||
+      readLocalForHydration(MIGRATION_KEY) !== null ||
+      LEGACY_STORAGE_KEYS.some((key, index) => readLocalForHydration(key) !== legacyLocalRaw[index])) return loadStateAsync()
   const promoted = { ...legacy, version: CURRENT_VERSION }
   writeLocalSnapshot(promoted)
+  const promotedLocalRaw = readLocalForHydration(STORAGE_KEY)
   await saveStateToIdb(promoted)
+  if (readLocalForHydration(STORAGE_KEY) !== promotedLocalRaw) return loadStateAsync()
   return promoted
 }
 
-/** Cheap structural check used both on load and after IDB hydration. Catches
- *  corrupted/truncated state before it reaches the rest of the app. */
+function hasUnsupportedVersion(value: unknown): boolean {
+  return !!value && typeof value === 'object' &&
+    typeof (value as { version?: unknown }).version === 'number' &&
+    (value as { version: number }).version > CURRENT_VERSION
+}
+
+function hasUnsupportedStoredVersion(raw: string | null): boolean {
+  if (!raw) return false
+  try {
+    return hasUnsupportedVersion(JSON.parse(raw))
+  } catch {
+    return false
+  }
+}
+
+function preserveLocalForRecovery(raw: string): void {
+  try {
+    const suffix = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+    localStorage.setItem(`${STORAGE_KEY}-recovery-${Date.now()}-${suffix}`, raw)
+  } catch {
+    throw new StorageRecoveryError('An unreadable saved copy could not be preserved. Free browser storage, then retry; your original data is unchanged.')
+  }
+}
+
+/** Validate before arbitration as well as hydration. A shallow shape check can
+ * promote a newer broken record over the only usable copy in the other store.
+ * The import validator allows fields introduced by additive migrations to be
+ * missing, while checking every present record consumed by the app. */
 function isPlausibleAppState(value: unknown): value is AppState {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
-  // Daily booked balances are semantically incompatible with old builds.
-  // Storage namespaces isolate those builds; reject unknown future schemas.
-  if (typeof v.version !== 'number' || !Number.isInteger(v.version) ||
-      v.version < 1 || v.version > CURRENT_VERSION) return false
-  if (!v.profile || typeof v.profile !== 'object') return false
-  if (!v.policy || typeof v.policy !== 'object') return false
-  if (!Array.isArray(v.plannedVacations)) return false
-  return true
+  return validateImportedState(value)
 }
 
 const TAB_ID =
@@ -170,7 +239,15 @@ export function subscribeToCrossTabUpdates(
     if (e.key !== STORAGE_KEY || !e.newValue) return
     try {
       const parsed = JSON.parse(e.newValue)
-      if (isPlausibleAppState(parsed)) onUpdate(parsed)
+      if (!isPlausibleAppState(parsed)) return
+      // Storage events are queued; a newer local write (or reset) may already
+      // exist by delivery time. Never let that stale event rewind this tab.
+      const localRaw = readLocal(STORAGE_KEY)
+      const localState = parseStoredState(localRaw)
+      if (localState && (parsed.savedAt ?? 0) <= (localState.savedAt ?? 0) &&
+          JSON.stringify(parsed) !== JSON.stringify(localState)) return
+      if (localRaw === null && readLocal(MIGRATION_KEY) !== null) return
+      onUpdate(parsed)
     } catch {
       /* ignore — corrupted incoming write */
     }
@@ -311,7 +388,7 @@ export function parseImportedBackup(raw: string): ParsedBackup {
 }
 
 export function validateImportedState(data: unknown): data is AppState {
-  if (typeof data !== 'object' || data === null) return false
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false
   const obj = data as Record<string, unknown>
 
   if (typeof obj.version !== 'number' || !Number.isInteger(obj.version) || obj.version < 1 || obj.version > CURRENT_VERSION) return false
@@ -319,6 +396,8 @@ export function validateImportedState(data: unknown): data is AppState {
   // omit it (migration doesn't backfill theme, so require it here as before),
   // but a garbage value must be rejected rather than imported and crashing.
   if (obj.theme !== 'light' && obj.theme !== 'dark') return false
+  if (obj.showTour !== undefined && typeof obj.showTour !== 'boolean') return false
+  if (obj.savedAt !== undefined && !isNonnegativeFinite(obj.savedAt)) return false
   if (!Array.isArray(obj.plannedVacations)) return false
 
   // Each planned vacation must be a well-formed object so the rest of the app
@@ -327,6 +406,10 @@ export function validateImportedState(data: unknown): data is AppState {
     if (typeof v !== 'object' || v === null) return false
     const pv = v as Record<string, unknown>
     if (typeof pv.id !== 'string') return false
+    for (const key of ['note', 'customEmoji', 'timeOffStart', 'timeOffEnd']) {
+      if (pv[key] !== undefined && typeof pv[key] !== 'string') return false
+    }
+    if (pv.locked !== undefined && typeof pv.locked !== 'boolean') return false
     if (typeof pv.startDate !== 'string' || !isValidIsoDate(pv.startDate)) return false
     if (typeof pv.endDate !== 'string' || !isValidIsoDate(pv.endDate)) return false
     if (pv.endDate < pv.startDate) return false
@@ -363,11 +446,36 @@ export function validateImportedState(data: unknown): data is AppState {
     const bank = entry as Record<string, unknown>
     if (typeof bank.id !== 'string' || typeof bank.date !== 'string' || !isValidIsoDate(bank.date)) return false
     if (typeof bank.hours !== 'number' || !Number.isFinite(bank.hours)) return false
+    if (bank.note !== undefined && typeof bank.note !== 'string') return false
     if (bank.appliedToBalance !== undefined && typeof bank.appliedToBalance !== 'boolean') return false
   }
 
+  // History is optional in older snapshots, but malformed rows would crash
+  // reconciliation or the history UI after the snapshot had been promoted.
+  if (obj.catchUpHistory !== undefined && !Array.isArray(obj.catchUpHistory)) return false
+  for (const entry of (obj.catchUpHistory ?? []) as unknown[]) {
+    if (!entry || typeof entry !== 'object') return false
+    const history = entry as Record<string, unknown>
+    if (typeof history.ranOn !== 'string' || !isValidIsoDate(history.ranOn) ||
+        typeof history.syncedTo !== 'string' || !isValidIsoDate(history.syncedTo) ||
+        typeof history.summary !== 'string' || !Array.isArray(history.events)) return false
+    for (const event of history.events) {
+      if (!event || typeof event !== 'object') return false
+      const row = event as Record<string, unknown>
+      if (typeof row.date !== 'string' || !isValidIsoDate(row.date) ||
+          typeof row.type !== 'string' || typeof row.label !== 'string' ||
+          !['vacation', 'sick', 'bank'].includes(row.pool as string) ||
+          typeof row.delta !== 'number' || !Number.isFinite(row.delta)) return false
+    }
+  }
+
   const profile = obj.profile as Record<string, unknown> | undefined
-  if (!profile) return false
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return false
+  if (typeof profile.displayName !== 'string') return false
+  if (profile.timezone !== undefined && typeof profile.timezone !== 'string') return false
+  if (profile.lastExportDate !== undefined && typeof profile.lastExportDate !== 'string') return false
+  if (profile.backupRemindersDisabled !== undefined && typeof profile.backupRemindersDisabled !== 'boolean') return false
+  if (profile.backupReminderDays !== undefined && !isNonnegativeFinite(profile.backupReminderDays)) return false
   if (typeof profile.hireDate !== 'string' || !isValidIsoDate(profile.hireDate)) return false
   if (typeof profile.currentVacationHours !== 'number' || !isFinite(profile.currentVacationHours)) return false
   if (typeof profile.currentSickHours !== 'number' || !isFinite(profile.currentSickHours)) return false
@@ -388,13 +496,15 @@ export function validateImportedState(data: unknown): data is AppState {
   }
 
   const policy = obj.policy as Record<string, unknown> | undefined
-  if (!policy) return false
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return false
+  if (policy.hideBankHours !== undefined && typeof policy.hideBankHours !== 'boolean') return false
   if (!Array.isArray(policy.accrualTiers) || policy.accrualTiers.length === 0) return false
   // Each accrual tier must have finite minYears/hoursPerPayPeriod and a
   // number|null maxYears, or computeAccrualTier produces NaN balances.
   for (const t of policy.accrualTiers) {
     if (typeof t !== 'object' || t === null) return false
     const tier = t as Record<string, unknown>
+    if (tier.label !== undefined && typeof tier.label !== 'string') return false
     if (typeof tier.minYears !== 'number' || !isFinite(tier.minYears)) return false
     if (typeof tier.hoursPerPayPeriod !== 'number' || !isFinite(tier.hoursPerPayPeriod)) return false
     if (

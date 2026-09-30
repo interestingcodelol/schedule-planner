@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppState, BankHoursEntry, PlannedVacation } from './lib/types'
 import {
-  loadState,
   loadStateAsync,
   saveState,
   clearState,
@@ -78,48 +77,33 @@ function balancesChanged(
   )
 }
 
-function getInitialState(): { state: AppState | null; isDemo: boolean } {
-  const loaded = loadState()
-  if (loaded) {
-    const migrated = migrateState(loaded)
-    const reconciled = reconcile(migrated)
-    return {
-      state: reconciled,
-      isDemo: loaded.profile.displayName === 'Demo User',
-    }
-  }
-  return { state: null, isDemo: false }
-}
-
 export default function App() {
-  const [{ state, isDemo }, setAppData] = useState(getInitialState)
-  // The last snapshot we've already persisted. Seeded with the initial state so
-  // the mount-time save effect does NOT re-stamp savedAt with a fresh timestamp
-  // on every app open (which would defeat loadStateAsync's savedAt arbitration
-  // and let a stale store win). Cross-tab updates also point this at the
-  // incoming snapshot to suppress an echo-save loop between tabs.
-  const lastPersistedRef = useRef<AppState | null>(state)
-  const initialHydrationRef = useRef(state)
+  const [{ state, isDemo }, setAppData] = useState<{ state: AppState | null; isDemo: boolean }>({ state: null, isDemo: false })
+  const [hydration, setHydration] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [hydrationAttempt, setHydrationAttempt] = useState(0)
+  const [hydrationError, setHydrationError] = useState('')
+  const lastPersistedRef = useRef<AppState | null>(null)
 
   useEffect(() => {
-    loadStateAsync().then((idbState) => {
-      if (idbState) {
-        setAppData((prev) => {
-          if (prev.state) {
-            // A fresher IDB snapshot may win after synchronous localStorage
-            // render. Apply it only while that initial snapshot is untouched;
-            // never overwrite an edit made while async hydration was pending.
-            if (prev.state !== initialHydrationRef.current) return prev
-            if ((idbState.savedAt ?? 0) <= (prev.state.savedAt ?? 0)) return prev
-          }
-          return {
-            state: reconcile(migrateState(idbState)),
-            isDemo: idbState.profile.displayName === 'Demo User',
-          }
-        })
+    let active = true
+    loadStateAsync().then((loaded) => {
+      if (!active) return
+      const restored = loaded ? reconcile(migrateState(loaded)) : null
+      setAppData(prev => {
+        // A different tab may have saved while the asynchronous mirror write
+        // was pending. Never replace its newer storage event with our read.
+        if (prev.state && (!restored || (prev.state.savedAt ?? 0) >= (restored.savedAt ?? 0))) return prev
+        return { state: restored, isDemo: loaded?.profile.displayName === 'Demo User' }
+      })
+      setHydration('ready')
+    }).catch((error: unknown) => {
+      if (active) {
+        setHydrationError(error instanceof Error ? error.message : 'Please reopen this page after browser storage is available.')
+        setHydration('error')
       }
     })
-  }, [])
+    return () => { active = false }
+  }, [hydrationAttempt])
 
   // Re-run catch-up if the tab stays open across a calendar-day boundary or
   // becomes visible again after being hidden — paydays / Jan 1 grants /
@@ -193,6 +177,7 @@ export default function App() {
           lastPersistedRef.current = migrated
           return { state: migrated, isDemo: migrated.profile.displayName === 'Demo User' }
         }
+        if ((migrated.savedAt ?? 0) < (prev.state.savedAt ?? 0)) return prev
         // Only react when the change actually came from elsewhere — guard on a
         // structural diff so an identical echo neither toasts nor triggers a
         // save.
@@ -219,17 +204,14 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // Only persist when the in-memory state actually changed since the last
-    // save. Skipping the no-op mount-time save keeps savedAt meaning "when the
-    // user last changed data", which loadStateAsync relies on to pick the newer
-    // of the localStorage / IndexedDB snapshots. (Cold-load catch-up results
-    // are idempotent, so deferring their persistence to the first real edit is
-    // safe.)
-    if (state && state !== lastPersistedRef.current) {
+    // Persist only after both stores have been checked and catch-up succeeds.
+    // Cross-tab snapshots point lastPersistedRef at the incoming state so they
+    // do not produce an echo-save loop.
+    if (hydration === 'ready' && state && state !== lastPersistedRef.current) {
       lastPersistedRef.current = state
       saveState(state)
     }
-  }, [state])
+  }, [state, hydration])
 
   // Dark mode only — light mode was removed. Always apply the dark class
   // regardless of any previously-stored theme value.
@@ -633,6 +615,22 @@ export default function App() {
     },
     [],
   )
+
+  // Do not offer setup or editable stale data until both persistent stores
+  // have been checked. A failed read must never look like a new account.
+  if (hydration !== 'ready') {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-slate-950 text-slate-100">
+        <section className="max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6" aria-live="polite">
+          <h1 className="text-xl font-semibold">{hydration === 'loading' ? 'Loading your saved planner' : 'Your saved planner needs attention'}</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-300">
+            {hydration === 'loading' ? 'Checking both saved copies before opening your planner.' : `We couldn’t safely open your saved data. Your existing records have been left in place. ${hydrationError}`}
+          </p>
+          {hydration === 'error' && <button className="mt-5 rounded-lg bg-cyan-700 px-4 py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300" onClick={() => { setHydration('loading'); setHydrationAttempt(n => n + 1) }}>Try again</button>}
+        </section>
+      </main>
+    )
+  }
 
   if (!state) {
     return <SetupWizard onComplete={handleSetupComplete} />
