@@ -1,5 +1,6 @@
 import { useMemo, useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
+import { flushSync } from 'react-dom'
 import { AlertTriangle, ChevronDown, Clock, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
 import { getCurrentBalanceSummary } from '../lib/projection'
@@ -13,13 +14,18 @@ function fmt(hours: number): string {
 export function BalanceSummary({ children }: { children?: ReactNode }) {
   const { state } = useAppState()
   const detailsRef = useRef<HTMLDetailsElement>(null)
-  const [detailsMaxHeight, setDetailsMaxHeight] = useState<number>()
+  const [detailsGeneration, setDetailsGeneration] = useState(0)
+  const [detailsPosition, setDetailsPosition] = useState<{ maxHeight: number; above: boolean }>()
   const sizeDetails = useCallback(() => {
     const details = detailsRef.current
-    if (details)
-      setDetailsMaxHeight(
-        Math.max(0, window.innerHeight - details.getBoundingClientRect().bottom - 12),
-      )
+    if (!details) return
+    const bounds = details.getBoundingClientRect()
+    const below = Math.max(0, window.innerHeight - bounds.bottom - 12)
+    const above = Math.max(0, bounds.top - 12)
+    // A zero-height padded panel still overflows. Open above the card when
+    // the space below cannot offer a useful scroll area and above has more room.
+    const openAbove = below < Math.min(240, above)
+    setDetailsPosition({ maxHeight: openAbove ? above : below, above: openAbove })
   }, [])
   useEffect(() => {
     const dismiss = (event: MouseEvent) => {
@@ -81,7 +87,25 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
           }}
         >
           <summary
-            onClick={sizeDetails}
+            onClick={(event) => {
+              // Open synchronously before measuring: closed details content can
+              // retain its fallback layout through the browser's default toggle.
+              // The summary still supplies keyboard click activation and focus.
+              event.preventDefault()
+              const details = detailsRef.current
+              if (!details) return
+              details.open = !details.open
+              if (details.open) {
+                flushSync(() => {
+                  sizeDetails()
+                  // Recreate the noninteractive region after opening so Chromium
+                  // cannot paint the cached layout of the formerly hidden subtree.
+                  setDetailsGeneration((generation) => generation + 1)
+                })
+                // Resolve the newly exposed subtree before its first painted frame.
+                details.querySelector('[aria-label="Balance breakdown"]')?.getBoundingClientRect()
+              }
+            }}
             aria-label="Balance details"
             className="list-none cursor-pointer px-3 py-2.5 h-full rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/30 [&::-webkit-details-marker]:hidden"
           >
@@ -110,11 +134,12 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
             </div>
           </summary>
           <div
+            key={detailsGeneration}
             role="region"
             aria-label="Balance breakdown"
             tabIndex={0}
-            style={{ maxHeight: detailsMaxHeight }}
-            className="absolute left-0 top-full mt-1 w-[min(40rem,calc(100vw-2rem))] max-h-[min(70dvh,calc(100dvh-12rem))] overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-xl"
+            style={{ maxHeight: detailsPosition?.maxHeight }}
+            className={`absolute left-0 ${detailsPosition?.above ? 'bottom-full mb-1' : 'top-full mt-1'} w-[min(40rem,calc(100vw-2rem))] max-h-[min(70dvh,calc(100dvh-12rem))] overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-xl`}
           >
             <p className="mb-2 text-xs font-medium">
               {todayUsed > 0

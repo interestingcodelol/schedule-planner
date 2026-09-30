@@ -35,8 +35,8 @@ export const DEFAULT_ICAL_OPTIONS: IcalExportOptions = {
   reminderDaysBeforeTimeOff: 1,
 }
 
-/** Per-category event colour (RFC 7986 COLOR property, CSS3 colour names).
- *  Keeps Outlook/Apple Calendar from rendering everything in one flat tone.
+/** Per-category event colour hint (RFC 7986 COLOR property, CSS3 colour names).
+ *  Calendar applications may ignore it.
  *  Key matches the first entry in each event's `categories` array. */
 const CATEGORY_COLORS: Record<string, string> = {
   'Time Off': 'royalblue',
@@ -47,30 +47,36 @@ const CATEGORY_COLORS: Record<string, string> = {
   Anniversary: 'mediumpurple',
 }
 
-/** Stable per-app domain so re-imports update existing events instead of
- *  duplicating. Outlook/Google match on UID. */
+/** Preserve existing event identities. A stable UID does not guarantee that a
+ *  calendar application's file-import workflow updates instead of duplicating. */
 const UID_DOMAIN = 'schedule-planner.local'
 
 /** RFC 5545 escaping for TEXT-typed properties. CRLF inside SUMMARY/DESCRIPTION
  *  must be encoded as `\n`; commas, semicolons, and backslashes must be
  *  escaped. We don't use control characters, so this is the full list. */
 function escapeText(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
+  return s.replace(/\\/g, '\\\\').replace(/\r\n|\r|\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
 }
 
-/** Fold long lines to 75 octets per RFC 5545. We're conservative and fold
- *  on character count — fine for ASCII subjects/descriptions which is all
- *  we generate. */
+/** Fold at 75 UTF-8 octets, including the continuation space, without
+ *  splitting an emoji or other multi-byte code point (RFC 5545 §3.1). */
 function foldLine(line: string): string {
-  if (line.length <= 75) return line
+  const encoder = new TextEncoder()
   const parts: string[] = []
-  let i = 0
-  while (i < line.length) {
-    const chunk = line.slice(i, i + (i === 0 ? 75 : 74))
-    parts.push(chunk)
-    i += chunk.length
+  let chunk = ''
+  let octets = 0
+  for (const character of line) {
+    const size = encoder.encode(character).length
+    if (octets + size > 75) {
+      parts.push(chunk)
+      chunk = ' '
+      octets = 1
+    }
+    chunk += character
+    octets += size
   }
-  return parts.join('\r\n ')
+  parts.push(chunk)
+  return parts.join('\r\n')
 }
 
 /** Format an all-day DATE value (YYYYMMDD). Every event date in this module is
@@ -88,6 +94,50 @@ function fmtHrs(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
 }
 
+function formatUtc(d: Date): string {
+  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+}
+
+/** Convert a saved civil clock time using the profile's IANA timezone, not
+ *  the computer's timezone. Check both sides of DST transitions; repeated
+ *  times use the first occurrence, as in RFC 5545 §3.3.5. Missing times are
+ *  rejected rather than silently shifting the user's appointment. */
+function clockTimeInZone(date: Date, time: string, timezone: string): Date {
+  let formatter: Intl.DateTimeFormat
+  try {
+    formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    })
+  } catch {
+    throw new Error('Calendar export needs a valid profile timezone. Check your timezone in Settings.')
+  }
+  const [hour, minute] = time.split(':').map(Number)
+  const wallTime = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute)
+  const readWallTime = (instant: number) => {
+    const parts = formatter.formatToParts(new Date(instant))
+    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value)
+    return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'))
+  }
+  const offsets = new Set<number>()
+  for (let hours = -36; hours <= 36; hours += 6) {
+    const instant = wallTime + hours * 3_600_000
+    offsets.add(readWallTime(instant) - instant)
+  }
+  const matches = [...offsets]
+    .map((offset) => wallTime - offset)
+    .filter((instant) => readWallTime(instant) === wallTime)
+  if (matches.length === 0) {
+    throw new Error(`Calendar export stopped: ${format(date, 'yyyy-MM-dd')} ${time} does not exist in ${timezone} because the clocks change. Review that entry's clock times.`)
+  }
+  return new Date(Math.min(...matches))
+}
+
+function isClockTime(time: string | undefined, allowMidnightEnd = false): time is string {
+  return typeof time === 'string' && (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time) || (allowMidnightEnd && time === '24:00'))
+}
+
 type RawEvent = {
   uid: string
   summary: string
@@ -97,6 +147,9 @@ type RawEvent = {
   /** All-day range — DTEND is exclusive per RFC, so we add a day at write time. */
   startDate?: Date
   endDate?: Date
+  /** Explicit single-day clock interval, resolved to UTC. */
+  startTime?: Date
+  endTime?: Date
   categories?: string[]
   /** True for time-off events that should show the user as Out of Office /
    *  busy (planned + logged absences). Informational events are FREE. */
@@ -121,6 +174,15 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
       const end = parseISO(v.endDate)
       const hrsPerDay = v.hoursPerDay ?? state.policy.hoursPerWorkDay
       const partial = hrsPerDay < state.policy.hoursPerWorkDay
+      const hasClockInterval = partial && v.startDate === v.endDate &&
+        isClockTime(v.timeOffStart) && isClockTime(v.timeOffEnd, true) &&
+        v.timeOffEnd > v.timeOffStart
+      const timezone = state.profile.timezone || 'America/New_York'
+      const startTime = hasClockInterval ? clockTimeInZone(start, v.timeOffStart!, timezone) : undefined
+      const endTime = hasClockInterval ? clockTimeInZone(end, v.timeOffEnd!, timezone) : undefined
+      if (startTime && endTime && endTime <= startTime) {
+        throw new Error('Calendar export stopped: a time-off clock interval ends before it starts. Review that entry’s clock times.')
+      }
       const sourceLabel = v.hourSource === 'any' ? 'auto' : v.hourSource
       const summary = isLogged
         ? '🌴 Time off (logged)'
@@ -133,6 +195,8 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
             ? `Partial day: ${fmtHrs(hrsPerDay)} hrs/day`
             : `Full day: ${fmtHrs(hrsPerDay)} hrs`,
         `Source: ${sourceLabel}`,
+        hasClockInterval ? `Clock times: ${v.timeOffStart}–${v.timeOffEnd} (${timezone})` : '',
+        partial && !hasClockInterval ? 'Exported as all-day: no valid single-day clock interval is saved.' : '',
       ].filter(Boolean)
       events.push({
         uid: `vacation-${v.id}@${UID_DOMAIN}`,
@@ -140,6 +204,8 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
         description: descriptionLines.join('\n'),
         startDate: start,
         endDate: end,
+        startTime,
+        endTime,
         categories: ['Time Off'],
         oof: true,
         planned: !isLogged,
@@ -213,7 +279,7 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
 
   // --- Bank hours payout -----------------------------------------------
   // Match both payout triggers in the balance engine. Preserve the existing
-  // opening-date UID so older exports still update in place; closing dates
+  // opening-date UID for identity compatibility with older exports; closing dates
   // get a distinct stable UID. Coincident payroll dates produce one event.
   if (opts.includeBankWindow && !state.policy.hideBankHours) {
     const startYear = today.getFullYear()
@@ -295,18 +361,10 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
 export function buildIcalString(state: AppState, opts: IcalExportOptions): string {
   const events = buildEvents(state, opts)
   const now = new Date()
-  const dtstamp = now
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .replace(/\.\d{3}Z$/, 'Z')
-  // Monotonically-increasing revision number: seconds since a fixed epoch. Every
-  // re-export happens later in time, so SEQUENCE strictly increases — which is
-  // what makes Outlook / Google / Apple APPLY the update to an existing event
-  // (matched by its stable UID) instead of ignoring the re-import as an
-  // unchanged duplicate. Combined with stable per-entry UIDs, a corrected date
-  // or detail overwrites the original event IN PLACE (the old one moves, no
-  // duplicate); events the user created themselves have different UIDs and are
-  // never touched, and a re-import never deletes anything.
+  const dtstamp = formatUtc(now)
+  // Retain the existing export-time hint for compatibility. It is not a
+  // persisted per-event revision: same-second exports can repeat it, and a
+  // clock correction can decrease it. It cannot ensure file-import deduplication.
   const sequence = Math.max(0, Math.floor((now.getTime() - Date.UTC(2020, 0, 1)) / 1000))
   const reminderDays = opts.reminderDaysBeforeTimeOff ?? 0
 
@@ -322,16 +380,17 @@ export function buildIcalString(state: AppState, opts: IcalExportOptions): strin
       'X-WR-CALDESC:Time off, holidays, paydays, and balance milestones from Schedule Planner',
     ),
   )
-  // Hint to subscribing clients (Outlook/Apple) how often to refresh a
-  // subscribed/published calendar. All-day events carry no time zone, so
-  // X-WR-TIMEZONE is intentionally omitted.
-  lines.push('X-PUBLISHED-TTL:PT12H')
+  // This is a downloaded snapshot, not a hosted calendar subscription. Timed
+  // events use UTC; all-day events remain civil dates, without a timezone.
 
   for (const ev of events) {
     lines.push('BEGIN:VEVENT')
-    lines.push(`UID:${ev.uid}`)
+    lines.push(foldLine(`UID:${escapeText(ev.uid)}`))
     lines.push(`DTSTAMP:${dtstamp}`)
-    if (ev.date) {
+    if (ev.startTime && ev.endTime) {
+      lines.push(`DTSTART:${formatUtc(ev.startTime)}`)
+      lines.push(`DTEND:${formatUtc(ev.endTime)}`)
+    } else if (ev.date) {
       lines.push(`DTSTART;VALUE=DATE:${formatDate(ev.date)}`)
       // For single-day all-day events, DTEND is the next day (exclusive).
       lines.push(`DTEND;VALUE=DATE:${formatDate(addDays(ev.date, 1))}`)
@@ -350,21 +409,19 @@ export function buildIcalString(state: AppState, opts: IcalExportOptions): strin
       if (color) lines.push(`COLOR:${color}`)
     }
 
-    // Per-event lifecycle metadata so re-imports update cleanly rather than
-    // duplicating, and clients can reason about the event state.
+    // Snapshot metadata does not instruct a file importer to replace or delete
+    // events. No CREATED is emitted: original creation times are not stored.
     lines.push('STATUS:CONFIRMED')
     lines.push(`SEQUENCE:${sequence}`)
     lines.push('CLASS:PUBLIC')
-    lines.push(`CREATED:${dtstamp}`)
     lines.push(`LAST-MODIFIED:${dtstamp}`)
 
     if (ev.oof) {
-      // Time off → block the calendar and surface Out-of-Office presence in
-      // Outlook and Teams.
+      // Preserve the existing Out-of-Office hint. Actual presence depends on
+      // the destination calendar and the client's handling of imported events.
       lines.push('TRANSP:OPAQUE')
       lines.push('X-MICROSOFT-CDO-BUSYSTATUS:OOF')
       lines.push('X-MICROSOFT-CDO-INTENDEDSTATUS:OOF')
-      lines.push('X-MICROSOFT-CDO-ALLDAYEVENT:TRUE')
     } else {
       // Informational events (holidays, paydays, carryover/bank, anniversary/
       // tier) stay free so they never block the user's calendar. Holidays
@@ -372,8 +429,8 @@ export function buildIcalString(state: AppState, opts: IcalExportOptions): strin
       // imported holiday doesn't make the user look busy/out of office.
       lines.push('TRANSP:TRANSPARENT')
       lines.push('X-MICROSOFT-CDO-BUSYSTATUS:FREE')
-      lines.push('X-MICROSOFT-CDO-ALLDAYEVENT:TRUE')
     }
+    lines.push(`X-MICROSOFT-CDO-ALLDAYEVENT:${ev.startTime ? 'FALSE' : 'TRUE'}`)
 
     // Reminder: only on *planned* (future) time off, never on logged-past
     // absences or informational events. Nested INSIDE the VEVENT.

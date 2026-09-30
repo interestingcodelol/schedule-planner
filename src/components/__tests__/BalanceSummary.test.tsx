@@ -67,10 +67,51 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
 describe('BalanceSummary', () => {
+  it('opens the scrollable breakdown above the card when a short viewport has no room below', () => {
+    setContext(makeState())
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(384)
+    render(<BalanceSummary />)
+    const details = screen.getByLabelText('Available now: 64 hours')
+    vi.spyOn(details, 'getBoundingClientRect').mockReturnValue({ top: 270, bottom: 376 } as DOMRect)
+    fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
+    const region = screen.getByRole('region', { name: 'Balance breakdown' })
+    expect(region).toHaveClass('bottom-full', 'mb-1', 'overflow-y-auto')
+    expect(region.style.maxHeight).toBe('258px')
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(details).toHaveAttribute('open')
+    fireEvent.keyDown(region, { key: 'Escape' })
+    expect(details).not.toHaveAttribute('open')
+    expect(screen.getByLabelText('Balance details', { exact: true })).toHaveFocus()
+  })
+
+  it('keeps the normal below-card placement and recalculates on resize and scroll', () => {
+    setContext(makeState())
+    const height = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(900)
+    render(<BalanceSummary />)
+    const details = screen.getByLabelText('Available now: 64 hours')
+    const rect = vi.spyOn(details, 'getBoundingClientRect').mockReturnValue({ top: 270, bottom: 376 } as DOMRect)
+    fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
+    const region = screen.getByRole('region', { name: 'Balance breakdown' })
+    expect(region).toHaveClass('top-full', 'mt-1')
+    expect(region.style.maxHeight).toBe('512px')
+    height.mockReturnValue(384)
+    fireEvent.resize(window)
+    expect(region).toHaveClass('bottom-full')
+    rect.mockReturnValue({ top: 20, bottom: 126 } as DOMRect)
+    fireEvent.scroll(window)
+    expect(region).toHaveClass('top-full')
+    expect(region.style.maxHeight).toBe('246px')
+    fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
+    expect(details).not.toHaveAttribute('open')
+    fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
+    expect(screen.getByRole('region', { name: 'Balance breakdown' })).not.toBe(region)
+  })
+
   it('shows immediate morning deductions by pool and an auditable balance equation', () => {
     const state = makeState()
     state.plannedVacations = [timeOff('vacation', 'vacation', 8), timeOff('sick', 'sick', 4)]

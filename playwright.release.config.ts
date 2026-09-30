@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
-  testMatch: 'migration.spec.ts',
+  testMatch: ['migration.spec.ts', 'calendar-export.spec.ts'],
   timeout: 180_000,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {

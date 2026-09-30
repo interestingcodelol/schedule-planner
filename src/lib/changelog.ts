@@ -16,6 +16,16 @@ export type ChangelogEntry = {
  */
 export const changelog: ChangelogEntry[] = [
   {
+    id: '2026-09-30-calendar',
+    date: 'September 2026',
+    title: 'More accurate calendar exports',
+    changes: [
+      { type: 'fixed', text: 'Single-day partial absences with saved clock times now export as timed events in your profile timezone, rather than blocking the whole day.' },
+      { type: 'fixed', text: 'Calendar export now explains that files are snapshots: repeated imports may duplicate events, and later changes or deletions do not update earlier imports.' },
+      { type: 'fixed', text: 'Calendar text preserves Unicode and line breaks correctly. Clock times that do not exist during a daylight-saving change show an export error instead of silently shifting.' },
+    ],
+  },
+  {
     id: '2026-09-30',
     date: 'September 2026',
     title: 'A clearer picture of your time off',

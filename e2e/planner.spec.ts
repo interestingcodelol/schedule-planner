@@ -3,6 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { defaultPolicy } from '../src/lib/defaultPolicy'
 import type { AppState } from '../src/lib/types'
 
+// Retain opening-frame evidence even when the viewport regression passes.
+test.use({ trace: 'on' })
+
 function fixture(): AppState {
   return {
     profile: {
@@ -265,22 +268,99 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     const insightsBounds = await insights.boundingBox()
     expect(insightsBounds!.y - (cardsBounds!.y + cardsBounds!.height)).toBeLessThanOrEqual(16)
     const balanceToggle = page.getByLabel('Balance details', { exact: true })
+    await balanceToggle.evaluate((summary) => {
+      summary.addEventListener('click', () => {
+        // This target listener runs before React's delegated toggle. Sample only
+        // openings so a prior closing sampler cannot overwrite the next result.
+        if ((summary.parentElement as HTMLDetailsElement).open) return
+        const getPanel = () => summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
+        summary.ownerDocument.addEventListener('click', (dispatched) => {
+          getPanel().dataset.qaClickPrevented = String(dispatched.defaultPrevented)
+        }, { once: true })
+        delete getPanel().dataset.qaFrameBounds
+        const frames: { top: number; bottom: number; maxHeight: string; connected: boolean; open: boolean }[] = []
+        const sample = () => {
+          const panel = getPanel()
+          const bounds = panel.getBoundingClientRect()
+          frames.push({ top: bounds.top, bottom: bounds.bottom, maxHeight: getComputedStyle(panel).maxHeight, connected: panel.isConnected, open: (summary.parentElement as HTMLDetailsElement).open })
+          if (frames.length < 6) requestAnimationFrame(sample)
+          else panel.dataset.qaFrameBounds = JSON.stringify(frames)
+        }
+        requestAnimationFrame(sample)
+      })
+    })
     await balanceToggle.click()
     await expect(page.getByRole('table')).toBeVisible()
     const breakdownBounds = await page.getByRole('table').locator('..').boundingBox()
+    if (breakdownBounds && breakdownBounds.y + breakdownBounds.height > size.height + 1) {
+      const geometry = await page.getByRole('region', { name: 'Balance breakdown', exact: true }).evaluate((panel) => {
+        const rect = (element: Element) => element.getBoundingClientRect().toJSON()
+        const css = getComputedStyle(panel)
+        return { panel: rect(panel), card: rect(panel.parentElement!), viewport: { height: innerHeight, width: innerWidth, scrollY }, style: panel.getAttribute('style'), css: { maxHeight: css.maxHeight, height: css.height, boxSizing: css.boxSizing, padding: css.padding, position: css.position, top: css.top, bottom: css.bottom }, fonts: document.fonts.status }
+      })
+      await info.attach(`${size.name}-overflow-geometry`, { body: JSON.stringify({ measured: breakdownBounds, geometry }, null, 2), contentType: 'application/json' })
+      const runtime = await page.evaluate(async () => {
+        const script = document.querySelector<HTMLScriptElement>('script[type="module"][src]')!
+        return { url: script.src, source: await (await fetch(script.src)).text(), prevented: document.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')?.dataset.qaClickPrevented }
+      })
+      await info.attach(`${size.name}-served-runtime`, { body: JSON.stringify(runtime), contentType: 'application/json' })
+    }
     expect(breakdownBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(breakdownBounds!.y).toBeGreaterThanOrEqual(0)
     expect(breakdownBounds!.x + breakdownBounds!.width).toBeLessThanOrEqual(size.width + 1)
     expect(breakdownBounds!.y + breakdownBounds!.height).toBeLessThanOrEqual(size.height + 1)
+    const breakdown = page.getByRole('region', { name: 'Balance breakdown', exact: true })
+    await expect(breakdown).toHaveAttribute('data-qa-frame-bounds', /./)
+    const paintedFrames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number; maxHeight: string; connected: boolean; open: boolean }[]
+    await info.attach(`${size.name}-opening-frames`, { body: JSON.stringify(paintedFrames), contentType: 'application/json' })
+    for (const frame of paintedFrames) {
+      expect(frame.connected).toBe(true)
+      expect(frame.open).toBe(true)
+      expect(frame.bottom).toBeGreaterThan(frame.top)
+      expect(frame.top, `opening frame ${JSON.stringify(frame)}`).toBeGreaterThanOrEqual(0)
+      expect(frame.bottom, `opening frame ${JSON.stringify(frame)}`).toBeLessThanOrEqual(size.height + 1)
+    }
     await page.screenshot({
       path: info.outputPath(`${size.name}-balance-details.png`),
       animations: 'disabled',
     })
+    if (size.name === 'reflow-200percent') {
+      for (const height of [614, 384]) {
+        await page.setViewportSize({ width: size.width, height })
+        await expect(async () => {
+          const bounds = (await breakdown.boundingBox())!
+          expect(bounds.y).toBeGreaterThanOrEqual(0)
+          expect(bounds.y + bounds.height).toBeLessThanOrEqual(height + 1)
+        }).toPass({ timeout: 1000 })
+      }
+    }
     await page.getByRole('region', { name: 'Balance breakdown', exact: true }).focus()
     await page.keyboard.press('End')
     await expect(page.getByText(/Sick leave limit:/)).toBeInViewport()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('table')).not.toBeVisible()
     await expect(balanceToggle).toBeFocused()
+    if (size.name === 'reflow-200percent') {
+      for (const key of ['Enter', 'Space', 'Enter', 'Space']) {
+        await page.keyboard.press(key)
+        await expect(breakdown).toBeVisible()
+        const opened = (await breakdown.boundingBox())!
+        expect(opened.y).toBeGreaterThanOrEqual(0)
+        expect(opened.y + opened.height).toBeLessThanOrEqual(size.height + 1)
+        await expect(breakdown).toHaveAttribute('data-qa-frame-bounds', /./)
+        const frames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number; connected: boolean; open: boolean }[]
+        for (const frame of frames) {
+          expect(frame.connected).toBe(true)
+          expect(frame.open).toBe(true)
+          expect(frame.bottom).toBeGreaterThan(frame.top)
+          expect(frame.top).toBeGreaterThanOrEqual(0)
+          expect(frame.bottom).toBeLessThanOrEqual(size.height + 1)
+        }
+        await page.keyboard.press(key)
+        await expect(breakdown).not.toBeVisible()
+        await expect(balanceToggle).toBeFocused()
+      }
+    }
 
     const dimensions = await page.evaluate(() => {
       const rect = (selector: string) => {
