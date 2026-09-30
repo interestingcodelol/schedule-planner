@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useRef, type ReactNode } from 'react'
+import { useMemo, useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
 import { AlertTriangle, ChevronDown, Clock, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
@@ -13,14 +13,33 @@ function fmt(hours: number): string {
 export function BalanceSummary({ children }: { children?: ReactNode }) {
   const { state } = useAppState()
   const detailsRef = useRef<HTMLDetailsElement>(null)
+  const [detailsMaxHeight, setDetailsMaxHeight] = useState<number>()
+  const sizeDetails = useCallback(() => {
+    const details = detailsRef.current
+    if (details?.open)
+      setDetailsMaxHeight(
+        Math.max(0, window.innerHeight - details.getBoundingClientRect().bottom - 12),
+      )
+  }, [])
   useEffect(() => {
     const dismiss = (event: MouseEvent) => {
       const details = detailsRef.current
       if (details?.open && !details.contains(event.target as Node)) details.open = false
     }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && detailsRef.current?.open) detailsRef.current.open = false
+    }
     document.addEventListener('mousedown', dismiss)
-    return () => document.removeEventListener('mousedown', dismiss)
-  }, [])
+    document.addEventListener('keydown', escape)
+    window.addEventListener('resize', sizeDetails)
+    window.addEventListener('scroll', sizeDetails, true)
+    return () => {
+      document.removeEventListener('mousedown', dismiss)
+      document.removeEventListener('keydown', escape)
+      window.removeEventListener('resize', sizeDetails)
+      window.removeEventListener('scroll', sizeDetails, true)
+    }
+  }, [sizeDetails])
   const summary = useMemo(() => getCurrentBalanceSummary(state), [state])
   const { stored, deductions, available, todayDeductions, todayUnallocatedHours, shortfall } =
     summary
@@ -50,6 +69,7 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
       >
         <details
           ref={detailsRef}
+          onToggle={sizeDetails}
           className="group relative col-span-2 sm:col-span-3 md:col-span-2 xl:col-span-1 glass-card rounded-xl min-w-0 h-full open:z-40"
           aria-label={`Available now: ${fmt(available.total)} hours`}
           onKeyDown={(event) => {
@@ -88,7 +108,10 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
               )}
             </div>
           </summary>
-          <div className="absolute left-0 top-full mt-1 w-[min(40rem,calc(100vw-2rem))] max-h-[min(70dvh,calc(100dvh-12rem))] overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-xl">
+          <div
+            style={{ maxHeight: detailsMaxHeight }}
+            className="absolute left-0 top-full mt-1 w-[min(40rem,calc(100vw-2rem))] max-h-[min(70dvh,calc(100dvh-12rem))] overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-xl"
+          >
             <p className="mb-2 text-xs font-medium">
               {todayUsed > 0
                 ? `${fmt(todayUsed)} hrs used today, already included`
