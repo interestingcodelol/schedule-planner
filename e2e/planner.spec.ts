@@ -293,6 +293,14 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
       size.width + 1,
     )
     expect(dimensions.nestedScroll, `${size.name} dashboard nested scrolling`).toEqual([])
+    if (size.width >= 1280) {
+      expect(
+        dimensions.documentHeight,
+        `${size.name} initial dashboard vertical overflow`,
+      ).toBeLessThanOrEqual(size.height + 1)
+      expect(dimensions.calendar.bottom).toBeLessThanOrEqual(size.height)
+      expect(dimensions.planner.bottom).toBeLessThanOrEqual(size.height)
+    }
     await page.screenshot({
       path: info.outputPath(`${size.name}-dashboard.png`),
       animations: 'disabled',
@@ -307,6 +315,11 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
       path: info.outputPath(`${size.name}-bank.png`),
       animations: 'disabled',
     })
+    await bankInput.fill('0.25')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByRole('button', { name: /Bank hours: 0.25 hours/ })).toBeVisible()
+    await page.getByRole('button', { name: 'Remove', exact: true }).click()
+    await expect(page.getByRole('button', { name: /Bank hours: 0 hours/ })).toBeVisible()
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'Next month', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'October 2026', exact: true })).toBeVisible()
@@ -334,6 +347,22 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await page.keyboard.press('Escape')
     await expect(settings).not.toBeVisible()
     await expect(page.getByRole('button', { name: 'Open settings' })).toBeFocused()
+    await page.getByRole('button', { name: /October 19, 2026.*planned time off/ }).click()
+    const editor = page.getByRole('dialog', { name: 'Plan time off for October 19' })
+    await expect(editor).toBeVisible()
+    const editorBounds = await editor.boundingBox()
+    expect(editorBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(editorBounds!.x + editorBounds!.width).toBeLessThanOrEqual(size.width + 1)
+    expect(editorBounds!.y).toBeGreaterThanOrEqual(0)
+    expect(editorBounds!.y + editorBounds!.height).toBeLessThanOrEqual(size.height + 1)
+    await editor.getByRole('button', { name: 'Update', exact: true }).focus()
+    await expect(editor.getByRole('button', { name: 'Update', exact: true })).toBeInViewport()
+    await page.screenshot({
+      path: info.outputPath(`${size.name}-day-editor.png`),
+      animations: 'disabled',
+    })
+    await page.keyboard.press('Escape')
+    await expect(editor).not.toBeVisible()
     await context.close()
   }
   await writeFile(

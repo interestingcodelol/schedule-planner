@@ -94,7 +94,7 @@ export function BankCard({ embedded = false }: { embedded?: boolean }) {
           <span
             className={`flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-600 dark:text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded-md shrink-0`}
           >
-            <Plus className="w-3 h-3" />
+            {open ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
             <span>{open ? 'Close' : 'Add'}</span>
           </span>
         </div>

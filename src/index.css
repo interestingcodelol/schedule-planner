@@ -207,7 +207,10 @@ input[type='date'] {
     --calendar-row-min: 4rem;
   }
   .planner-dashboard > header {
-    padding-block: 0.5rem;
+    padding-block: 0.375rem;
+  }
+  .planner-dashboard > main {
+    gap: 0.5rem;
   }
   .calendar-day {
     min-height: 4rem;
