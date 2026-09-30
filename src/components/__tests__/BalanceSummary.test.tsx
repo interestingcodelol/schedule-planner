@@ -83,6 +83,7 @@ describe('BalanceSummary', () => {
     expect(region).toHaveClass('bottom-full', 'mb-1', 'overflow-y-auto')
     expect(region.style.maxHeight).toBe('258px')
     expect(region).toHaveAttribute('tabindex', '0')
+    expect(details).toHaveAttribute('open')
     fireEvent.keyDown(region, { key: 'Escape' })
     expect(details).not.toHaveAttribute('open')
     expect(screen.getByLabelText('Balance details', { exact: true })).toHaveFocus()
@@ -105,6 +106,8 @@ describe('BalanceSummary', () => {
     fireEvent.scroll(window)
     expect(region).toHaveClass('top-full')
     expect(region.style.maxHeight).toBe('246px')
+    fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
+    expect(details).not.toHaveAttribute('open')
   })
 
   it('shows immediate morning deductions by pool and an auditable balance equation', () => {

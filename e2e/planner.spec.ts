@@ -271,6 +271,7 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await balanceToggle.evaluate((summary) => {
       summary.addEventListener('click', () => {
         const panel = summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
+        delete panel.dataset.qaFrameBounds
         const frames: { top: number; bottom: number; maxHeight: string }[] = []
         const sample = () => {
           const bounds = panel.getBoundingClientRect()
@@ -279,7 +280,7 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
           else panel.dataset.qaFrameBounds = JSON.stringify(frames)
         }
         requestAnimationFrame(sample)
-      }, { once: true })
+      })
     })
     await balanceToggle.click()
     await expect(page.getByRole('table')).toBeVisible()
@@ -324,6 +325,24 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await page.keyboard.press('Escape')
     await expect(page.getByRole('table')).not.toBeVisible()
     await expect(balanceToggle).toBeFocused()
+    if (size.name === 'reflow-200percent') {
+      for (const key of ['Enter', 'Space', 'Enter', 'Space']) {
+        await page.keyboard.press(key)
+        await expect(breakdown).toBeVisible()
+        const opened = (await breakdown.boundingBox())!
+        expect(opened.y).toBeGreaterThanOrEqual(0)
+        expect(opened.y + opened.height).toBeLessThanOrEqual(size.height + 1)
+        await expect(breakdown).toHaveAttribute('data-qa-frame-bounds', /./)
+        const frames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number }[]
+        for (const frame of frames) {
+          expect(frame.top).toBeGreaterThanOrEqual(0)
+          expect(frame.bottom).toBeLessThanOrEqual(size.height + 1)
+        }
+        await page.keyboard.press(key)
+        await expect(breakdown).not.toBeVisible()
+        await expect(balanceToggle).toBeFocused()
+      }
+    }
 
     const dimensions = await page.evaluate(() => {
       const rect = (selector: string) => {

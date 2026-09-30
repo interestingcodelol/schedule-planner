@@ -86,10 +86,19 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
           }}
         >
           <summary
-            onClick={() => {
-              // Commit bounds before the native details toggle paints its content.
-              // A batched update can otherwise expose the CSS fallback for one frame.
-              flushSync(sizeDetails)
+            onClick={(event) => {
+              // Open synchronously before measuring: closed details content can
+              // retain its fallback layout through the browser's default toggle.
+              // The summary still supplies keyboard click activation and focus.
+              event.preventDefault()
+              const details = detailsRef.current
+              if (!details) return
+              details.open = !details.open
+              if (details.open) {
+                flushSync(sizeDetails)
+                // Resolve the newly exposed subtree before its first painted frame.
+                details.querySelector('[aria-label="Balance breakdown"]')?.getBoundingClientRect()
+              }
             }}
             aria-label="Balance details"
             className="list-none cursor-pointer px-3 py-2.5 h-full rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/30 [&::-webkit-details-marker]:hidden"
