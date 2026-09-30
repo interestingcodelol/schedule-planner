@@ -81,6 +81,7 @@ for (const winner of ['local', 'indexeddb'] as const) {
   }, info) => {
     await page.clock.install({ time: new Date('2026-09-30T15:00:00Z') })
     await page.goto('./')
+    await expect(page.getByRole('heading', { name: 'Schedule Planner', exact: true })).toBeVisible()
     const local = fixture(winner === 'local' ? 200 : 100, 'Synthetic local user')
     const idb = fixture(winner === 'indexeddb' ? 200 : 100, 'Synthetic IndexedDB user')
     const expected = winner === 'local' ? local : idb
@@ -149,6 +150,7 @@ for (const winner of ['local', 'indexeddb'] as const) {
 
 test('unreadable saved data stays intact and does not open setup', async ({ page }, info) => {
   await page.goto('./')
+  await expect(page.getByRole('heading', { name: 'Schedule Planner', exact: true })).toBeVisible()
   const raw = '{"version":2,"profile":{"displayName":"Synthetic damaged record"'
   await page.evaluate((raw) => localStorage.setItem('schedule-planner-state-v2', raw), raw)
   await page.reload()
@@ -163,6 +165,7 @@ test('unreadable saved data stays intact and does not open setup', async ({ page
 test('legacy backup file remains restorable with records and custom policy', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-09-30T15:00:00Z') })
   await page.goto('./')
+  await expect(page.getByRole('heading', { name: 'Schedule Planner', exact: true })).toBeVisible()
   await page.evaluate(
     (state) => localStorage.setItem('schedule-planner-state-v1', JSON.stringify(state)),
     fixture(100, 'Synthetic initial data'),
@@ -200,20 +203,18 @@ test('legacy backup file remains restorable with records and custom policy', asy
 
 test('temporary database failure does not promote an older local snapshot', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-09-30T15:00:00Z') })
-  await page.goto('./')
   const original = JSON.stringify(fixture(100, 'Synthetic protected legacy data'))
-  await page.evaluate((raw) => {
-    localStorage.setItem('schedule-planner-state-v1', raw)
-    sessionStorage.setItem('synthetic-idb-failure', 'yes')
-  }, original)
-  await page.addInitScript(() => {
-    if (sessionStorage.getItem('synthetic-idb-failure')) {
+  // Inject before the application starts, so the initial successful page load
+  // cannot migrate the fixture before the simulated failure is installed.
+  await page.addInitScript((raw) => {
+    if (!sessionStorage.getItem('synthetic-idb-recovered')) {
+      localStorage.setItem('schedule-planner-state-v1', raw)
       indexedDB.open = () => {
         throw new DOMException('Synthetic read failure', 'UnknownError')
       }
     }
-  })
-  await page.reload()
+  }, original)
+  await page.goto('./')
   await expect(page.getByText('Your saved planner needs attention')).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('schedule-planner-state-v1'))).toBe(
     original,
@@ -222,7 +223,7 @@ test('temporary database failure does not promote an older local snapshot', asyn
   expect(
     await page.evaluate(() => localStorage.getItem('schedule-planner-v2-initialized')),
   ).toBeNull()
-  await page.evaluate(() => sessionStorage.removeItem('synthetic-idb-failure'))
+  await page.evaluate(() => sessionStorage.setItem('synthetic-idb-recovered', 'yes'))
   await page.reload()
   await expect(page.getByLabel('Available now: 66.75 hours')).toBeVisible()
 })

@@ -16,7 +16,7 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
   const [detailsMaxHeight, setDetailsMaxHeight] = useState<number>()
   const sizeDetails = useCallback(() => {
     const details = detailsRef.current
-    if (details?.open)
+    if (details)
       setDetailsMaxHeight(
         Math.max(0, window.innerHeight - details.getBoundingClientRect().bottom - 12),
       )
@@ -81,6 +81,7 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
           }}
         >
           <summary
+            onClick={sizeDetails}
             aria-label="Balance details"
             className="list-none cursor-pointer px-3 py-2.5 h-full rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/30 [&::-webkit-details-marker]:hidden"
           >
