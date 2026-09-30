@@ -3,6 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { defaultPolicy } from '../src/lib/defaultPolicy'
 import type { AppState } from '../src/lib/types'
 
+// Retain opening-frame evidence even when the viewport regression passes.
+test.use({ trace: 'on' })
+
 function fixture(): AppState {
   return {
     profile: {
@@ -230,9 +233,6 @@ test('compact layout matches original density', async ({ page, browser }, info) 
   await originalContext.close()
 })
 
-test.describe('viewport opening-frame evidence', () => {
-  test.use({ trace: 'on' })
-
 test('viewport and accessible reflow audit', async ({ browser }, info) => {
   test.skip(info.project.name !== 'desktop', 'Run the viewport matrix once')
   test.setTimeout(180_000)
@@ -439,8 +439,6 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     info.outputPath('viewport-measurements.json'),
     JSON.stringify(measurements, null, 2),
   )
-})
-
 })
 
 test('original feature entry points remain visible and usable', async ({ page }, info) => {
