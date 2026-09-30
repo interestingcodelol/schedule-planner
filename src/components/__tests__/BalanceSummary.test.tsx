@@ -81,7 +81,7 @@ describe('BalanceSummary', () => {
     expect(screen.getByLabelText('Vacation available: 32 hours')).toBeInTheDocument()
     expect(screen.getByLabelText('Sick leave available: 12 hours')).toBeInTheDocument()
     expect(screen.getByText('12 hrs used today, already included')).toBeInTheDocument()
-    expect(screen.getByText('8 hrs vacation · 4 hrs sick')).toBeInTheDocument()
+    expect(screen.getByText(/8 hrs vacation · 4 hrs sick/)).toBeInTheDocument()
     fireEvent.click(screen.getByText('Balance details'))
     const table = screen.getByRole('table')
     expect(within(table).getByRole('row', { name: 'Vacation 40 −8 32' })).toBeInTheDocument()
@@ -99,9 +99,9 @@ describe('BalanceSummary', () => {
 
     expect(screen.getByLabelText('Available now: 64 hours')).toBeInTheDocument()
     expect(screen.getByText('No time off charged today')).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Looking ahead' })).toBeInTheDocument()
-    expect(screen.getByText('Forecasts include future plans and accruals')).toBeInTheDocument()
-    expect(screen.getByText('Projected Dec 31')).toBeInTheDocument()
+    expect(screen.getByText('Includes future plans')).toBeInTheDocument()
+    expect(screen.getByText('Year-end forecast')).toBeInTheDocument()
+    expect(screen.getByTestId('balance-card-grid').children).toHaveLength(7)
   })
 
   it('explains logged consumption without deducting it again', () => {

@@ -21,7 +21,15 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - uses: actions/checkout@v4
+        with:
+          ref: ed543d9c923af0974e3f2df701f33e110046c96b
+          path: .visual-baseline
+      - run: npm ci && npm run build
+        working-directory: .visual-baseline
       - run: npm run test:visual
+        env:
+          BASELINE_URL: http://127.0.0.1:4174
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

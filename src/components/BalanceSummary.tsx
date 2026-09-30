@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
 import { AlertTriangle, Check, ChevronDown, Clock, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
@@ -10,7 +10,7 @@ function fmt(hours: number): string {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(2)
 }
 
-export function BalanceSummary() {
+export function BalanceSummary({ children }: { children?: ReactNode }) {
   const { state } = useAppState()
   const summary = useMemo(() => getCurrentBalanceSummary(state), [state])
   const { stored, deductions, available, todayDeductions, todayUnallocatedHours, shortfall } =
@@ -34,77 +34,39 @@ export function BalanceSummary() {
   ].join(' · ')
 
   return (
-    <section className="glass-card rounded-2xl" aria-labelledby="balance-title">
-      <div className="px-4 pt-4 sm:px-5 flex items-center justify-between gap-3">
-        <h2 id="balance-title" className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-          Your balance
-        </h2>
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          Today, {format(parseISO(today), 'MMM d')}
-        </span>
-      </div>
-
-      <div className="p-4 sm:px-5 grid grid-cols-1 md:grid-cols-[minmax(180px,1fr)_2fr] gap-4 sm:gap-5 items-stretch">
-        <div
-          className="flex flex-col justify-center"
-          aria-label={`Available now: ${fmt(available.total)} hours`}
-        >
-          <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden />
-            Available now
-          </div>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-4xl sm:text-[2.75rem] leading-none font-bold tracking-tight tabular-nums">
-              {fmt(available.total)}
-            </span>
-            <span className="text-base text-gray-500 dark:text-gray-400">hrs</span>
-          </div>
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            Across your leave pools · through today
-          </p>
-        </div>
-
-        <div className={`grid ${showBank ? 'grid-cols-3' : 'grid-cols-2'} gap-2 sm:gap-3 min-w-0`}>
-          <div
-            className="rounded-xl border border-gray-200/70 dark:border-gray-700/40 bg-gray-50/70 dark:bg-gray-800/35 p-2 sm:p-4 min-w-0"
-            aria-label={`Vacation available: ${fmt(available.vacation)} hours`}
-          >
-            <div className="flex min-h-5 items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-              <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" aria-hidden />
-              Vacation
-            </div>
-            <div className="mt-2 text-lg sm:text-2xl font-bold tracking-tight tabular-nums">
-              {fmt(available.vacation)}{' '}
-              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">hrs</span>
-            </div>
-            <p className="mt-1 text-[11px] sm:text-xs text-gray-500 dark:text-gray-400">
-              Vacation leave
-            </p>
-          </div>
-          <div
-            className="rounded-xl border border-gray-200/70 dark:border-gray-700/40 bg-gray-50/70 dark:bg-gray-800/35 p-2 sm:p-4 min-w-0"
-            aria-label={`Sick leave available: ${fmt(available.sick)} hours`}
-          >
-            <div className="flex min-h-5 items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-              <HeartPulse className="w-3.5 h-3.5 text-rose-500 shrink-0" aria-hidden />
-              Sick
-            </div>
-            <div className="mt-2 text-lg sm:text-2xl font-bold tracking-tight tabular-nums">
-              {fmt(available.sick)}{' '}
-              <span className="text-xs font-normal text-gray-500 dark:text-gray-400">hrs</span>
-            </div>
-            <p className="mt-1 text-[11px] sm:text-xs text-gray-500 dark:text-gray-400">
-              Sick leave
-            </p>
-          </div>
-          {showBank && <BankCard embedded />}
-        </div>
+    <section aria-label="Your balance">
+      <div
+        data-testid="balance-card-grid"
+        className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${showBank ? 'xl:grid-cols-7' : 'xl:grid-cols-6'} gap-2 sm:gap-3 auto-rows-fr`}
+      >
+        <CompactBalanceCard
+          label="Available now"
+          value={fmt(available.total)}
+          description="Across leave pools"
+          ariaLabel={`Available now: ${fmt(available.total)} hours`}
+        />
+        <CompactBalanceCard
+          label="Vacation"
+          value={fmt(available.vacation)}
+          description="Available through today"
+          ariaLabel={`Vacation available: ${fmt(available.vacation)} hours`}
+          icon={<Clock className="w-3.5 h-3.5 text-blue-500" aria-hidden />}
+        />
+        <CompactBalanceCard
+          label="Sick"
+          value={fmt(available.sick)}
+          description={`Limit ${fmt(state.policy.sickLeaveMaxBalance)} hrs`}
+          ariaLabel={`Sick leave available: ${fmt(available.sick)} hours`}
+          icon={<HeartPulse className="w-3.5 h-3.5 text-rose-500" aria-hidden />}
+        />
+        {showBank && <BankCard embedded />}
+        {children}
       </div>
 
       {shortfall > 0 && (
         <div
           role="status"
-          className="mx-4 sm:mx-5 mb-3 flex items-start gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300"
+          className="mt-2 flex items-start gap-2 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300"
         >
           <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden />
           <span>
@@ -114,21 +76,18 @@ export function BalanceSummary() {
         </div>
       )}
 
-      <details className="group border-t border-gray-200/70 dark:border-gray-700/40">
-        <summary className="flex list-none cursor-pointer items-center justify-between gap-3 px-4 py-3 sm:px-5 rounded-b-2xl hover:bg-gray-50/70 dark:hover:bg-gray-800/30 transition-colors [&::-webkit-details-marker]:hidden">
-          <div className="flex items-start gap-2 min-w-0">
+      <details className="group mt-1">
+        <summary className="flex list-none cursor-pointer items-center justify-between gap-3 px-1 py-1.5 rounded-lg hover:bg-gray-50/70 dark:hover:bg-gray-800/30 transition-colors [&::-webkit-details-marker]:hidden">
+          <div className="flex items-center gap-1.5 min-w-0">
             <Check
-              className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5"
+              className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0"
               aria-hidden
             />
-            <div className="text-xs leading-relaxed">
+            <div className="text-xs leading-snug">
               <p className="font-medium text-gray-700 dark:text-gray-200">
                 {todayUsed > 0
                   ? `${fmt(todayUsed)} hrs used today, already included`
                   : 'No time off charged today'}
-              </p>
-              <p className="text-gray-500 dark:text-gray-400">
-                {todayBreakdown || 'Future plans only affect forecasts'}
               </p>
             </div>
           </div>
@@ -140,7 +99,11 @@ export function BalanceSummary() {
             />
           </span>
         </summary>
-        <div className="px-4 sm:px-5 pb-4">
+        <div className="glass-card rounded-xl p-3 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            <span>Today, {format(parseISO(today), 'MMM d')}</span> ·{' '}
+            <span>{todayBreakdown || 'Future plans only affect forecasts'}</span>
+          </p>
           <p className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-3">
             Recorded balance − applied time off = available now
           </p>
@@ -210,5 +173,36 @@ export function BalanceSummary() {
         </div>
       </details>
     </section>
+  )
+}
+
+export function CompactBalanceCard({
+  label,
+  value,
+  description,
+  ariaLabel,
+  icon,
+  unit = 'hrs',
+}: {
+  label: string
+  value: string
+  description: ReactNode
+  ariaLabel?: string
+  icon?: ReactNode
+  unit?: string
+}) {
+  return (
+    <div className="glass-card rounded-xl px-3 py-2.5 min-w-0 h-full" aria-label={ariaLabel}>
+      <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 min-h-5">
+        {icon}
+        {label}
+      </div>
+      <div className="text-lg sm:text-xl font-bold tabular-nums tracking-tight mt-0.5">
+        {value} <span className="text-xs font-normal text-gray-500 dark:text-gray-400">{unit}</span>
+      </div>
+      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
+        {description}
+      </div>
+    </div>
   )
 }
