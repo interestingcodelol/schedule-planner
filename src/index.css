@@ -244,3 +244,14 @@ input[type='date'] {
     display: none;
   }
 }
+
+/* Clock ranges are secondary to hours consumed. Show them in calendar cells
+ * only when the desktop has room; the tooltip and editor retain exact times. */
+.calendar-time-detail {
+  display: none;
+}
+@media (min-width: 1280px) and (min-height: 1000px) {
+  .calendar-time-detail {
+    display: block;
+  }
+}

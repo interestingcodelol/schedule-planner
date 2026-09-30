@@ -13,11 +13,7 @@ import {
 import { preparePlannedEdit } from '../lib/plannedLedger'
 import { useFocusTrap } from '../lib/useFocusTrap'
 import { useAppState } from '../context'
-import {
-  countWorkDays,
-  getEffectiveCurrentBalances,
-  projectBalance,
-} from '../lib/projection'
+import { countWorkDays, getEffectiveCurrentBalances, projectBalance } from '../lib/projection'
 
 type DayPopoverMode = 'plan' | 'log_past' | 'adjust_past'
 
@@ -44,14 +40,7 @@ function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : (Math.round(n * 100) / 100).toString()
 }
 
-export function DayPopover({
-  date,
-  existing,
-  hoursPerWorkDay,
-  onSave,
-  onRemove,
-  onClose,
-}: Props) {
+export function DayPopover({ date, existing, hoursPerWorkDay, onSave, onRemove, onClose }: Props) {
   const { state } = useAppState()
   const workStart = 8
   const workEnd = workStart + hoursPerWorkDay
@@ -64,20 +53,22 @@ export function DayPopover({
   const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
   const isPastDay = format(date, 'yyyy-MM-dd') < todayIso
 
-  const mode: DayPopoverMode = isPastDay
-    ? existing
-      ? 'adjust_past'
-      : 'log_past'
-    : 'plan'
+  const mode: DayPopoverMode = isPastDay ? (existing ? 'adjust_past' : 'log_past') : 'plan'
 
   const [partialOrFull, setPartialOrFull] = useState<'full' | 'partial'>(
     existing?.hoursPerDay !== undefined && existing.hoursPerDay < hoursPerWorkDay
       ? 'partial'
       : 'full',
   )
-  const [startTime, setStartTime] = useState(existing?.timeOffStart ?? `${String(workStart).padStart(2, '0')}:00`)
+  const [startTime, setStartTime] = useState(
+    existing?.timeOffStart ?? `${String(workStart).padStart(2, '0')}:00`,
+  )
   const [endTime, setEndTime] = useState(
-    existing?.timeOffEnd ?? `${String(workStart + Math.floor(hoursPerWorkDay / 2)).padStart(2, '0')}:00`,
+    existing?.timeOffEnd ??
+      hoursToHHMM(
+        (existing?.timeOffStart ? hhmmToHours(existing.timeOffStart) : workStart) +
+          (existing?.hoursPerDay ?? hoursPerWorkDay / 2),
+      ),
   )
   const [source, setSource] = useState<'vacation' | 'sick' | 'bank' | 'any'>(
     existing?.hourSource ?? (mode === 'log_past' ? 'sick' : 'any'),
@@ -94,14 +85,12 @@ export function DayPopover({
         countWorkDays(parseISO(existing.startDate), parseISO(existing.endDate), state.policy),
       )
     : 1
-  const perDayHrs = existing ? existing.hoursPerDay ?? hoursPerWorkDay : hoursPerWorkDay
+  const perDayHrs = existing ? (existing.hoursPerDay ?? hoursPerWorkDay) : hoursPerWorkDay
   // Original total hours for the whole entry.
   const plannedHrs = perDayHrs * spanWorkDays
   // Ceiling when adjusting: a full work day per charged day.
   const maxAdjustHrs = spanWorkDays * hoursPerWorkDay
-  const [actualHours, setActualHours] = useState<number>(
-    existing?.actualHoursUsed ?? plannedHrs,
-  )
+  const [actualHours, setActualHours] = useState<number>(existing?.actualHoursUsed ?? plannedHrs)
   const modalRef = useRef<HTMLDivElement>(null)
   useFocusTrap(modalRef, true)
 
@@ -118,11 +107,16 @@ export function DayPopover({
     if (mode !== 'log_past') {
       const updates = {
         hoursPerDay: partialOrFull === 'partial' ? hoursOff : undefined,
-        actualHoursUsed: existing?.hoursPerDay === (partialOrFull === 'partial' ? hoursOff : undefined) ? existing?.actualHoursUsed : undefined,
+        actualHoursUsed:
+          existing?.hoursPerDay === (partialOrFull === 'partial' ? hoursOff : undefined)
+            ? existing?.actualHoursUsed
+            : undefined,
         hourSource: 'any' as const,
       }
       const base = existing ? preparePlannedEdit(state, existing.id, updates) : state
-      const retained = existing ? base.plannedVacations.find((v) => v.id === existing.id) : undefined
+      const retained = existing
+        ? base.plannedVacations.find((v) => v.id === existing.id)
+        : undefined
       const proposal: PlannedVacation = {
         ...retained,
         ...updates,
@@ -133,16 +127,32 @@ export function DayPopover({
         locked: false,
         kind: 'planned',
       }
-      const projection = projectBalance({
-        ...base,
-        plannedVacations: [...base.plannedVacations.filter((v) => v.id !== proposal.id), proposal],
-      }, date)
-      const pending = projection.events.find((e) => e.vacationId === proposal.id && e.date === format(date, 'yyyy-MM-dd'))
-      const booked = proposal.appliedDeductions?.find((row) => row.date === format(date, 'yyyy-MM-dd'))
-      const event = pending ?? (booked ? { drawn: booked.drawn, requestedHours: booked.hours } : undefined)
+      const projection = projectBalance(
+        {
+          ...base,
+          plannedVacations: [
+            ...base.plannedVacations.filter((v) => v.id !== proposal.id),
+            proposal,
+          ],
+        },
+        date,
+      )
+      const pending = projection.events.find(
+        (e) => e.vacationId === proposal.id && e.date === format(date, 'yyyy-MM-dd'),
+      )
+      const booked = proposal.appliedDeductions?.find(
+        (row) => row.date === format(date, 'yyyy-MM-dd'),
+      )
+      const event =
+        pending ?? (booked ? { drawn: booked.drawn, requestedHours: booked.hours } : undefined)
       if (!event?.drawn) return { bank: 0, vacation: 0, sick: 0, short: 0 }
       const { bank, vacation, sick } = event.drawn
-      return { bank, vacation, sick, short: Math.max(0, (event.requestedHours ?? hoursOff) - bank - vacation - sick) }
+      return {
+        bank,
+        vacation,
+        sick,
+        short: Math.max(0, (event.requestedHours ?? hoursOff) - bank - vacation - sick),
+      }
     }
     const eff = getEffectiveCurrentBalances(state)
     let remaining = hoursOff
@@ -166,7 +176,9 @@ export function DayPopover({
     modalRef.current?.focus()
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = previousOverflow }
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
   }, [])
 
   const handleSave = () => {
@@ -236,9 +248,7 @@ export function DayPopover({
     const debited = existing.debitedFrom
     const refundPoolLabel = (() => {
       if (debited) {
-        const pools = (['bank', 'vacation', 'sick'] as const).filter(
-          (p) => debited[p] > 0,
-        )
+        const pools = (['bank', 'vacation', 'sick'] as const).filter((p) => debited[p] > 0)
         if (pools.length > 0) return pools.join('/')
       }
       return existing.hourSource === 'any' ? 'vacation' : existing.hourSource
@@ -323,7 +333,9 @@ export function DayPopover({
                   className="flex-1 px-3 py-2 text-center text-base font-bold tabular-nums bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
-                  onClick={() => setActualHours((h) => Math.min(maxAdjustHrs, roundToQuarter(h + 0.25)))}
+                  onClick={() =>
+                    setActualHours((h) => Math.min(maxAdjustHrs, roundToQuarter(h + 0.25)))
+                  }
                   className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700/60 text-sm font-bold"
                   aria-label="Increase by 15 minutes"
                 >
@@ -384,7 +396,9 @@ export function DayPopover({
               {format(date, 'EEEE, MMM d')}
             </div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {mode === 'log_past' ? 'Log past absence' : `${fmt(hoursOff)}h off · ${fmt(hoursPerWorkDay - hoursOff)}h working`}
+              {mode === 'log_past'
+                ? 'Log past absence'
+                : `${fmt(hoursOff)}h off · ${fmt(hoursPerWorkDay - hoursOff)}h working`}
             </div>
           </div>
           <button
@@ -400,12 +414,15 @@ export function DayPopover({
         <div className="p-5 space-y-5 overflow-y-auto scroll-panel">
           {existing && existing.startDate !== existing.endDate && (
             <p className="rounded-xl bg-blue-500/10 p-3 text-xs text-blue-300">
-              Editing this entire entry: {format(parseISO(existing.startDate), 'MMM d')}–{format(parseISO(existing.endDate), 'MMM d')}. Hours apply to each workday; removing it removes the whole entry.
+              Editing this entire entry: {format(parseISO(existing.startDate), 'MMM d')}–
+              {format(parseISO(existing.endDate), 'MMM d')}. Hours apply to each workday; removing
+              it removes the whole entry.
             </p>
           )}
           {mode === 'log_past' && (
             <div className="rounded-xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200/50 dark:border-rose-800/30 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-300">
-              This will deduct hours from your current balance to keep the planner in sync with your timecard system.
+              This will deduct hours from your current balance to keep the planner in sync with your
+              timecard system.
             </div>
           )}
 
@@ -427,7 +444,9 @@ export function DayPopover({
                 setPartialOrFull('partial')
                 if (hhmmToHours(endTime) - hhmmToHours(startTime) >= hoursPerWorkDay) {
                   setStartTime(`${String(workStart).padStart(2, '0')}:00`)
-                  setEndTime(`${String(workStart + Math.floor(hoursPerWorkDay / 2)).padStart(2, '0')}:00`)
+                  setEndTime(
+                    `${String(workStart + Math.floor(hoursPerWorkDay / 2)).padStart(2, '0')}:00`,
+                  )
                 }
               }}
               className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-xl border-2 transition-all ${
@@ -462,10 +481,7 @@ export function DayPopover({
               )}
               <div className="absolute inset-0 flex pointer-events-none">
                 {Array.from({ length: dayHours }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="flex-1 border-r border-white/15 last:border-r-0"
-                  />
+                  <div key={i} className="flex-1 border-r border-white/15 last:border-r-0" />
                 ))}
               </div>
             </div>
@@ -585,7 +601,11 @@ export function DayPopover({
             </div>
             <input
               type="text"
-              placeholder={mode === 'log_past' ? "Note (optional, e.g. 'Flu')" : "Note (optional, e.g. 'Dentist appointment')"}
+              placeholder={
+                mode === 'log_past'
+                  ? "Note (optional, e.g. 'Flu')"
+                  : "Note (optional, e.g. 'Dentist appointment')"
+              }
               value={note}
               onChange={(e) => setNote(e.target.value)}
               className="w-full px-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -615,9 +635,15 @@ export function DayPopover({
               }
             >
               {mode === 'log_past' ? (
-                <><History className="w-4 h-4" />Log absence</>
+                <>
+                  <History className="w-4 h-4" />
+                  Log absence
+                </>
               ) : (
-                <><CalendarCheck className="w-4 h-4" />{existing ? 'Update' : 'Add to calendar'}</>
+                <>
+                  <CalendarCheck className="w-4 h-4" />
+                  {existing ? 'Update' : 'Add to calendar'}
+                </>
               )}
             </button>
           </div>

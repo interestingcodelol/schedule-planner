@@ -266,6 +266,11 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
           `🏖️ Planned time off${plannedVacation?.note ? ` — ${plannedVacation.note}` : ''}`,
         )
       }
+      if (plannedVacation?.timeOffStart && plannedVacation.timeOffEnd) {
+        parts.push(
+          `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`,
+        )
+      }
       // Multi-day streak context
       if (plannedVacation && plannedVacation.startDate !== plannedVacation.endDate) {
         const days =
@@ -441,16 +446,15 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         <div className="calendar-time-indicator absolute inset-x-2 top-7 sm:top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
           {isPartialDay ? (
             <>
-              <div
-                className={`calendar-time-detail hidden sm:block text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}
-              >
-                {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
-                  ? `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`
-                  : `${fmt(deductHours)}h`}
-              </div>
-              <div
-                className={`calendar-time-detail hidden sm:block w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`}
-              />
+              {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd && (
+                <div
+                  className={`calendar-time-detail text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}
+                >
+                  {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
+                    ? `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`
+                    : `${fmt(deductHours)}h`}
+                </div>
+              )}
               <div
                 className={`text-[10px] sm:text-xs mt-0.5 font-bold whitespace-nowrap ${isUnaffordable ? 'text-red-400' : 'text-sky-300'}`}
               >

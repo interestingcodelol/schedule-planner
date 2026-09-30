@@ -22,7 +22,7 @@ export function InlineToast() {
   // (Settings, day popovers, etc. sit at z-50). Anchoring this inline in the
   // header meant any toast fired from within a modal appeared behind it.
   return createPortal(
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[70] flex items-center gap-2 px-4 py-2 rounded-xl bg-white dark:bg-gray-800 text-sm shadow-2xl ring-1 ring-black/10 dark:ring-white/10 animate-slide-up max-w-[calc(100vw-2rem)]">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2 rounded-xl bg-white dark:bg-gray-800 text-sm shadow-2xl ring-1 ring-black/10 dark:ring-white/10 animate-slide-up max-w-[calc(100vw-2rem)]">
       <span className="min-w-0 break-words text-gray-700 dark:text-gray-200">{toast.message}</span>
       {toast.action && (
         <button

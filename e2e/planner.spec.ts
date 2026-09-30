@@ -350,6 +350,7 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await page.getByRole('button', { name: /October 19, 2026.*planned time off/ }).click()
     const editor = page.getByRole('dialog', { name: 'Plan time off for October 19' })
     await expect(editor).toBeVisible()
+    await expect(editor.getByLabel('Off until', { exact: true })).toHaveValue('10:15')
     const editorBounds = await editor.boundingBox()
     expect(editorBounds!.x).toBeGreaterThanOrEqual(0)
     expect(editorBounds!.x + editorBounds!.width).toBeLessThanOrEqual(size.width + 1)

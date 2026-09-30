@@ -12,30 +12,67 @@ import { useUpcomingItems } from '../../lib/upcomingItems'
 
 function fixture(): AppState {
   return {
-    profile: { displayName: 'Test', hireDate: '2023-01-01', currentVacationHours: 40,
-      currentSickHours: 20, currentBankHours: 4.75, lastPaydayDate: '2026-09-25',
-      lastSyncDate: '2026-09-29', timezone: 'America/Los_Angeles' },
-    policy: { ...defaultPolicy }, plannedVacations: [], bankHoursLog: [],
-    theme: 'dark', showTour: false, version: 1,
+    profile: {
+      displayName: 'Test',
+      hireDate: '2023-01-01',
+      currentVacationHours: 40,
+      currentSickHours: 20,
+      currentBankHours: 4.75,
+      lastPaydayDate: '2026-09-25',
+      lastSyncDate: '2026-09-29',
+      timezone: 'America/Los_Angeles',
+    },
+    policy: { ...defaultPolicy },
+    plannedVacations: [],
+    bankHoursLog: [],
+    theme: 'dark',
+    showTour: false,
+    version: 1,
   }
 }
 function mount(ui: React.ReactNode, state: AppState) {
   const noop = vi.fn()
   const value: AppContextType = {
-    state, setState: noop, importState: noop, updateProfile: noop, updatePolicy: noop,
-    addVacation: noop, removeVacation: noop, updateVacation: noop, addPastAbsence: noop,
-    removePastAbsence: noop, adjustActualHours: noop, addBankHours: noop, removeBankHours: noop,
-    toggleTheme: noop, setShowTour: noop, isDemo: true, resetToSetup: noop,
+    state,
+    setState: noop,
+    importState: noop,
+    updateProfile: noop,
+    updatePolicy: noop,
+    addVacation: noop,
+    removeVacation: noop,
+    updateVacation: noop,
+    addPastAbsence: noop,
+    removePastAbsence: noop,
+    adjustActualHours: noop,
+    addBankHours: noop,
+    removeBankHours: noop,
+    toggleTheme: noop,
+    setShowTour: noop,
+    isDemo: true,
+    resetToSetup: noop,
   }
   return render(<AppContext.Provider value={value}>{ui}</AppContext.Provider>)
 }
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T02:00:00Z')) })
-afterEach(() => { cleanup(); vi.useRealTimers() })
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-09-30T02:00:00Z'))
+})
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('consistent calendar-local balance UX', () => {
   it('keeps profile-local today visible and plannable after 4pm and across host midnight', () => {
     const onDayClick = vi.fn()
-    mount(<CalendarDay date={parseISO('2026-09-29')} currentMonth={parseISO('2026-09-01')} onDayClick={onDayClick} />, fixture())
+    mount(
+      <CalendarDay
+        date={parseISO('2026-09-29')}
+        currentMonth={parseISO('2026-09-01')}
+        onDayClick={onDayClick}
+      />,
+      fixture(),
+    )
     const cell = screen.getByRole('button', { name: 'September 29, 2026, today' })
     expect(cell.getAttribute('title')).not.toContain('past absence')
     expect(cell.getAttribute('title')).toContain('Balance: 64.75 hrs')
@@ -45,24 +82,98 @@ describe('consistent calendar-local balance UX', () => {
   it('flags a selected-pool shortage even when other pools have hours', () => {
     const state = fixture()
     state.profile.currentVacationHours = 2
-    state.plannedVacations = [{ id: 'today', startDate: '2026-09-29', endDate: '2026-09-29', hourSource: 'vacation', locked: false }]
-    mount(<CalendarDay date={parseISO('2026-09-29')} currentMonth={parseISO('2026-09-01')} onDayClick={vi.fn()} />, state)
-    expect(screen.getByRole('button', { name: /insufficient hours/ }).getAttribute('title')).toContain('6 hrs of planned time off cannot be covered')
+    state.plannedVacations = [
+      {
+        id: 'today',
+        startDate: '2026-09-29',
+        endDate: '2026-09-29',
+        hourSource: 'vacation',
+        locked: false,
+      },
+    ]
+    mount(
+      <CalendarDay
+        date={parseISO('2026-09-29')}
+        currentMonth={parseISO('2026-09-01')}
+        onDayClick={vi.fn()}
+      />,
+      state,
+    )
+    expect(
+      screen.getByRole('button', { name: /insufficient hours/ }).getAttribute('title'),
+    ).toContain('6 hrs of planned time off cannot be covered')
   })
   it('counts recorded multi-day actuals once in the monthly heading', () => {
     const state = fixture()
-    state.plannedVacations = [{ id: 'past', startDate: '2026-09-21', endDate: '2026-09-22', hourSource: 'vacation', locked: false, kind: 'logged_past', actualHoursUsed: 10 }]
+    state.plannedVacations = [
+      {
+        id: 'past',
+        startDate: '2026-09-21',
+        endDate: '2026-09-22',
+        hourSource: 'vacation',
+        locked: false,
+        kind: 'logged_past',
+        actualHoursUsed: 10,
+      },
+    ]
     mount(<CalendarView />, state)
-    expect(screen.getByRole('button', { name: /September 2026 10h off across 2 partial days/ })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /September 2026 10h off across 2 partial days/ }),
+    ).toBeInTheDocument()
   })
   it('previews the original bank allocation when editing today instead of deducting twice', () => {
     const state = fixture()
-    const existing = { id: 'today', startDate: '2026-09-29', endDate: '2026-09-29', hourSource: 'any' as const, locked: false }
+    const existing = {
+      id: 'today',
+      startDate: '2026-09-29',
+      endDate: '2026-09-29',
+      hourSource: 'any' as const,
+      locked: false,
+    }
     state.plannedVacations = [existing]
-    mount(<DayPopover date={parseISO('2026-09-29')} existing={existing} hoursPerWorkDay={8} onSave={vi.fn()} onRemove={vi.fn()} onClose={vi.fn()} />, state)
+    mount(
+      <DayPopover
+        date={parseISO('2026-09-29')}
+        existing={existing}
+        hoursPerWorkDay={8}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+        onClose={vi.fn()}
+      />,
+      state,
+    )
     expect(screen.getByText('4.75h')).toBeInTheDocument()
     expect(screen.getByText('3.25h')).toBeInTheDocument()
   })
+  it.each([0.25, 2.25, 7.75])(
+    'preserves an untimed %s-hour appointment when opened and saved',
+    (hours) => {
+      const state = fixture()
+      const existing = {
+        id: 'partial',
+        startDate: '2026-10-19',
+        endDate: '2026-10-19',
+        hoursPerDay: hours,
+        hourSource: 'vacation' as const,
+        locked: false,
+      }
+      state.plannedVacations = [existing]
+      const onSave = vi.fn()
+      mount(
+        <DayPopover
+          date={parseISO('2026-10-19')}
+          existing={existing}
+          hoursPerWorkDay={8}
+          onSave={onSave}
+          onRemove={vi.fn()}
+          onClose={vi.fn()}
+        />,
+        state,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Update' }))
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ hoursPerDay: hours }))
+    },
+  )
   it('labels planner fields and uses profile-local today for their date limits', () => {
     mount(<VacationPlanner />, fixture())
     expect(screen.getByLabelText('Start')).toHaveAttribute('min', '2026-09-29')
@@ -74,11 +185,41 @@ describe('consistent calendar-local balance UX', () => {
     vi.setSystemTime(new Date('2026-05-01T12:00:00Z'))
     const state = fixture()
     state.policy.holidays = [
-      { name: 'Memorial Day', type: 'last_weekday', month: 5, weekday: 1, weekendObservance: 'none' },
-      { name: 'Independence Day', type: 'fixed', month: 7, day: 4, weekendObservance: 'nearest_weekday' },
-      { name: 'Not yet', type: 'fixed', month: 5, day: 6, weekendObservance: 'none', startYear: 2027 },
+      {
+        name: 'Memorial Day',
+        type: 'last_weekday',
+        month: 5,
+        weekday: 1,
+        weekendObservance: 'none',
+      },
+      {
+        name: 'Independence Day',
+        type: 'fixed',
+        month: 7,
+        day: 4,
+        weekendObservance: 'nearest_weekday',
+      },
+      {
+        name: 'Not yet',
+        type: 'fixed',
+        month: 5,
+        day: 6,
+        weekendObservance: 'none',
+        startYear: 2027,
+      },
     ]
-    function Holidays() { const { infoEvents } = useUpcomingItems(); return <>{infoEvents.map(e => <p key={e.key}>{e.label}: {e.detail}</p>)}</> }
+    function Holidays() {
+      const { infoEvents } = useUpcomingItems()
+      return (
+        <>
+          {infoEvents.map((e) => (
+            <p key={e.key}>
+              {e.label}: {e.detail}
+            </p>
+          ))}
+        </>
+      )
+    }
     mount(<Holidays />, state)
     expect(screen.getByText(/Memorial Day: Mon, May 25/)).toBeInTheDocument()
     expect(screen.getByText(/Independence Day: Fri, Jul 3/)).toBeInTheDocument()
@@ -86,21 +227,32 @@ describe('consistent calendar-local balance UX', () => {
   })
   it('rejects sub-quarter-hour input instead of accidentally saving a full day', () => {
     mount(<VacationPlanner />, fixture())
-    fireEvent.change(screen.getByLabelText('Start'), {target:{value:'2026-09-30'}})
-    fireEvent.change(screen.getByLabelText('End'), {target:{value:'2026-09-30'}})
-    fireEvent.change(screen.getByLabelText('Hrs/day'), {target:{value:'0.1'}})
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: '2026-09-30' } })
+    fireEvent.change(screen.getByLabelText('End'), { target: { value: '2026-09-30' } })
+    fireEvent.change(screen.getByLabelText('Hrs/day'), { target: { value: '0.1' } })
     expect(screen.getByText('Hours per day must be between 0.25 and 8')).toBeInTheDocument()
-    expect(screen.queryByRole('button',{name:'Add to calendar'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add to calendar' })).not.toBeInTheDocument()
   })
   it('previews payday accrual before PTO and bank payout after PTO', () => {
-    const state=fixture()
-    state.profile.currentVacationHours=0;state.profile.currentBankHours=2;state.profile.currentSickHours=0
-    state.profile.lastPaydayDate='2026-09-29';state.policy.payPeriodLengthDays=1
-    state.policy.bankHoursPayoutStart={month:9,day:30}
-    mount(<DayPopover date={parseISO('2026-09-30')} hoursPerWorkDay={8} onSave={vi.fn()} onRemove={vi.fn()} onClose={vi.fn()} />,state)
+    const state = fixture()
+    state.profile.currentVacationHours = 0
+    state.profile.currentBankHours = 2
+    state.profile.currentSickHours = 0
+    state.profile.lastPaydayDate = '2026-09-29'
+    state.policy.payPeriodLengthDays = 1
+    state.policy.bankHoursPayoutStart = { month: 9, day: 30 }
+    mount(
+      <DayPopover
+        date={parseISO('2026-09-30')}
+        hoursPerWorkDay={8}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+        onClose={vi.fn()}
+      />,
+      state,
+    )
     expect(screen.getByText('2h')).toBeInTheDocument()
     expect(screen.getByText('3.08h')).toBeInTheDocument()
     expect(screen.getByText(/2.92h short/)).toBeInTheDocument()
   })
-
 })
