@@ -40,6 +40,7 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
         className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${showBank ? 'xl:grid-cols-7' : 'xl:grid-cols-6'} gap-2 sm:gap-3 auto-rows-fr`}
       >
         <CompactBalanceCard
+          className="col-span-2 sm:col-span-3 md:col-span-2 xl:col-span-1"
           label="Available now"
           value={fmt(available.total)}
           description="Across leave pools"
@@ -183,7 +184,9 @@ export function CompactBalanceCard({
   ariaLabel,
   icon,
   unit = 'hrs',
+  className = '',
 }: {
+  className?: string
   label: string
   value: string
   description: ReactNode
@@ -192,7 +195,10 @@ export function CompactBalanceCard({
   unit?: string
 }) {
   return (
-    <div className="glass-card rounded-xl px-3 py-2.5 min-w-0 h-full" aria-label={ariaLabel}>
+    <div
+      className={`glass-card rounded-xl px-3 py-2.5 min-w-0 h-full ${className}`}
+      aria-label={ariaLabel}
+    >
       <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 min-h-5">
         {icon}
         {label}

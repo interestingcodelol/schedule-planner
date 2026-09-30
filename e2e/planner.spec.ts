@@ -176,20 +176,22 @@ test('compact layout matches original density', async ({ page, browser }, info) 
         topBlockHeight: top.height,
         calendarTop: calendar.top,
         viewportWidth: innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
         viewportHeight: innerHeight,
       }
     })
   const revised = await measure(page)
-  const sizes = await page
-    .getByTestId('balance-card-grid')
-    .evaluate((el) =>
-      Array.from(el.children).map((card) => ({
-        width: card.getBoundingClientRect().width,
-        height: card.getBoundingClientRect().height,
-      })),
-    )
+  const sizes = await page.getByTestId('balance-card-grid').evaluate((el) =>
+    Array.from(el.children).map((card) => ({
+      width: card.getBoundingClientRect().width,
+      height: card.getBoundingClientRect().height,
+    })),
+  )
+  const equalWidthCards = info.project.name === 'desktop' ? sizes : sizes.slice(1)
   expect(
-    Math.max(...sizes.map((s) => s.width)) - Math.min(...sizes.map((s) => s.width)),
+    Math.max(...equalWidthCards.map((s) => s.width)) -
+      Math.min(...equalWidthCards.map((s) => s.width)),
   ).toBeLessThanOrEqual(1)
   expect(
     Math.max(...sizes.map((s) => s.height)) - Math.min(...sizes.map((s) => s.height)),
