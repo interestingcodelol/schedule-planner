@@ -482,12 +482,13 @@ export function DayPopover({
           </div>
 
           {partialOrFull === 'partial' && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wider">
                   Off from
                 </label>
                 <input
+                  aria-label="Off from"
                   type="time"
                   step={900}
                   value={startTime}
@@ -500,6 +501,7 @@ export function DayPopover({
                   Off until
                 </label>
                 <input
+                  aria-label="Off until"
                   type="time"
                   step={900}
                   value={endTime}

@@ -327,7 +327,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       className={`
-        group relative p-1.5 min-h-[58px] lg:min-h-[5rem] border-r border-b
+        group relative p-1.5 min-h-[64px] lg:min-h-[5rem] border-r border-b
         ${borderClass}
         ${bgClass}
         ${!isCurrentMonth ? 'opacity-[0.08]' : ''}
@@ -407,14 +407,14 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         <div className="absolute inset-x-2 top-7 sm:top-9 bottom-7 flex flex-col items-center justify-center pointer-events-none">
           {isPartialDay ? (
             <>
-              <div className={`text-[10px] sm:text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
+              <div className={`hidden sm:block text-sm font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-400'}`}>
                 {plannedVacation?.timeOffStart && plannedVacation?.timeOffEnd
                   ? `${formatTimeCompact(plannedVacation.timeOffStart)} – ${formatTimeCompact(plannedVacation.timeOffEnd)}`
                   : `${fmt(deductHours)}h`}
               </div>
-              <div className={`w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`} />
-              <div className={`text-xs mt-0.5 font-bold ${isUnaffordable ? 'text-red-400' : 'text-sky-300'}`}>
-                {fmt(deductHours)}h off
+              <div className={`hidden sm:block w-8 h-[3px] rounded-full mt-1 ${isUnaffordable ? 'bg-red-400' : 'bg-sky-400'}`} />
+              <div className={`text-[10px] sm:text-xs mt-0.5 font-bold whitespace-nowrap ${isUnaffordable ? 'text-red-400' : 'text-sky-300'}`}>
+                {fmt(deductHours)}h<span className="hidden sm:inline"> off</span>
               </div>
             </>
           ) : (

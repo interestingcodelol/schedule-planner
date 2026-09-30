@@ -66,14 +66,14 @@ export function BalanceSummary() {
 
         <div className={`grid ${showBank ? 'grid-cols-3' : 'grid-cols-2'} gap-2 sm:gap-3 min-w-0`}>
           <div
-            className="rounded-xl border border-gray-200/70 dark:border-gray-700/40 bg-gray-50/70 dark:bg-gray-800/35 p-3 sm:p-4 min-w-0"
+            className="rounded-xl border border-gray-200/70 dark:border-gray-700/40 bg-gray-50/70 dark:bg-gray-800/35 p-2 sm:p-4 min-w-0"
             aria-label={`Vacation available: ${fmt(available.vacation)} hours`}
           >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <div className="flex min-h-5 items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
               <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" aria-hidden />
               Vacation
             </div>
-            <div className="mt-2 text-xl sm:text-2xl font-bold tracking-tight tabular-nums">
+            <div className="mt-2 text-lg sm:text-2xl font-bold tracking-tight tabular-nums">
               {fmt(available.vacation)}{' '}
               <span className="text-xs font-normal text-gray-500 dark:text-gray-400">hrs</span>
             </div>
@@ -82,14 +82,14 @@ export function BalanceSummary() {
             </p>
           </div>
           <div
-            className="rounded-xl border border-gray-200/70 dark:border-gray-700/40 bg-gray-50/70 dark:bg-gray-800/35 p-3 sm:p-4 min-w-0"
+            className="rounded-xl border border-gray-200/70 dark:border-gray-700/40 bg-gray-50/70 dark:bg-gray-800/35 p-2 sm:p-4 min-w-0"
             aria-label={`Sick leave available: ${fmt(available.sick)} hours`}
           >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+            <div className="flex min-h-5 items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
               <HeartPulse className="w-3.5 h-3.5 text-rose-500 shrink-0" aria-hidden />
               Sick
             </div>
-            <div className="mt-2 text-xl sm:text-2xl font-bold tracking-tight tabular-nums">
+            <div className="mt-2 text-lg sm:text-2xl font-bold tracking-tight tabular-nums">
               {fmt(available.sick)}{' '}
               <span className="text-xs font-normal text-gray-500 dark:text-gray-400">hrs</span>
             </div>

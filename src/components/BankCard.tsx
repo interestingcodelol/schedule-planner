@@ -76,31 +76,31 @@ export function BankCard({ embedded = false }: { embedded?: boolean }) {
         aria-label={`Bank hours: ${fmt(balance)} hours — click to manage`}
         className={`w-full text-left rounded-xl relative overflow-hidden flex flex-col hover:bg-white/90 dark:hover:bg-gray-900/70 transition-colors ${
           embedded
-            ? 'h-full p-3 sm:p-4 min-h-[7.5rem] border border-gray-200/60 dark:border-gray-700/50 bg-gray-50/70 dark:bg-gray-800/35'
+            ? 'h-full p-2 sm:p-4 min-h-[6.5rem] border border-gray-200/60 dark:border-gray-700/50 bg-gray-50/70 dark:bg-gray-800/35'
             : 'glass-card px-3 py-2.5 sm:px-4 sm:py-3 min-h-[4.5rem] sm:min-h-[5.5rem]'
         }`}
       >
         {!embedded && <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-cyan-500" />}
-        <div className="flex w-full items-center justify-between gap-1 mb-1">
-          <div className="flex min-w-0 items-center gap-1 sm:gap-1.5 text-gray-500 dark:text-gray-400 text-xs sm:text-sm font-medium">
+        <div className={`flex w-full min-h-5 items-center justify-between gap-1 ${embedded ? '' : 'mb-1'}`}>
+          <div className="flex min-w-0 items-center gap-1 sm:gap-1.5 text-gray-500 dark:text-gray-400 text-xs font-medium">
             <Wallet className="w-3.5 h-3.5 shrink-0 text-teal-500" />
             <span className="truncate">{embedded ? 'Bank' : 'Bank Hours'}</span>
           </div>
           {/* Clear, button-like affordance so it's obvious you can add/manage
               here (the whole card is the toggle; this is a styled span, not a
               nested button). */}
-          <span className="flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-600 dark:text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded-md shrink-0">
+          <span className={`${embedded ? 'hidden sm:flex' : 'flex'} items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-600 dark:text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded-md shrink-0`}>
             <Plus className="w-3 h-3" />
             <span className={embedded ? 'hidden sm:inline' : ''}>{open ? 'Close' : 'Add'}</span>
           </span>
         </div>
-        <div className={`${embedded ? 'text-xl sm:text-2xl mt-2' : 'text-lg sm:text-xl'} font-bold tabular-nums tracking-tight`}>
+        <div className={`${embedded ? 'text-lg sm:text-2xl mt-2' : 'text-lg sm:text-xl'} font-bold tabular-nums tracking-tight`}>
           {fmt(balance)} <span className={embedded ? 'text-xs font-normal text-gray-400' : ''}>hrs</span>
         </div>
-        <div className={`text-xs sm:text-[13px] text-gray-400 dark:text-gray-500 mt-0.5 leading-snug ${embedded ? '' : 'truncate'}`}>
+        <div className={`text-gray-400 leading-snug ${embedded ? 'text-[11px] sm:text-xs mt-1' : 'text-xs sm:text-[13px] mt-0.5 truncate'}`}>
           {!embedded && summary.deductions.bank > 0
             ? `${fmt(recordedBalance)} recorded − ${fmt(summary.deductions.bank)} scheduled`
-            : 'Extra hours worked'}
+            : embedded ? 'Manage hours' : 'Extra hours worked'}
         </div>
       </button>
 

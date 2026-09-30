@@ -7,7 +7,11 @@ function fixture(): AppState {
   return {
     profile: { displayName: 'Visual QA fixture', hireDate: '2023-01-01', currentVacationHours: 62.3, currentSickHours: 32, currentBankHours: 4.75, lastPaydayDate: '2026-09-25', lastSyncDate: '2026-09-29', timezone: 'UTC', backupRemindersDisabled: true },
     policy: { ...defaultPolicy },
-    plannedVacations: [{ id: 'today-fixture', startDate: '2026-09-29', endDate: '2026-09-29', hourSource: 'any', locked: false, note: 'Synthetic time off for visual verification' }],
+    plannedVacations: [
+      { id: 'today-fixture', startDate: '2026-09-29', endDate: '2026-09-29', hourSource: 'any', locked: false, note: 'Synthetic time off for visual verification' },
+      { id: 'future-fixture', startDate: '2026-10-05', endDate: '2026-10-09', hourSource: 'vacation', locked: false, note: 'Example vacation' },
+      { id: 'appointment-fixture', startDate: '2026-10-19', endDate: '2026-10-19', hoursPerDay: 2.25, hourSource: 'vacation', locked: false, note: 'Example appointment' },
+    ],
     bankHoursLog: [], theme: 'dark', showTour: false, version: 2,
   }
 }
@@ -40,6 +44,10 @@ test('balance, editing, dialog, bank, planner and chat visual smoke', async ({ p
   const editor = page.getByRole('dialog', { name: 'Plan time off for September 29' })
   await expect(editor).toBeVisible()
   await page.getByRole('button', { name: 'Partial Day', exact: true }).click()
+  if (info.project.name === 'mobile-360') {
+    const bounds = await page.getByLabel('Off from', {exact:true}).boundingBox()
+    expect(bounds?.width).toBeGreaterThan(200)
+  }
   await capture(page, info, '03-partial-day-dialog')
   await editor.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(editor).not.toBeVisible()
@@ -63,6 +71,9 @@ test('balance, editing, dialog, bank, planner and chat visual smoke', async ({ p
   await capture(page, info, '06-chat-current-balance')
   await page.getByRole('button', { name: 'Close chat' }).click()
   await expect(page.getByRole('dialog', { name: 'Plan time off assistant' })).not.toBeVisible()
+  await page.getByRole('button', { name: 'Next month', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'October 2026', exact: true })).toBeVisible()
+  await capture(page, info, '10-next-month-planning')
   expect(errors).toEqual([])
 })
 
@@ -87,6 +98,9 @@ test('legacy migration and backup settings are safe and reviewable', async ({ pa
   expect(backup._schemaVersion).toBe(2)
   expect(backup.state.version).toBe(2)
   expect(backup.state.plannedVacations[0].appliedDeductions).toHaveLength(1)
+  await settings.getByRole('button', { name: 'Clear all data', exact: true }).scrollIntoViewIfNeeded()
+  await expect(settings.getByRole('button', { name: 'Clear all data', exact: true })).toBeVisible()
+  await capture(page, info, '09-settings-bottom-reachable')
   await page.keyboard.press('Escape')
   await expect(settings).not.toBeVisible()
   await expect(page.getByRole('button', { name: 'Open settings' })).toBeFocused()

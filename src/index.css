@@ -156,3 +156,6 @@ input[type="date"] {
     scroll-behavior: auto !important;
   }
 }
+
+/* Native date/time controls need a dark palette as well as dark CSS fields. */
+.dark { color-scheme: dark; }
