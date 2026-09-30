@@ -289,6 +289,7 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
       }
       const nestedScroll = Array.from(document.querySelectorAll('main *'))
         .filter((el) => {
+          if (el.closest('details:not([open])')) return false
           const style = getComputedStyle(el)
           return /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1
         })
