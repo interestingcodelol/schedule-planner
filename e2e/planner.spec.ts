@@ -229,3 +229,111 @@ test('compact layout matches original density', async ({ page, browser }, info) 
   }
   await originalContext.close()
 })
+
+test('viewport and accessible reflow audit', async ({ browser }, info) => {
+  test.skip(info.project.name !== 'desktop', 'Run the viewport matrix once')
+  test.setTimeout(180_000)
+  const matrix = [
+    { name: 'laptop-1366x768', width: 1366, height: 768 },
+    { name: 'desktop-1440x900', width: 1440, height: 900 },
+    { name: 'desktop-1920x1080', width: 1920, height: 1080 },
+    { name: 'tablet-768x1024', width: 768, height: 1024 },
+    { name: 'phone-360x800', width: 360, height: 800 },
+    { name: 'phone-390x844', width: 390, height: 844 },
+    // Equivalent CSS viewport reflow at 125%/200% on a 1366x768 display.
+    // This is not browser-chrome zoom or a claim of real-device coverage.
+    { name: 'reflow-125percent', width: 1093, height: 614 },
+    { name: 'reflow-200percent', width: 683, height: 384 },
+  ]
+  const measurements = []
+  for (const size of matrix) {
+    const context = await browser.newContext({
+      viewport: size,
+      timezoneId: 'UTC',
+      colorScheme: 'dark',
+      reducedMotion: 'reduce',
+    })
+    const page = await context.newPage()
+    await seed(page)
+    await page.goto('/')
+    await expect(page.getByLabel('Available now: 91.05 hours')).toBeVisible()
+    const dimensions = await page.evaluate(() => {
+      const rect = (selector: string) => {
+        const r = document.querySelector(selector)!.getBoundingClientRect()
+        return { top: r.top, bottom: r.bottom, height: r.height }
+      }
+      const nestedScroll = Array.from(document.querySelectorAll('main *'))
+        .filter((el) => {
+          const style = getComputedStyle(el)
+          return /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight + 1
+        })
+        .map((el) => ({
+          tag: el.tagName,
+          label: el.getAttribute('aria-label'),
+          height: el.clientHeight,
+          scrollHeight: el.scrollHeight,
+        }))
+      return {
+        width: innerWidth,
+        height: innerHeight,
+        documentWidth: document.documentElement.scrollWidth,
+        documentHeight: document.documentElement.scrollHeight,
+        clientWidth: document.documentElement.clientWidth,
+        calendar: rect('[data-tour="calendar"]'),
+        planner: rect('[data-tour="planner"]'),
+        nestedScroll,
+      }
+    })
+    measurements.push({ name: size.name, ...dimensions })
+    expect(dimensions.documentWidth, `${size.name} horizontal overflow`).toBeLessThanOrEqual(
+      size.width + 1,
+    )
+    expect(dimensions.nestedScroll, `${size.name} dashboard nested scrolling`).toEqual([])
+    await page.screenshot({
+      path: info.outputPath(`${size.name}-dashboard.png`),
+      animations: 'disabled',
+    })
+    await page.getByRole('button', { name: /Bank hours: 0 hours/ }).click()
+    const bankInput = page.getByPlaceholder('Hours', { exact: true })
+    await expect(bankInput).toBeVisible()
+    const bankBounds = await bankInput.locator('..').locator('..').boundingBox()
+    expect(bankBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bankBounds!.x + bankBounds!.width).toBeLessThanOrEqual(size.width + 1)
+    await page.screenshot({
+      path: info.outputPath(`${size.name}-bank.png`),
+      animations: 'disabled',
+    })
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Next month', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'October 2026', exact: true })).toBeVisible()
+    await page.screenshot({
+      path: info.outputPath(`${size.name}-populated.png`),
+      animations: 'disabled',
+      fullPage: true,
+    })
+    await page.getByRole('button', { name: 'Open settings' }).click()
+    const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+    await expect(settings).toBeVisible()
+    await settings.getByRole('button', { name: 'Data', exact: true }).click()
+    const clear = settings.getByRole('button', { name: 'Clear all data', exact: true })
+    await clear.focus()
+    await expect(clear).toBeInViewport()
+    const bounds = await settings.boundingBox()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(size.width + 1)
+    expect(bounds!.y).toBeGreaterThanOrEqual(0)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(size.height + 1)
+    await page.screenshot({
+      path: info.outputPath(`${size.name}-settings-bottom.png`),
+      animations: 'disabled',
+    })
+    await page.keyboard.press('Escape')
+    await expect(settings).not.toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open settings' })).toBeFocused()
+    await context.close()
+  }
+  await writeFile(
+    info.outputPath('viewport-measurements.json'),
+    JSON.stringify(measurements, null, 2),
+  )
+})

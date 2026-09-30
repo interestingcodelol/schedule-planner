@@ -92,10 +92,10 @@ export function BankCard({ embedded = false }: { embedded?: boolean }) {
               here (the whole card is the toggle; this is a styled span, not a
               nested button). */}
           <span
-            className={`${embedded ? 'hidden sm:flex' : 'flex'} items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-600 dark:text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded-md shrink-0`}
+            className={`flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-600 dark:text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded-md shrink-0`}
           >
             <Plus className="w-3 h-3" />
-            <span className={embedded ? 'hidden sm:inline' : ''}>{open ? 'Close' : 'Add'}</span>
+            <span>{open ? 'Close' : 'Add'}</span>
           </span>
         </div>
         <div
@@ -110,14 +110,14 @@ export function BankCard({ embedded = false }: { embedded?: boolean }) {
           {!embedded && summary.deductions.bank > 0
             ? `${fmt(recordedBalance)} recorded − ${fmt(summary.deductions.bank)} scheduled`
             : embedded
-              ? 'Manage hours'
+              ? 'Extra hours worked'
               : 'Extra hours worked'}
         </div>
       </button>
 
       {open && (
         <div
-          className={`absolute top-full mt-1.5 z-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up ${embedded ? 'right-0 w-[min(20rem,calc(100vw-3rem))]' : 'left-0 w-full'}`}
+          className={`absolute top-full mt-1.5 z-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up ${embedded ? 'left-0 md:left-auto md:right-0 xl:left-0 xl:right-auto w-[min(20rem,calc(100vw-2rem))]' : 'left-0 w-full'}`}
         >
           <div className="flex gap-1.5">
             <input
