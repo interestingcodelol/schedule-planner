@@ -274,6 +274,9 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
         // openings so a prior closing sampler cannot overwrite the next result.
         if ((summary.parentElement as HTMLDetailsElement).open) return
         const panel = summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
+        summary.ownerDocument.addEventListener('click', (dispatched) => {
+          panel.dataset.qaClickPrevented = String(dispatched.defaultPrevented)
+        }, { once: true })
         delete panel.dataset.qaFrameBounds
         const frames: { top: number; bottom: number; maxHeight: string }[] = []
         const sample = () => {
@@ -295,6 +298,11 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
         return { panel: rect(panel), card: rect(panel.parentElement!), viewport: { height: innerHeight, width: innerWidth, scrollY }, style: panel.getAttribute('style'), css: { maxHeight: css.maxHeight, height: css.height, boxSizing: css.boxSizing, padding: css.padding, position: css.position, top: css.top, bottom: css.bottom }, fonts: document.fonts.status }
       })
       await info.attach(`${size.name}-overflow-geometry`, { body: JSON.stringify({ measured: breakdownBounds, geometry }, null, 2), contentType: 'application/json' })
+      const runtime = await page.evaluate(async () => {
+        const script = document.querySelector<HTMLScriptElement>('script[type="module"][src]')!
+        return { url: script.src, source: await (await fetch(script.src)).text(), prevented: document.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')?.dataset.qaClickPrevented }
+      })
+      await info.attach(`${size.name}-served-runtime`, { body: JSON.stringify(runtime), contentType: 'application/json' })
     }
     expect(breakdownBounds!.x).toBeGreaterThanOrEqual(0)
     expect(breakdownBounds!.y).toBeGreaterThanOrEqual(0)
