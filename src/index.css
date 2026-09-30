@@ -202,7 +202,7 @@ input[type='date'] {
 /* Short laptops keep the same layout, with less padding and a compact month.
  * At narrow/zoomed widths, normal document scrolling preserves all controls.
  * No fixed page height or overflow clipping is used to force a fit. */
-@media (min-width: 1280px) and (max-height: 850px) {
+@media (min-width: 1280px) and (max-height: 950px) {
   .planner-dashboard {
     --calendar-row-min: 4rem;
   }
@@ -253,5 +253,19 @@ input[type='date'] {
 @media (min-width: 1280px) and (min-height: 1000px) {
   .calendar-time-detail {
     display: block;
+  }
+}
+
+@media (min-width: 1280px) and (max-height: 950px) {
+  [data-tour='calendar'] > div > div:first-child {
+    padding-block: 0.5rem;
+  }
+  .forecast-header {
+    padding-top: 0.5rem;
+    padding-bottom: 0.25rem;
+  }
+  .forecast-footer {
+    padding-top: 0.25rem;
+    padding-bottom: 0.5rem;
   }
 }

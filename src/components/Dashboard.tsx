@@ -213,6 +213,8 @@ export function Dashboard() {
           <StatusCards />
         </div>
 
+        <Insights />
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-1 lg:min-h-0">
           <div className="lg:col-span-8 flex flex-col lg:min-h-0" data-tour="calendar">
             <CalendarView />
@@ -228,19 +230,6 @@ export function Dashboard() {
             </div>
           </div>
         </div>
-
-        <details className="group">
-          <summary className="flex list-none cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1 [&::-webkit-details-marker]:hidden">
-            Planning notes
-            <ChevronDown
-              className="w-3.5 h-3.5 transition-transform group-open:rotate-180"
-              aria-hidden
-            />
-          </summary>
-          <div className="mt-2">
-            <Insights />
-          </div>
-        </details>
       </main>
 
       <Suspense fallback={null}>

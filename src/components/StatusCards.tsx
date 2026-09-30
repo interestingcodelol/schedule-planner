@@ -46,7 +46,7 @@ export function StatusCards() {
         value={String(Math.round(annualHours))}
         unit="hrs/yr"
         icon={<TrendingUp className="w-3.5 h-3.5 text-blue-500" aria-hidden />}
-        description={`${fmt(currentTier.hoursPerPayPeriod)} hrs/period`}
+        description={`${fmt(currentTier.hoursPerPayPeriod)} hrs/period · ${currentTier.label}`}
       />
       <CompactBalanceCard
         label="Next payday"
@@ -60,11 +60,15 @@ export function StatusCards() {
         value={fmt(yearEnd.totalAvailable)}
         description={
           exceedsCap ? (
-            <span className="text-amber-700 dark:text-amber-400">
-              {fmt(carryover.projectedPayout)} vacation hrs may pay out
+            <span
+              className="text-amber-700 dark:text-amber-400"
+              title={`Vacation cap: ${fmt(carryover.cap!)} hrs; ${fmt(carryover.projectedPayout)} hrs may be paid out${carryover.payoutDate ? ` on ${format(carryover.payoutDate, 'MMM d')}` : ''} if unused`}
+            >
+              Vac {fmt(yearEnd.vacationBalance)} · cap {fmt(carryover.cap!)} ·{' '}
+              {fmt(carryover.projectedPayout)}h payout
             </span>
           ) : (
-            'Includes future plans'
+            `Vac ${fmt(yearEnd.vacationBalance)} · Sick ${fmt(yearEnd.sickBalance)}${!state.policy.hideBankHours ? ` · Bank ${fmt(yearEnd.bankBalance)}` : ''}`
           )
         }
       />

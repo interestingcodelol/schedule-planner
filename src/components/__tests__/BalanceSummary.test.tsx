@@ -99,7 +99,7 @@ describe('BalanceSummary', () => {
 
     expect(screen.getByLabelText('Available now: 64 hours')).toBeInTheDocument()
     expect(screen.getByText('No time off charged today')).toBeInTheDocument()
-    expect(screen.getByText('Includes future plans')).toBeInTheDocument()
+    expect(screen.getByText(/Vac .* · Sick .* · Bank/)).toBeInTheDocument()
     expect(screen.getByText('Year-end forecast')).toBeInTheDocument()
     expect(screen.getByTestId('balance-card-grid').children).toHaveLength(7)
   })

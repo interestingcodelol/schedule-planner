@@ -257,6 +257,10 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await seed(page)
     await page.goto('/')
     await expect(page.getByLabel('Available now: 91.05 hours')).toBeVisible()
+    const insights = page.getByRole('region', { name: 'Planning insights' })
+    await expect(insights).toBeVisible()
+    expect(await insights.locator('xpath=ancestor::details').count()).toBe(0)
+    expect(await insights.textContent()).not.toContain('4.75 bank hrs')
     const dimensions = await page.evaluate(() => {
       const rect = (selector: string) => {
         const r = document.querySelector(selector)!.getBoundingClientRect()
@@ -370,4 +374,66 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     info.outputPath('viewport-measurements.json'),
     JSON.stringify(measurements, null, 2),
   )
+})
+
+test('original feature entry points remain visible and usable', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'Feature inventory runs once')
+  await seed(page)
+  await page.goto('/')
+  const insights = page.getByRole('region', { name: 'Planning insights' })
+  await expect(insights).toBeVisible()
+  const insightMessages = page.getByLabel('Planning insight messages', { exact: true })
+  await insightMessages.focus()
+  await expect(insightMessages).toBeFocused()
+  await page.getByRole('tab', { name: 'Sick', exact: true }).click()
+  await expect(page.getByRole('tab', { name: 'Sick', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await page.getByRole('tab', { name: 'Vacation', exact: true }).click()
+  const upcoming = page.getByRole('button', { name: 'View upcoming events', exact: true })
+  await expect(upcoming).toHaveAttribute('title', /View all 9 upcoming items/)
+  await upcoming.click()
+  await expect(page.getByText('Example vacation', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Edit dates', exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Delete', exact: true }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Lock', exact: true }).first().click()
+  await page.getByRole('button', { name: 'Unlock', exact: true }).first().click()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Next month', exact: true }).click()
+  await page.getByRole('button', { name: 'Previous month', exact: true }).click()
+  await page.getByRole('button', { name: 'Go to current month', exact: true }).click()
+  await page.getByTitle('Click to jump to a month').click()
+  await expect(page.getByRole('button', { name: 'Jan', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Plan time off with the assistant' }).click()
+  for (const name of [
+    'Can I afford a week in August?',
+    "What's my balance?",
+    'Plan the first week of December',
+    'Will I lose sick hours?',
+  ]) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible()
+  }
+  await page.getByRole('button', { name: 'Expand chat' }).click()
+  await page.getByRole('button', { name: 'Shrink chat' }).click()
+  await page.getByRole('button', { name: 'Clear chat' }).click()
+  await page.getByRole('button', { name: 'Close chat' }).click()
+  await page.getByRole('button', { name: 'Open settings' }).click()
+  await page.getByRole('button', { name: 'Policy', exact: true }).click()
+  await page.getByRole('button', { name: 'Data', exact: true }).click()
+  await expect(
+    page.getByRole('button', { name: 'Export backup (JSON)', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restore from file', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Show guided tour' }).click()
+  await expect(page.getByRole('dialog', { name: 'Tour step 1 of 5' })).toBeVisible()
+  await page.getByRole('button', { name: 'Close tour' }).click()
+  await page.getByRole('button', { name: "What's new", exact: true }).click()
+  await expect(page.getByRole('dialog', { name: "What's new", exact: true })).toBeVisible()
+  await page
+    .getByRole('dialog', { name: "What's new", exact: true })
+    .getByRole('button', { name: 'Close', exact: true })
+    .click()
 })
