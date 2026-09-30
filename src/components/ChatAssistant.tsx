@@ -33,6 +33,15 @@ export function ChatAssistant({ onClose }: { onClose: () => void }) {
   const [lastContext, setLastContext] = useState<{ startDate?: string; endDate?: string }>({})
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const responseTimer = useRef<number | null>(null)
+  const addedMessages = useRef(new Set<string>())
+
+  useEffect(
+    () => () => {
+      if (responseTimer.current !== null) window.clearTimeout(responseTimer.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -51,19 +60,29 @@ export function ChatAssistant({ onClose }: { onClose: () => void }) {
 
   const send = (raw: string) => {
     const userText = raw.trim()
-    if (!userText || isTyping) return
+    if (!userText || responseTimer.current !== null) return
 
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', text: userText }
 
     // Enrich bare confirmations / follow-ups using the last discussed range.
     let enrichedInput = userText
     const lower = userText.toLowerCase()
-    const hasDate = /\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|monday|tuesday|wednesday|thursday|friday|tomorrow|next\s+week|this\s+week/i.test(lower)
+    const hasDate =
+      /\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|next\s+week|this\s+week/i.test(
+        lower,
+      )
     if (!hasDate && lastContext.startDate && lastContext.endDate) {
-      const isConfirmation = /\b(yes|yeah|yep|sure|ok|do\s+it|add\s+it|go\s+ahead|book\s+it|plan\s+it|sounds\s+good|let.?s\s+do|confirm)\b/i.test(lower)
-      const isFollowUpQuestion = /\b(why|explain|tell\s+me\s+more|details|breakdown|how|when\s+will|when\s+can)\b/i.test(lower)
+      const isConfirmation =
+        /\b(yes|yeah|yep|sure|ok|do\s+it|add\s+it|go\s+ahead|book\s+it|plan\s+it|sounds\s+good|let.?s\s+do|confirm)\b/i.test(
+          lower,
+        )
+      const isFollowUpQuestion =
+        /\b(why|explain|tell\s+me\s+more|details|breakdown|how\s+(does|would|will)\s+(that|it)|when\s+(will|can)\s+.*\b(it|that))\b/i.test(
+          lower,
+        )
       if (isConfirmation) enrichedInput = `book ${lastContext.startDate} to ${lastContext.endDate}`
-      else if (isFollowUpQuestion) enrichedInput = `tell me more about ${lastContext.startDate} to ${lastContext.endDate}`
+      else if (isFollowUpQuestion)
+        enrichedInput = `tell me more about ${lastContext.startDate} to ${lastContext.endDate}`
     }
 
     setMessages((prev) => [...prev, userMsg])
@@ -72,14 +91,20 @@ export function ChatAssistant({ onClose }: { onClose: () => void }) {
 
     // Small delay so the assistant feels responsive (typing indicator) rather
     // than answers appearing instantly. Processing itself is synchronous/local.
-    window.setTimeout(() => {
+    responseTimer.current = window.setTimeout(() => {
+      responseTimer.current = null
       const response = processChat(enrichedInput, state)
       if (response.action?.startDate) {
         setLastContext({ startDate: response.action.startDate, endDate: response.action.endDate })
       }
       setMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: 'assistant', text: response.text, action: response.action },
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: response.text,
+          action: response.action,
+        },
       ])
       setIsTyping(false)
     }, 420)
@@ -93,7 +118,14 @@ export function ChatAssistant({ onClose }: { onClose: () => void }) {
   }
 
   const handleAddToPlan = (msg: Message) => {
-    if (!msg.action || msg.action.type !== 'plan_vacation') return
+    if (
+      !msg.action ||
+      msg.action.type !== 'plan_vacation' ||
+      msg.actionTaken ||
+      addedMessages.current.has(msg.id)
+    )
+      return
+    addedMessages.current.add(msg.id)
     addVacation({
       id: crypto.randomUUID(),
       startDate: msg.action.startDate,
@@ -106,7 +138,17 @@ export function ChatAssistant({ onClose }: { onClose: () => void }) {
   }
 
   const clearChat = () => {
-    setMessages([{ id: 'welcome-' + Date.now(), role: 'assistant', text: 'Fresh start! What would you like to plan?' }])
+    if (responseTimer.current !== null) window.clearTimeout(responseTimer.current)
+    responseTimer.current = null
+    setIsTyping(false)
+    addedMessages.current.clear()
+    setMessages([
+      {
+        id: 'welcome-' + Date.now(),
+        role: 'assistant',
+        text: 'Fresh start! What would you like to plan?',
+      },
+    ])
     setLastContext({})
   }
 
@@ -140,95 +182,144 @@ export function ChatAssistant({ onClose }: { onClose: () => void }) {
     : STARTERS
 
   return (
-    <div className={`fixed bottom-5 right-5 z-30 ${panelSize} bg-white dark:bg-gray-900 border border-gray-200/70 dark:border-gray-700/50 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-slide-up`}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="p-1 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <span className="text-sm font-semibold">Plan Assistant</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <button onClick={clearChat} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all" title="New conversation" aria-label="Clear chat">
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={() => setExpanded(!expanded)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all" title={expanded ? 'Shrink' : 'Expand'} aria-label={expanded ? 'Shrink chat' : 'Expand chat'}>
-                {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-              </button>
-              <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all" title="Close" aria-label="Close chat">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+    <div
+      role="dialog"
+      aria-label="Plan time off assistant"
+      className={`fixed bottom-5 right-5 z-30 ${panelSize} bg-white dark:bg-gray-900 border border-gray-200/70 dark:border-gray-700/50 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-slide-up`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200/60 dark:border-gray-700/40 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="p-1 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+            <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
           </div>
+          <span className="text-sm font-semibold">Plan Assistant</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={clearChat}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all"
+            title="New conversation"
+            aria-label="Clear chat"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all"
+            title={expanded ? 'Shrink' : 'Expand'}
+            aria-label={expanded ? 'Shrink chat' : 'Expand chat'}
+          >
+            {expanded ? (
+              <Minimize2 className="w-3.5 h-3.5" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5" />
+            )}
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all"
+            title="Close"
+            aria-label="Close chat"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
 
-          {/* Messages */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 scroll-panel">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800/60 text-gray-700 dark:text-gray-300'}`}>
-                  <div>{renderText(msg.text)}</div>
-                  {msg.action && msg.action.type === 'plan_vacation' && (
-                    <div className="mt-2">
-                      {msg.actionTaken ? (
-                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">✓ Added to calendar</span>
-                      ) : (
-                        <button onClick={() => handleAddToPlan(msg)} className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors" title="Add this time off to your calendar">
-                          <CalendarPlus className="w-3 h-3" />
-                          Add to calendar
-                        </button>
-                      )}
-                    </div>
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 scroll-panel">
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
+          >
+            <div
+              className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800/60 text-gray-700 dark:text-gray-300'}`}
+            >
+              <div>{renderText(msg.text)}</div>
+              {msg.action && msg.action.type === 'plan_vacation' && (
+                <div className="mt-2">
+                  {msg.actionTaken ? (
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                      ✓ Added to calendar
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleAddToPlan(msg)}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
+                      title="Add this time off to your calendar"
+                    >
+                      <CalendarPlus className="w-3 h-3" />
+                      Add to calendar
+                    </button>
                   )}
                 </div>
-              </div>
-            ))}
-            {isTyping && (
-              <div className="flex justify-start animate-fade-in">
-                <div className="bg-gray-100 dark:bg-gray-800/60 rounded-xl px-3.5 py-3 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '120ms' }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '240ms' }} />
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+        ))}
+        {isTyping && (
+          <div className="flex justify-start animate-fade-in">
+            <div className="bg-gray-100 dark:bg-gray-800/60 rounded-xl px-3.5 py-3 flex items-center gap-1">
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"
+                style={{ animationDelay: '0ms' }}
+              />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"
+                style={{ animationDelay: '120ms' }}
+              />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"
+                style={{ animationDelay: '240ms' }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
 
-          {/* Suggestion chips — wrap so every chip is reachable (a hidden-
+      {/* Suggestion chips — wrap so every chip is reachable (a hidden-
               scrollbar horizontal row left overflowed chips unreachable on
               desktop, where there's no touch-scroll). */}
-          <div className="px-3 pb-1 pt-2 shrink-0">
-            <div className="flex flex-wrap gap-1.5">
-              {chips.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => send(c)}
-                  disabled={isTyping}
-                  className="whitespace-nowrap px-2.5 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-700 dark:hover:text-blue-300 transition-colors disabled:opacity-50"
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
+      <div className="px-3 pb-1 pt-2 shrink-0">
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((c) => (
+            <button
+              key={c}
+              onClick={() => send(c)}
+              disabled={isTyping}
+              className="whitespace-nowrap px-2.5 py-1 text-xs rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-700 dark:hover:text-blue-300 transition-colors disabled:opacity-50"
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
 
-          {/* Input */}
-          <div className="px-4 py-3 border-t border-gray-200/60 dark:border-gray-700/40 shrink-0">
-            <div className="flex gap-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder='e.g. "take off July 14-18"'
-                className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <button onClick={() => send(input)} disabled={!input.trim() || isTyping} className="p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-colors shrink-0" title="Send" aria-label="Send message">
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+      {/* Input */}
+      <div className="px-4 py-3 border-t border-gray-200/60 dark:border-gray-700/40 shrink-0">
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder='e.g. "take off July 14-18"'
+            className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <button
+            onClick={() => send(input)}
+            disabled={!input.trim() || isTyping}
+            className="p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-colors shrink-0"
+            title="Send"
+            aria-label="Send message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

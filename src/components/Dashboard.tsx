@@ -1,9 +1,17 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
-import { Settings, HelpCircle, CalendarClock, ChevronDown, Sparkles, MessageCircle } from 'lucide-react'
-import { parseISO, isBefore, startOfDay, differenceInDays } from 'date-fns'
+import {
+  Settings,
+  HelpCircle,
+  CalendarClock,
+  ChevronDown,
+  Sparkles,
+  MessageCircle,
+} from 'lucide-react'
+import { parseISO, isBefore, differenceInDays } from 'date-fns'
 import { useAppState } from '../context'
 import { hasUnseenChangelog, markChangelogSeen } from '../lib/changelog'
 import { computeHolidayDates } from '../lib/holidays'
+import { getNowInZone } from '../lib/timeUtils'
 import { StatusCards } from './StatusCards'
 import { Insights } from './Insights'
 import { CalendarView } from './CalendarView'
@@ -18,15 +26,11 @@ import { BackupNag } from './BackupNag'
 const SettingsModal = lazy(() =>
   import('./SettingsModal').then((m) => ({ default: m.SettingsModal })),
 )
-const GuidedTour = lazy(() =>
-  import('./GuidedTour').then((m) => ({ default: m.GuidedTour })),
-)
+const GuidedTour = lazy(() => import('./GuidedTour').then((m) => ({ default: m.GuidedTour })))
 const ChatAssistant = lazy(() =>
   import('./ChatAssistant').then((m) => ({ default: m.ChatAssistant })),
 )
-const WhatsNew = lazy(() =>
-  import('./WhatsNew').then((m) => ({ default: m.WhatsNew })),
-)
+const WhatsNew = lazy(() => import('./WhatsNew').then((m) => ({ default: m.WhatsNew })))
 
 export function Dashboard() {
   const { state, setShowTour, isDemo, resetToSetup } = useAppState()
@@ -34,7 +38,8 @@ export function Dashboard() {
   const [showWhatsNew, setShowWhatsNew] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [changelogUnseen, setChangelogUnseen] = useState(hasUnseenChangelog)
-  const today = startOfDay(new Date())
+  const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
+  const today = useMemo(() => parseISO(todayIso), [todayIso])
 
   const openWhatsNew = () => {
     setShowWhatsNew(true)
@@ -48,7 +53,8 @@ export function Dashboard() {
     const vac = state.plannedVacations
       .filter((v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today))
       .sort((a, b) => a.startDate.localeCompare(b.startDate))[0]
-    const vacDate = vac ? parseISO(vac.startDate) : null
+    // An ongoing trip is still time off today, even when it began yesterday.
+    const vacDate = vac ? parseISO(vac.startDate < todayIso ? todayIso : vac.startDate) : null
     const y = today.getFullYear()
     const holDate =
       [...computeHolidayDates(state.policy, y), ...computeHolidayDates(state.policy, y + 1)]
@@ -56,12 +62,12 @@ export function Dashboard() {
         .sort((a, b) => a.getTime() - b.getTime())[0] ?? null
     if (vacDate && holDate) return vacDate <= holDate ? vacDate : holDate
     return vacDate ?? holDate
-  }, [state.plannedVacations, state.policy, today])
+  }, [state.plannedVacations, state.policy, today, todayIso])
 
   const daysUntilNext = nextDayOff ? differenceInDays(nextDayOff, today) : null
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="planner-dashboard flex-1 flex flex-col">
       <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 sm:px-6 py-3 shrink-0">
         <div className="glass-card rounded-xl flex items-stretch min-w-0">
           <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 shrink-0">
@@ -129,7 +135,10 @@ export function Dashboard() {
                   </>
                 )}
 
-                <span className="hidden sm:block h-8 w-px bg-gray-200/60 dark:bg-gray-700/60 mx-1 shrink-0" aria-hidden />
+                <span
+                  className="hidden sm:block h-8 w-px bg-gray-200/60 dark:bg-gray-700/60 mx-1 shrink-0"
+                  aria-hidden
+                />
 
                 <div className="flex items-center gap-1.5 shrink-0 relative">
                   <span className="text-[10px] font-bold tracking-wider uppercase text-gray-400 dark:text-gray-500 hidden sm:inline">
@@ -199,14 +208,12 @@ export function Dashboard() {
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col px-4 sm:px-6 pb-4 gap-3">
+      <main className="flex-1 flex flex-col px-4 sm:px-6 pb-2 gap-3">
         <div data-tour="status-cards">
           <StatusCards />
         </div>
 
-        <div>
-          <Insights />
-        </div>
+        <Insights />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:flex-1 lg:min-h-0">
           <div className="lg:col-span-8 flex flex-col lg:min-h-0" data-tour="calendar">
@@ -223,7 +230,7 @@ export function Dashboard() {
             </div>
           </div>
         </div>
-      </div>
+      </main>
 
       <Suspense fallback={null}>
         {chatOpen && <ChatAssistant onClose={() => setChatOpen(false)} />}

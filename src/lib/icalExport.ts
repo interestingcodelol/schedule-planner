@@ -1,18 +1,8 @@
-import {
-  addDays,
-  addYears,
-  differenceInYears,
-  endOfYear,
-  format,
-  parseISO,
-  startOfDay,
-} from 'date-fns'
+import { addDays, addYears, differenceInYears, endOfYear, format, parseISO } from 'date-fns'
 import type { AppState } from './types'
 import { computeHolidayDates, getHolidayName } from './holidays'
-import {
-  computeAccrualTier,
-  firstPaydayOnOrAfter,
-} from './projection'
+import { getNowInZone } from './timeUtils'
+import { computeAccrualTier, firstPaydayOnOrAfter } from './projection'
 
 export type IcalExportOptions = {
   /** Scheduled future time off + logged past absences (toggled separately
@@ -65,11 +55,7 @@ const UID_DOMAIN = 'schedule-planner.local'
  *  must be encoded as `\n`; commas, semicolons, and backslashes must be
  *  escaped. We don't use control characters, so this is the full list. */
 function escapeText(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n')
-    .replace(/,/g, '\\,')
-    .replace(/;/g, '\\;')
+  return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
 }
 
 /** Fold long lines to 75 octets per RFC 5545. We're conservative and fold
@@ -122,7 +108,7 @@ type RawEvent = {
 
 function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
   const events: RawEvent[] = []
-  const today = startOfDay(new Date())
+  const today = parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate)
   const horizon = addYears(today, Math.max(1, opts.yearsAhead))
 
   // --- Planned time off -------------------------------------------------
@@ -135,18 +121,17 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
       const end = parseISO(v.endDate)
       const hrsPerDay = v.hoursPerDay ?? state.policy.hoursPerWorkDay
       const partial = hrsPerDay < state.policy.hoursPerWorkDay
-      const sourceLabel =
-        v.hourSource === 'any'
-          ? 'auto'
-          : v.hourSource
+      const sourceLabel = v.hourSource === 'any' ? 'auto' : v.hourSource
       const summary = isLogged
         ? '🌴 Time off (logged)'
         : `🌴 Time off${v.note ? ' — ' + v.note : ''}`
       const descriptionLines = [
         v.note ? `Note: ${v.note}` : '',
-        partial
-          ? `Partial day: ${fmtHrs(hrsPerDay)} hrs/day`
-          : `Full day: ${fmtHrs(hrsPerDay)} hrs`,
+        v.actualHoursUsed !== undefined
+          ? `Actual hours used: ${fmtHrs(v.actualHoursUsed)} hrs total`
+          : partial
+            ? `Partial day: ${fmtHrs(hrsPerDay)} hrs/day`
+            : `Full day: ${fmtHrs(hrsPerDay)} hrs`,
         `Source: ${sourceLabel}`,
       ].filter(Boolean)
       events.push({
@@ -192,9 +177,7 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
         events.push({
           uid: `payday-${format(payday, 'yyyyMMdd')}@${UID_DOMAIN}`,
           summary: `💰 Payday (+${fmtHrs(tier.hoursPerPayPeriod)} hrs vacation)`,
-          description: `Vacation accrual at ${tier.label}: +${fmtHrs(
-            tier.hoursPerPayPeriod,
-          )} hrs.`,
+          description: `Vacation accrual at ${tier.label}: +${fmtHrs(tier.hoursPerPayPeriod)} hrs.`,
           date: payday,
           categories: ['Payday'],
         })
@@ -204,10 +187,7 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
   }
 
   // --- Carryover-cap payout date ---------------------------------------
-  if (
-    opts.includeCarryoverPayout &&
-    state.policy.carryoverCapStrategy !== 'unlimited'
-  ) {
+  if (opts.includeCarryoverPayout && state.policy.carryoverCapStrategy !== 'unlimited') {
     const lastPayday = parseISO(state.profile.lastPaydayDate)
     const startYear = today.getFullYear()
     const endYear = horizon.getFullYear()
@@ -218,11 +198,7 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
           '0',
         )}-${String(state.policy.carryoverPayoutDate.day).padStart(2, '0')}`,
       )
-      const payoutDate = firstPaydayOnOrAfter(
-        lastPayday,
-        state.policy.payPeriodLengthDays,
-        anchor,
-      )
+      const payoutDate = firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, anchor)
       if (payoutDate < today || payoutDate > horizon) continue
       events.push({
         uid: `carryover-${y}@${UID_DOMAIN}`,
@@ -236,32 +212,43 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
   }
 
   // --- Bank hours payout -----------------------------------------------
-  // Banked / overtime hours are paid out via payroll on the FIRST PAYDAY on or
-  // after the payout window opens — a single pay date, not a multi-day window.
-  if (opts.includeBankWindow) {
+  // Match both payout triggers in the balance engine. Preserve the existing
+  // opening-date UID so older exports still update in place; closing dates
+  // get a distinct stable UID. Coincident payroll dates produce one event.
+  if (opts.includeBankWindow && !state.policy.hideBankHours) {
     const startYear = today.getFullYear()
     const endYear = horizon.getFullYear()
-    const startM = state.policy.bankHoursPayoutStart.month
-    const startD = state.policy.bankHoursPayoutStart.day
     const lastPayday = parseISO(state.profile.lastPaydayDate)
+    const seenDates = new Set<string>()
+    const anchors = [
+      { date: state.policy.bankHoursPayoutStart, kind: 'start' },
+      { date: state.policy.bankHoursPayoutEnd, kind: 'end' },
+    ] as const
     for (let y = startYear - 1; y <= endYear; y++) {
-      const windowOpen = parseISO(
-        `${y}-${String(startM).padStart(2, '0')}-${String(startD).padStart(2, '0')}`,
-      )
-      const payoutDate = firstPaydayOnOrAfter(
-        lastPayday,
-        state.policy.payPeriodLengthDays,
-        windowOpen,
-      )
-      if (payoutDate < today || payoutDate > horizon) continue
-      events.push({
-        uid: `bank-payout-${y}@${UID_DOMAIN}`,
-        summary: '🏦 Bank hours payout',
-        description:
-          'Banked / overtime hours are paid out on this pay date — the first payday on or after the payout window opens.',
-        date: payoutDate,
-        categories: ['Bank'],
-      })
+      for (const anchor of anchors) {
+        const triggerDate = parseISO(
+          `${y}-${String(anchor.date.month).padStart(2, '0')}-${String(anchor.date.day).padStart(2, '0')}`,
+        )
+        const payoutDate = firstPaydayOnOrAfter(
+          lastPayday,
+          state.policy.payPeriodLengthDays,
+          triggerDate,
+        )
+        if (payoutDate < today || payoutDate > horizon) continue
+        const iso = format(payoutDate, 'yyyy-MM-dd')
+        if (seenDates.has(iso)) continue
+        seenDates.add(iso)
+        events.push({
+          uid:
+            anchor.kind === 'start'
+              ? `bank-payout-${y}@${UID_DOMAIN}`
+              : `bank-payout-end-${y}@${UID_DOMAIN}`,
+          summary: '🏦 Bank hours payout',
+          description: `Banked / overtime hours are paid out on this pay date — the first payday on or after the payout window ${anchor.kind === 'start' ? 'opens' : 'closes'}.`,
+          date: payoutDate,
+          categories: ['Bank'],
+        })
+      }
     }
   }
 
@@ -269,11 +256,7 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
   if (opts.includeAnniversaries) {
     const hireDate = parseISO(state.profile.hireDate)
     for (let y = today.getFullYear(); y <= horizon.getFullYear(); y++) {
-      const anniv = new Date(
-        y,
-        hireDate.getMonth(),
-        hireDate.getDate(),
-      )
+      const anniv = new Date(y, hireDate.getMonth(), hireDate.getDate())
       if (anniv < today || anniv > horizon) continue
       const yos = differenceInYears(anniv, hireDate)
       if (yos <= 0) continue
@@ -309,14 +292,13 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
  * options. Returns a string with CRLF line endings — caller writes it
  * to a Blob with type `text/calendar`.
  */
-export function buildIcalString(
-  state: AppState,
-  opts: IcalExportOptions,
-): string {
+export function buildIcalString(state: AppState, opts: IcalExportOptions): string {
   const events = buildEvents(state, opts)
   const now = new Date()
-  const dtstamp =
-    format(now, "yyyyMMdd'T'HHmmss") + 'Z'
+  const dtstamp = now
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z')
   // Monotonically-increasing revision number: seconds since a fixed epoch. Every
   // re-export happens later in time, so SEQUENCE strictly increases — which is
   // what makes Outlook / Google / Apple APPLY the update to an existing event
@@ -325,10 +307,7 @@ export function buildIcalString(
   // or detail overwrites the original event IN PLACE (the old one moves, no
   // duplicate); events the user created themselves have different UIDs and are
   // never touched, and a re-import never deletes anything.
-  const sequence = Math.max(
-    0,
-    Math.floor((now.getTime() - Date.UTC(2020, 0, 1)) / 1000),
-  )
+  const sequence = Math.max(0, Math.floor((now.getTime() - Date.UTC(2020, 0, 1)) / 1000))
   const reminderDays = opts.reminderDaysBeforeTimeOff ?? 0
 
   const lines: string[] = []
@@ -339,7 +318,9 @@ export function buildIcalString(
   lines.push('CALSCALE:GREGORIAN')
   lines.push(foldLine('X-WR-CALNAME:Schedule Planner'))
   lines.push(
-    foldLine('X-WR-CALDESC:Time off, holidays, paydays, and balance milestones from Schedule Planner'),
+    foldLine(
+      'X-WR-CALDESC:Time off, holidays, paydays, and balance milestones from Schedule Planner',
+    ),
   )
   // Hint to subscribing clients (Outlook/Apple) how often to refresh a
   // subscribed/published calendar. All-day events carry no time zone, so
@@ -420,7 +401,7 @@ export function downloadIcal(
   opts: IcalExportOptions = DEFAULT_ICAL_OPTIONS,
 ): string {
   const ics = buildIcalString(state, opts)
-  const dateStr = format(new Date(), 'yyyy-MM-dd')
+  const dateStr = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
   const filename = `schedule-planner-${dateStr}.ics`
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
   const url = URL.createObjectURL(blob)

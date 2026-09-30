@@ -1,7 +1,6 @@
 import {
   addDays,
   differenceInYears,
-  eachDayOfInterval,
   format,
   isAfter,
   isBefore,
@@ -10,16 +9,16 @@ import {
 } from 'date-fns'
 import type {
   AccrualTier,
+  AppliedTimeOffDeduction,
   AppState,
-  PlannedVacation,
   PolicyConfig,
   UserProfile,
 } from './types'
-import { computeHolidayDates } from './holidays'
 import {
   accrualForPeriod,
   computeAccrualTier,
   firstPaydayOnOrAfter,
+  getScheduledDeductions,
   newYearAccrualThrough,
 } from './projection'
 import { getNowInZone } from './timeUtils'
@@ -62,24 +61,6 @@ export type CatchUpResult = {
 
 type Pools = { vacation: number; sick: number; bank: number }
 
-/** Same civil calendar day? Every date-only value here is constructed at local
- *  midnight (parseISO / isoMidnight) and read with LOCAL getters, so the civil
- *  date round-trips correctly in any timezone. (Reading getUTC* — as before —
- *  only matched the civil date at UTC/behind-UTC offsets.) */
-function isSameCivilDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  )
-}
-
-function isWorkDay(date: Date, policy: PolicyConfig, holidays: Date[]): boolean {
-  const dow = date.getDay()
-  if (!policy.workDaysPerWeek.includes(dow)) return false
-  return !holidays.some((h) => isSameCivilDay(h, date))
-}
-
 function computeCarryoverCap(policy: PolicyConfig, tier: AccrualTier): number | null {
   switch (policy.carryoverCapStrategy) {
     case 'unlimited':
@@ -93,22 +74,6 @@ function computeCarryoverCap(policy: PolicyConfig, tier: AccrualTier): number | 
   }
 }
 
-function resolveDeductHours(
-  v: PlannedVacation,
-  hoursPerWorkDay: number,
-  workDays: number,
-): number {
-  // `actualHoursUsed` is the ENTRY TOTAL across every work day in the span (see
-  // types.ts). The per-day deduction loop needs a per-work-day figure, so spread
-  // the total evenly. `hoursPerDay` is already per-day; full days fall back to
-  // the policy work-day length.
-  if (v.actualHoursUsed !== undefined) {
-    return workDays > 0 ? v.actualHoursUsed / workDays : v.actualHoursUsed
-  }
-  if (v.hoursPerDay !== undefined) return v.hoursPerDay
-  return hoursPerWorkDay
-}
-
 /**
  * Subtract `hours` from the appropriate pool(s) and return the per-pool
  * breakdown so the catch-up log can attribute each draw to a specific bucket.
@@ -120,22 +85,22 @@ function applyDeduction(
   source: 'vacation' | 'sick' | 'bank' | 'any',
   pools: Pools,
 ): { from: 'vacation' | 'sick' | 'bank'; amount: number }[] {
-  // Match projection's behaviour: explicit pool sources floor at 0. The
-  // attributed amount is the actual hours drawn (capped to what was
-  // available), not the requested hours — the caller tracks any shortfall.
+  // Match projection: draw only positive capacity, preserving any already-
+  // recorded debt rather than crediting it back by flooring the pool to zero.
+  // Attribute only the actual hours drawn, never an unfunded request.
   if (source === 'vacation') {
     const drawn = Math.min(hours, Math.max(0, pools.vacation))
-    pools.vacation = Math.max(0, pools.vacation - hours)
+    pools.vacation -= drawn
     return [{ from: 'vacation', amount: drawn }]
   }
   if (source === 'sick') {
     const drawn = Math.min(hours, Math.max(0, pools.sick))
-    pools.sick = Math.max(0, pools.sick - hours)
+    pools.sick -= drawn
     return [{ from: 'sick', amount: drawn }]
   }
   if (source === 'bank') {
     const drawn = Math.min(hours, Math.max(0, pools.bank))
-    pools.bank = Math.max(0, pools.bank - hours)
+    pools.bank -= drawn
     return [{ from: 'bank', amount: drawn }]
   }
   const breakdown: { from: 'vacation' | 'sick' | 'bank'; amount: number }[] = []
@@ -173,24 +138,11 @@ type PendingEvent = {
 }
 
 /**
- * Walk every event that should have fired between
- * `state.profile.lastSyncDate` (or `lastPaydayDate` if missing) and the
- * current local day, applying them to the stored balances and marking
- * fully-past planned vacations as `logged_past` so they don't re-process
- * on the next run. Idempotent: subsequent calls without elapsed time are
- * no-ops apart from refreshing `lastSyncDate`.
- *
- * Events handled, in chronological order with same-day ties broken in the
- * order projection.ts uses:
- *   - Jan 1 sick grant (with carryover-cap forfeiture)
- *   - Pay-period accruals at each payday after lastSync
- *   - Per-work-day deductions for any planned vacation that fully ended
- *     in the catch-up window (entire range is processed; running this
- *     across multiple sessions never double-counts because the entry is
- *     flipped to `logged_past` once applied)
- *   - Carryover-cap payouts (first payday on/after carryoverPayoutDate)
- *   - Bank-hours payouts at the start AND end of the bank payout window,
- *     matching the projection's behaviour
+ * Reconcile paydays, grants, payouts and scheduled workdays chronologically
+ * through the user's local today. Payroll events fire only after lastSyncDate;
+ * scheduled days carry their own per-entry ledger so newly added same-day PTO
+ * can be booked without replaying payroll. Ended entries become logged_past.
+ * Repeated calls are idempotent, including an active multi-day trip.
  */
 export function catchUpState(state: AppState, now: Date = new Date()): CatchUpResult {
   const tz = state.profile.timezone || DEFAULT_TZ
@@ -201,8 +153,8 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
     state.profile.lastSyncDate ?? state.profile.lastPaydayDate
   const lastSync = startOfDay(parseISO(lastSyncIso))
 
-  if (!isAfter(today, lastSync)) {
-    // Clock went backwards (DST jump, manual change, timezone shift). Refusing
+  if (isBefore(today, lastSync)) {
+    // Clock went backwards (manual change or timezone shift). Refusing
     // to rewind lastSyncDate prevents the next forward-in-time run from
     // re-applying paydays/vacations that were already booked.
     return { state, events: [], applied: false, syncedTo: lastSyncIso }
@@ -433,108 +385,61 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
     }
   }
 
-  // --- Past planned-vacation deductions ----------------------------------
-  // Any vacation that *fully* ended before today and isn't already logged_past
-  // gets its full work-day range deducted in one pass. A vacation still
-  // spanning today is left alone — getEffectiveCurrentBalances handles its
-  // same-day display, projection handles its future days, and the next
-  // catch-up after it ends will deduct the whole thing. This keeps the
-  // logic idempotent without depending on whether the user happened to
-  // open the app mid-vacation.
-  const allHolidays: Date[] = []
-  // Vacations could start in earlier years than lastSync (e.g., a long
-  // vacation that began before the last sync but ended after); compute
-  // holidays across every year a candidate vacation could touch.
-  const earliestVacYear = state.plannedVacations.reduce<number>(
-    (min, v) => {
-      if (v.kind === 'logged_past') return min
-      const y = parseISO(v.startDate).getFullYear()
-      return y < min ? y : min
-    },
-    startYear,
+  // --- Scheduled vacation deductions through local today ----------------
+  // Book each elapsed workday exactly once, even for trips still in progress.
+  // Doing this in the same stream as accruals/payouts prevents reopening
+  // mid-trip from changing which pool funds the trip or what gets paid out.
+  const finalizedVacationIds = new Set(
+    state.plannedVacations
+      .filter((v) => v.kind !== 'logged_past' && isBefore(parseISO(v.endDate), today))
+      .map((v) => v.id),
   )
-  for (let y = earliestVacYear; y <= endYear; y++) {
-    allHolidays.push(...computeHolidayDates(state.policy, y))
-  }
-
-  const processedVacationIds = new Set<string>()
+  const changedVacationIds = new Set(finalizedVacationIds)
   const vacationActuals: Record<string, number> = {}
-  // Per-pool breakdown of what each converted vacation actually debited, so
-  // the App layer can record `debitedFrom` for exact future refunds.
-  const vacationDebits: Record<
-    string,
-    { vacation: number; sick: number; bank: number }
-  > = {}
-
-  // Days already debited by an existing logged_past entry. A newly-elapsed
-  // planned entry that overlaps one of these must NOT debit it a second time.
-  const loggedPastDates = new Set<string>()
-  for (const v of state.plannedVacations) {
-    if (v.kind !== 'logged_past') continue
-    for (const d of eachDayOfInterval({
-      start: parseISO(v.startDate),
-      end: parseISO(v.endDate),
-    })) {
-      loggedPastDates.add(format(d, 'yyyy-MM-dd'))
-    }
-  }
-
+  const vacationDebits: Record<string, Pools> = {}
+  const appliedDeductions: Record<string, AppliedTimeOffDeduction[]> = {}
   for (const vacation of state.plannedVacations) {
     if (vacation.kind === 'logged_past') continue
-    const vEnd = parseISO(vacation.endDate)
-    if (!isBefore(vEnd, today)) continue
-    const vStart = parseISO(vacation.startDate)
-    const days = eachDayOfInterval({ start: vStart, end: vEnd })
-    // Work days this entry will actually debit: real work days not already
-    // covered by a separate logged_past entry. The per-day deduction is the
-    // entry total spread across exactly these days.
-    const chargeableDays = days.filter(
-      (d) =>
-        isWorkDay(d, state.policy, allHolidays) &&
-        !loggedPastDates.has(format(d, 'yyyy-MM-dd')),
-    )
-    const workDays = chargeableDays.length
-    const deductHours = resolveDeductHours(
-      vacation,
-      state.policy.hoursPerWorkDay,
-      workDays,
-    )
-    // The entry's total intended hours across the charged days. Stored back as
-    // `actualHoursUsed` so the value is unambiguously a TOTAL (not per-day),
-    // matching what the adjust UI and refund logic expect.
-    const entryTotal = vacation.actualHoursUsed ?? deductHours * workDays
+    const applied = vacation.appliedDeductions ?? []
+    appliedDeductions[vacation.id] = [...applied]
+    vacationActuals[vacation.id] = applied.reduce((total, d) => total + d.hours, 0)
+    vacationDebits[vacation.id] = applied.reduce((total, d) => ({
+      vacation: total.vacation + d.drawn.vacation,
+      sick: total.sick + d.drawn.sick,
+      bank: total.bank + d.drawn.bank,
+    }), { vacation: 0, sick: 0, bank: 0 })
+  }
 
-    for (const day of chargeableDays) {
-      const dayCopy = day
-      pending.push({
-        date: dayCopy,
-        order: 2,
-        apply: () => {
-          const breakdown = applyDeduction(
-            deductHours,
-            vacation.hourSource || 'any',
-            pools,
-          )
-          const debit = (vacationDebits[vacation.id] ??= {
-            vacation: 0,
-            sick: 0,
-            bank: 0,
+  for (const { date, hours, vacation } of getScheduledDeductions(state, today)) {
+    changedVacationIds.add(vacation.id)
+    vacationActuals[vacation.id] += hours
+    pending.push({
+      date,
+      order: 2,
+      apply: () => {
+        const breakdown = applyDeduction(hours, vacation.hourSource || 'any', pools)
+        const drawn = { vacation: 0, sick: 0, bank: 0 }
+        for (const draw of breakdown) {
+          // Stored profile balances use hundredths. Store matching precision
+          // for refunds so a depleted fractional accrual cannot reintroduce
+          // a value such as 3.076 when the recorded balance was 3.08.
+          const recordedDraw = r2(draw.amount)
+          vacationDebits[vacation.id][draw.from] = r2(vacationDebits[vacation.id][draw.from] + recordedDraw)
+          drawn[draw.from] = r2(drawn[draw.from] + recordedDraw)
+          if (draw.amount === 0) continue
+          events.push({
+            date: format(date, 'yyyy-MM-dd'),
+            type: 'vacation_deduction',
+            pool: draw.from,
+            delta: -draw.amount,
+            label: vacation.note ? `Time off — ${vacation.note}` : 'Time off',
           })
-          for (const b of breakdown) {
-            debit[b.from] += b.amount
-            events.push({
-              date: format(dayCopy, 'yyyy-MM-dd'),
-              type: 'vacation_deduction',
-              pool: b.from,
-              delta: -b.amount,
-              label: vacation.note ? `Time off — ${vacation.note}` : 'Time off',
-            })
-          }
-          processedVacationIds.add(vacation.id)
-          vacationActuals[vacation.id] = entryTotal
-        },
-      })
-    }
+        }
+        // A zero draw is still an applied day; recording it prevents a later
+        // payday from silently funding a past shortage on the next app open.
+        appliedDeductions[vacation.id].push({ date: format(date, 'yyyy-MM-dd'), hours, drawn })
+      },
+    })
   }
 
   pending.sort((a, b) => {
@@ -554,17 +459,23 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   }
 
   const newPlannedVacations =
-    processedVacationIds.size === 0
+    changedVacationIds.size === 0
       ? state.plannedVacations
       : state.plannedVacations.map((v) => {
-          if (!processedVacationIds.has(v.id)) return v
+          if (!changedVacationIds.has(v.id)) return v
+          const finalized = finalizedVacationIds.has(v.id)
           return {
             ...v,
-            kind: 'logged_past' as const,
-            actualHoursUsed: v.actualHoursUsed ?? vacationActuals[v.id],
-            // Record the exact per-pool draw so a later refund can reverse it
-            // precisely. Preserve any pre-existing value defensively.
-            debitedFrom: v.debitedFrom ?? vacationDebits[v.id],
+            kind: finalized ? 'logged_past' as const : v.kind,
+            // Active actual-hours totals remain the original whole-trip plan.
+            // Finalized totals describe only this entry's reconciled days.
+            actualHoursUsed: finalized ? r2(vacationActuals[v.id]) : v.actualHoursUsed,
+            debitedFrom: {
+              vacation: r2(vacationDebits[v.id].vacation),
+              sick: r2(vacationDebits[v.id].sick),
+              bank: r2(vacationDebits[v.id].bank),
+            },
+            appliedDeductions: appliedDeductions[v.id],
           }
         })
 

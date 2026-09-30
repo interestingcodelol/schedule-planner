@@ -4,7 +4,6 @@ import {
   differenceInDays,
   format,
   isBefore,
-  isSameDay,
   parseISO,
   startOfDay,
 } from 'date-fns'
@@ -13,6 +12,7 @@ import type { ElementType } from 'react'
 import { useAppState } from '../context'
 import { getNextPayday } from './projection'
 import { getNowInZone } from './timeUtils'
+import { computeHolidayDates, getHolidayName } from './holidays'
 import type { AppState, PlannedVacation } from './types'
 
 export type InfoEvent = {
@@ -69,36 +69,21 @@ function computeInfoEvents(state: AppState, today: Date): InfoEvent[] {
   }
 
   const lookAhead = addDays(today, 90)
-  for (const rule of state.policy.holidays) {
-    for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
-      let holidayDate: Date
-      if (rule.type === 'fixed') {
-        holidayDate = new Date(year, rule.month - 1, rule.day)
-      } else if (rule.type === 'nth_weekday') {
-        const firstOfMonth = new Date(year, rule.month - 1, 1)
-        const firstDow = firstOfMonth.getDay()
-        let dayOffset = rule.weekday - firstDow
-        if (dayOffset < 0) dayOffset += 7
-        holidayDate = addDays(firstOfMonth, dayOffset + (rule.n - 1) * 7)
-      } else {
-        continue
-      }
-
-      if (
-        !isBefore(holidayDate, today) &&
-        isBefore(holidayDate, lookAhead) &&
-        !isSameDay(holidayDate, today)
-      ) {
-        const daysUntil = differenceInDays(holidayDate, today)
-        items.push({
-          key: `holiday-${rule.name}-${year}`,
-          icon: Gift,
-          label: rule.name,
-          detail: `${format(holidayDate, 'EEE, MMM d')} — ${daysUntil}d away`,
-          accent: 'text-amber-500',
-          sortDate: holidayDate,
-        })
-      }
+  // Reuse the calendar's observed dates: includes last-weekday rules,
+  // weekend shifts, start years, and New Year spillover without duplicates.
+  for (const year of [today.getFullYear(), today.getFullYear() + 1]) {
+    for (const holidayDate of computeHolidayDates(state.policy, year)) {
+      if (isBefore(holidayDate, today) || !isBefore(holidayDate, lookAhead)) continue
+      const name = getHolidayName(state.policy, holidayDate) ?? 'Holiday'
+      const daysUntil = differenceInDays(holidayDate, today)
+      items.push({
+        key: `holiday-${format(holidayDate, 'yyyy-MM-dd')}`,
+        icon: Gift,
+        label: name,
+        detail: `${format(holidayDate, 'EEE, MMM d')} — ${daysUntil === 0 ? 'today' : `${daysUntil}d away`}`,
+        accent: 'text-amber-500',
+        sortDate: holidayDate,
+      })
     }
   }
 

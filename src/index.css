@@ -7,14 +7,23 @@
  * shell with inner-scrolling panels, which produced an inner scrollbar on the
  * right column.) Content sizes to its natural height and the page scrolls if it
  * exceeds the viewport. */
-html, body, #root {
+html,
+body,
+#root {
   min-height: 100%;
 }
 
 body {
   @apply bg-gray-50 text-gray-900 dark:bg-[#0a0b0f] dark:text-gray-100 antialiased;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
   margin: 0;
 }
 
@@ -52,7 +61,9 @@ body {
 
 /* Subtle glow */
 .glow-blue {
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.15), 0 0 40px rgba(59, 130, 246, 0.05);
+  box-shadow:
+    0 0 20px rgba(59, 130, 246, 0.15),
+    0 0 40px rgba(59, 130, 246, 0.05);
 }
 
 .glow-teal {
@@ -68,19 +79,19 @@ body {
 }
 
 /* Custom number input — hide native spinners */
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
 
 /* Custom select/date arrow — override default OS styling */
 select,
-input[type="date"] {
+input[type='date'] {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
@@ -88,20 +99,44 @@ input[type="date"] {
 
 /* Animations */
 @keyframes slide-down {
-  from { transform: translateY(-100%); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 @keyframes slide-up {
-  from { transform: translateY(12px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.animate-slide-down { animation: slide-down 0.3s ease-out; }
-.animate-slide-up { animation: slide-up 0.25s ease-out; }
-.animate-fade-in { animation: fade-in 0.18s ease-out; }
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out;
+}
+.animate-slide-up {
+  animation: slide-up 0.25s ease-out;
+}
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out;
+}
 
 /* Collapsible: smooth height transition without measuring children. The
  * outer element animates grid-template-rows from 0fr → 1fr while the inner
@@ -145,4 +180,92 @@ input[type="date"] {
 .scroll-panel::-webkit-scrollbar-thumb {
   background: #374151;
   border-radius: 2px;
+}
+
+/* Honor the user's motion preference without removing state feedback. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Native date/time controls need a dark palette as well as dark CSS fields. */
+.dark {
+  color-scheme: dark;
+}
+
+/* Short laptops keep the same layout, with less padding and a compact month.
+ * At narrow/zoomed widths, normal document scrolling preserves all controls.
+ * No fixed page height or overflow clipping is used to force a fit. */
+@media (min-width: 1280px) and (max-height: 950px) {
+  .planner-dashboard {
+    --calendar-row-min: 4rem;
+  }
+  .planner-dashboard > header {
+    padding-block: 0.375rem;
+  }
+  .planner-dashboard > main {
+    gap: 0.5rem;
+  }
+  .calendar-day {
+    min-height: 4rem;
+  }
+  .calendar-time-indicator {
+    top: 1.75rem;
+    bottom: 1.5rem;
+  }
+  .calendar-time-detail {
+    display: none;
+  }
+  [data-tour='planner'] h2 {
+    font-size: 1rem;
+  }
+  [data-tour='planner'] > div > div:first-child {
+    padding-block: 0.5rem;
+  }
+  .planner-form {
+    padding-block: 0.5rem;
+  }
+  .planner-form > :not(:last-child) {
+    margin-block-end: 0.5rem;
+  }
+  .planner-form input,
+  .planner-form select {
+    padding-block: 0.375rem;
+  }
+  /* This empty hint repeats the instruction above the inputs. Results and
+   * the Add to calendar action always retain their natural height. */
+  .planner-empty-preview {
+    display: none;
+  }
+}
+
+/* Clock ranges are secondary to hours consumed. Show them in calendar cells
+ * only when the desktop has room; the tooltip and editor retain exact times. */
+.calendar-time-detail {
+  display: none;
+}
+@media (min-width: 1280px) and (min-height: 1000px) {
+  .calendar-time-detail {
+    display: block;
+  }
+}
+
+@media (min-width: 1280px) and (max-height: 950px) {
+  [data-tour='calendar'] > div > div:first-child {
+    padding-block: 0.5rem;
+  }
+  .forecast-header {
+    padding-top: 0.5rem;
+    padding-bottom: 0.25rem;
+  }
+  .forecast-footer {
+    padding-top: 0.25rem;
+    padding-bottom: 0.5rem;
+  }
 }

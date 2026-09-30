@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppState, BankHoursEntry, PlannedVacation } from './lib/types'
 import {
-  loadState,
   loadStateAsync,
   saveState,
   clearState,
@@ -16,8 +15,12 @@ import { showToast } from './lib/toastBus'
 import { getNowInZone } from './lib/timeUtils'
 import { migrateState } from './lib/migrate'
 import { applyDebit, applyRefund, applyBreakdownRefund } from './lib/balances'
+import { unbookPlannedEntry, unbookPlannedDates, preparePlannedEdit } from './lib/plannedLedger'
+import { countWorkDays } from './lib/projection'
+import { parseISO } from 'date-fns'
 
 const CATCH_UP_HISTORY_LIMIT = 50
+const r2 = (n: number) => Math.round(n * 100) / 100
 
 function appendCatchUpHistory(state: AppState, result: ReturnType<typeof catchUpState>): AppState {
   if (!result.applied) return result.state
@@ -74,41 +77,33 @@ function balancesChanged(
   )
 }
 
-function getInitialState(): { state: AppState | null; isDemo: boolean } {
-  const loaded = loadState()
-  if (loaded) {
-    const migrated = migrateState(loaded)
-    const reconciled = reconcile(migrated)
-    return {
-      state: reconciled,
-      isDemo: loaded.profile.displayName === 'Demo User',
-    }
-  }
-  return { state: null, isDemo: false }
-}
-
 export default function App() {
-  const [{ state, isDemo }, setAppData] = useState(getInitialState)
-  // The last snapshot we've already persisted. Seeded with the initial state so
-  // the mount-time save effect does NOT re-stamp savedAt with a fresh timestamp
-  // on every app open (which would defeat loadStateAsync's savedAt arbitration
-  // and let a stale store win). Cross-tab updates also point this at the
-  // incoming snapshot to suppress an echo-save loop between tabs.
-  const lastPersistedRef = useRef<AppState | null>(state)
+  const [{ state, isDemo }, setAppData] = useState<{ state: AppState | null; isDemo: boolean }>({ state: null, isDemo: false })
+  const [hydration, setHydration] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [hydrationAttempt, setHydrationAttempt] = useState(0)
+  const [hydrationError, setHydrationError] = useState('')
+  const lastPersistedRef = useRef<AppState | null>(null)
 
   useEffect(() => {
-    loadStateAsync().then((idbState) => {
-      if (idbState) {
-        setAppData((prev) => {
-          if (prev.state) return prev
-          return {
-            state: reconcile(migrateState(idbState)),
-            isDemo: idbState.profile.displayName === 'Demo User',
-          }
-        })
+    let active = true
+    loadStateAsync().then((loaded) => {
+      if (!active) return
+      const restored = loaded ? reconcile(migrateState(loaded)) : null
+      setAppData(prev => {
+        // A different tab may have saved while the asynchronous mirror write
+        // was pending. Never replace its newer storage event with our read.
+        if (prev.state && (!restored || (prev.state.savedAt ?? 0) >= (restored.savedAt ?? 0))) return prev
+        return { state: restored, isDemo: loaded?.profile.displayName === 'Demo User' }
+      })
+      setHydration('ready')
+    }).catch((error: unknown) => {
+      if (active) {
+        setHydrationError(error instanceof Error ? error.message : 'Please reopen this page after browser storage is available.')
+        setHydration('error')
       }
     })
-  }, [])
+    return () => { active = false }
+  }, [hydrationAttempt])
 
   // Re-run catch-up if the tab stays open across a calendar-day boundary or
   // becomes visible again after being hidden — paydays / Jan 1 grants /
@@ -182,11 +177,13 @@ export default function App() {
           lastPersistedRef.current = migrated
           return { state: migrated, isDemo: migrated.profile.displayName === 'Demo User' }
         }
+        if ((migrated.savedAt ?? 0) < (prev.state.savedAt ?? 0)) return prev
         // Only react when the change actually came from elsewhere — guard on a
         // structural diff so an identical echo neither toasts nor triggers a
         // save.
         const same =
           JSON.stringify(prev.state.profile) === JSON.stringify(migrated.profile) &&
+          JSON.stringify(prev.state.policy) === JSON.stringify(migrated.policy) &&
           JSON.stringify(prev.state.plannedVacations) ===
             JSON.stringify(migrated.plannedVacations) &&
           JSON.stringify(prev.state.bankHoursLog) === JSON.stringify(migrated.bankHoursLog)
@@ -207,17 +204,14 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // Only persist when the in-memory state actually changed since the last
-    // save. Skipping the no-op mount-time save keeps savedAt meaning "when the
-    // user last changed data", which loadStateAsync relies on to pick the newer
-    // of the localStorage / IndexedDB snapshots. (Cold-load catch-up results
-    // are idempotent, so deferring their persistence to the first real edit is
-    // safe.)
-    if (state && state !== lastPersistedRef.current) {
+    // Persist only after both stores have been checked and catch-up succeeds.
+    // Cross-tab snapshots point lastPersistedRef at the incoming state so they
+    // do not produce an echo-save loop.
+    if (hydration === 'ready' && state && state !== lastPersistedRef.current) {
       lastPersistedRef.current = state
       saveState(state)
     }
-  }, [state])
+  }, [state, hydration])
 
   // Dark mode only — light mode was removed. Always apply the dark class
   // regardless of any previously-stored theme value.
@@ -335,6 +329,9 @@ export default function App() {
             ? `${mergedNote} · ${sourceNote}`
             : sourceNote ?? mergedNote
 
+        // Undo elapsed, recorded days before replacing overlapping plans.
+        // The merged plan's current deduction is then derived exactly once.
+        const unbooked = overlapping.reduce((current, entry) => unbookPlannedEntry(current, entry.id), prev.state)
         const firstOverlap = overlapping[0]
         const mergedEntry: PlannedVacation = {
           ...firstOverlap,
@@ -342,6 +339,8 @@ export default function App() {
           startDate: mergedStart,
           endDate: mergedEnd,
           kind: 'planned',
+          appliedDeductions: undefined,
+          debitedFrom: undefined,
           note: finalNote,
           hoursPerDay: mergedHoursPerDay,
           // Prefer incoming display/time fields, but keep an overlapped value
@@ -362,10 +361,23 @@ export default function App() {
             duration: 6000,
           })
         }, 0)
-        return { ...prev, state: { ...prev.state, plannedVacations: filtered } }
+        return { ...prev, state: { ...unbooked, plannedVacations: filtered } }
       }
 
-      return { ...prev, state: { ...prev.state, plannedVacations: [...newVacations, vacation] } }
+      // Undo of an active trip must restore its exact dated draws, including
+      // zero-draw shortages. Replaying those days against later accruals would
+      // change history merely by deleting and undoing.
+      const restoredDraw = (vacation.appliedDeductions ?? []).reduce((sum, row) => ({
+        vacation: sum.vacation + row.drawn.vacation,
+        sick: sum.sick + row.drawn.sick,
+        bank: sum.bank + row.drawn.bank,
+      }), {vacation:0,sick:0,bank:0})
+      return { ...prev, state: { ...prev.state,
+        profile: {...prev.state.profile,
+          currentVacationHours:r2(prev.state.profile.currentVacationHours-restoredDraw.vacation),
+          currentSickHours:r2(prev.state.profile.currentSickHours-restoredDraw.sick),
+          currentBankHours:r2(prev.state.profile.currentBankHours-restoredDraw.bank)},
+        plannedVacations: [...newVacations, vacation] } }
     })
   }, [])
 
@@ -390,19 +402,20 @@ export default function App() {
             ...prev.state,
             profile: {
               ...prev.state.profile,
-              currentVacationHours: refunded.vacation,
-              currentSickHours: refunded.sick,
-              currentBankHours: refunded.bank,
+              currentVacationHours: r2(refunded.vacation),
+              currentSickHours: r2(refunded.sick),
+              currentBankHours: r2(refunded.bank),
             },
             plannedVacations: prev.state.plannedVacations.filter((v) => v.id !== id),
           },
         }
       }
+      const unbooked = unbookPlannedEntry(prev.state, id)
       return {
         ...prev,
         state: {
-          ...prev.state,
-          plannedVacations: prev.state.plannedVacations.filter((v) => v.id !== id),
+          ...unbooked,
+          plannedVacations: unbooked.plannedVacations.filter((v) => v.id !== id),
         },
       }
     })
@@ -411,26 +424,38 @@ export default function App() {
   const addPastAbsence = useCallback((vacation: PlannedVacation) => {
     setAppData((prev) => {
       if (!prev.state) return prev
+      const base = unbookPlannedDates(prev.state, vacation.startDate, vacation.endDate)
       const hrs = vacation.actualHoursUsed ?? vacation.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
-      const debited = applyDebit(prev.state, hrs, vacation.hourSource || 'sick')
+      // Undo restores exactly what the removed entry actually drew. A
+      // scheduled shortage can have requested 8h but drawn only 3h; replaying
+      // the request as a new logged absence would create 5h of false debt.
+      const debited = vacation.debitedFrom ? {
+        drawn: vacation.debitedFrom,
+        balances: {
+          vacation: base.profile.currentVacationHours - vacation.debitedFrom.vacation,
+          sick: base.profile.currentSickHours - vacation.debitedFrom.sick,
+          bank: base.profile.currentBankHours - vacation.debitedFrom.bank,
+        },
+      } : applyDebit(base, hrs, vacation.hourSource || 'sick')
       // Record exactly which pools were drawn so a later delete/edit refunds
       // the same buckets instead of dumping everything back into vacation.
       const entry: PlannedVacation = {
         ...vacation,
         kind: 'logged_past',
+        appliedDeductions: vacation.debitedFrom ? vacation.appliedDeductions : undefined,
         debitedFrom: debited.drawn,
       }
       return {
         ...prev,
         state: {
-          ...prev.state,
+          ...base,
           profile: {
-            ...prev.state.profile,
-            currentVacationHours: debited.balances.vacation,
-            currentSickHours: debited.balances.sick,
-            currentBankHours: debited.balances.bank,
+            ...base.profile,
+            currentVacationHours: r2(debited.balances.vacation),
+            currentSickHours: r2(debited.balances.sick),
+            currentBankHours: r2(debited.balances.bank),
           },
-          plannedVacations: [...prev.state.plannedVacations, entry],
+          plannedVacations: [...base.plannedVacations, entry],
         },
       }
     })
@@ -444,13 +469,16 @@ export default function App() {
       const entry = prev.state.plannedVacations.find((v) => v.id === id)
       if (!entry) return prev
 
+      const effectiveTotal = entry.actualHoursUsed ?? (entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay) * countWorkDays(parseISO(entry.startDate), parseISO(entry.endDate), prev.state.policy)
+      if (r2(actualHoursUsed) === r2(effectiveTotal)) return prev
       if (entry.kind !== 'logged_past') {
-        const newEntries = prev.state.plannedVacations.map((v) =>
+        const base = preparePlannedEdit(prev.state, id, {actualHoursUsed})
+        const newEntries = base.plannedVacations.map((v) =>
           v.id === id ? { ...v, actualHoursUsed } : v,
         )
         return {
           ...prev,
-          state: { ...prev.state, plannedVacations: newEntries },
+          state: { ...base, plannedVacations: newEntries },
         }
       }
 
@@ -469,14 +497,14 @@ export default function App() {
         ...prev.state,
         profile: {
           ...prev.state.profile,
-          currentVacationHours: refunded.vacation,
-          currentSickHours: refunded.sick,
-          currentBankHours: refunded.bank,
+          currentVacationHours: r2(refunded.vacation),
+          currentSickHours: r2(refunded.sick),
+          currentBankHours: r2(refunded.bank),
         },
       }
       const debited = applyDebit(refundedState, actualHoursUsed, entry.hourSource || 'sick')
       const newEntries = prev.state.plannedVacations.map((v) =>
-        v.id === id ? { ...v, actualHoursUsed, debitedFrom: debited.drawn } : v,
+        v.id === id ? { ...v, actualHoursUsed, debitedFrom: debited.drawn, appliedDeductions: undefined } : v,
       )
       return {
         ...prev,
@@ -484,9 +512,9 @@ export default function App() {
           ...prev.state,
           profile: {
             ...prev.state.profile,
-            currentVacationHours: debited.balances.vacation,
-            currentSickHours: debited.balances.sick,
-            currentBankHours: debited.balances.bank,
+            currentVacationHours: r2(debited.balances.vacation),
+            currentSickHours: r2(debited.balances.sick),
+            currentBankHours: r2(debited.balances.bank),
           },
           plannedVacations: newEntries,
         },
@@ -498,11 +526,12 @@ export default function App() {
     (id: string, updates: Partial<PlannedVacation>) => {
       setAppData((prev) => {
         if (!prev.state) return prev
+        const base = preparePlannedEdit(prev.state, id, updates)
         return {
           ...prev,
           state: {
-            ...prev.state,
-            plannedVacations: prev.state.plannedVacations.map((v) =>
+            ...base,
+            plannedVacations: base.plannedVacations.map((v) =>
               v.id === id ? { ...v, ...updates } : v,
             ),
           },
@@ -586,6 +615,22 @@ export default function App() {
     },
     [],
   )
+
+  // Do not offer setup or editable stale data until both persistent stores
+  // have been checked. A failed read must never look like a new account.
+  if (hydration !== 'ready') {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-6 bg-slate-950 text-slate-100">
+        <section className="max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6" aria-live="polite">
+          <h1 className="text-xl font-semibold">{hydration === 'loading' ? 'Loading your saved planner' : 'Your saved planner needs attention'}</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-300">
+            {hydration === 'loading' ? 'Checking both saved copies before opening your planner.' : `We couldn’t safely open your saved data. Your existing records have been left in place. ${hydrationError}`}
+          </p>
+          {hydration === 'error' && <button className="mt-5 rounded-lg bg-cyan-700 px-4 py-2 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300" onClick={() => { setHydration('loading'); setHydrationAttempt(n => n + 1) }}>Try again</button>}
+        </section>
+      </main>
+    )
+  }
 
   if (!state) {
     return <SetupWizard onComplete={handleSetupComplete} />

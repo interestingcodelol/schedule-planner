@@ -1,11 +1,6 @@
+import { getNowInZone } from '../lib/timeUtils'
 import { useMemo, useState } from 'react'
-import {
-  addDays,
-  endOfYear,
-  format,
-  parseISO,
-  startOfDay,
-} from 'date-fns'
+import { addDays, endOfYear, format, parseISO, startOfDay } from 'date-fns'
 import { TrendingUp, AlertTriangle, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
 import {
@@ -31,7 +26,8 @@ export function BalanceForecast() {
   const { state } = useAppState()
   const [mode, setMode] = useState<Mode>('vacation')
 
-  const today = useMemo(() => startOfDay(new Date()), [])
+  const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
+  const today = useMemo(() => startOfDay(parseISO(todayIso)), [todayIso])
   const yearEnd = useMemo(() => endOfYear(today), [today])
 
   // Tier-boundary anniversaries inside the range — inserted as explicit sample
@@ -42,11 +38,7 @@ export function BalanceForecast() {
     const out: Date[] = []
     for (const tier of state.policy.accrualTiers) {
       if (tier.minYears <= 0) continue
-      const anniv = new Date(
-        hire.getFullYear() + tier.minYears,
-        hire.getMonth(),
-        hire.getDate(),
-      )
+      const anniv = new Date(hire.getFullYear() + tier.minYears, hire.getMonth(), hire.getDate())
       if (anniv > today && anniv <= yearEnd) out.push(anniv)
     }
     return out
@@ -124,9 +116,7 @@ export function BalanceForecast() {
     const capToday = carryoverCapForDate(state, today)
     if (capToday === null || capToday >= carryover.cap) return null
     // The anniversary that raises the cap (first whose cap exceeds today's).
-    const riser = anniversaries.find(
-      (a) => (carryoverCapForDate(state, a) ?? 0) > capToday,
-    )
+    const riser = anniversaries.find((a) => (carryoverCapForDate(state, a) ?? 0) > capToday)
     return riser
       ? `cap rises to ${fmtHRound(carryover.cap)} after your ${format(riser, 'MMMM')} work anniversary`
       : `cap rises to ${fmtHRound(carryover.cap)} at your next work anniversary`
@@ -138,7 +128,7 @@ export function BalanceForecast() {
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden flex flex-col h-full">
-      <div className="px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap shrink-0">
+      <div className="forecast-header px-4 pt-3 pb-2 flex items-center gap-3 flex-wrap shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           <Icon className={`w-4 h-4 ${mode === 'vacation' ? 'text-blue-500' : 'text-rose-500'}`} />
           <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 truncate">
@@ -209,7 +199,7 @@ export function BalanceForecast() {
       />
 
       {mode === 'vacation' && carryover.cap !== null && (
-        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug shrink-0">
+        <div className="forecast-footer px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug shrink-0">
           {carryover.projectedPayout > 0 ? (
             <>
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
@@ -248,7 +238,7 @@ export function BalanceForecast() {
       )}
 
       {mode === 'sick' && (
-        <div className="px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug shrink-0">
+        <div className="forecast-footer px-4 pb-3 pt-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1.5 leading-snug shrink-0">
           {sick.projectedForfeit > 0 ? (
             <>
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
@@ -256,12 +246,12 @@ export function BalanceForecast() {
                 About{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtH(sick.projectedForfeit)}
-                </span>
-                {' '}forfeited on Jan 1 — over the{' '}
+                </span>{' '}
+                forfeited on Jan 1 — over the{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtHRound(sick.carryoverCap ?? 0)}
-                </span>
-                {' '}carry-over limit. Sick time isn't paid out, so use it or lose it.
+                </span>{' '}
+                carry-over limit. Sick time isn't paid out, so use it or lose it.
               </span>
             </>
           ) : (

@@ -1,3 +1,5 @@
+import { getNowInZone } from '../lib/timeUtils'
+import { countWorkDays } from '../lib/projection'
 import { useMemo, useState, useRef, useEffect } from 'react'
 import {
   addMonths,
@@ -8,6 +10,7 @@ import {
   endOfWeek,
   eachDayOfInterval,
   format,
+  parseISO,
   getDay,
   setMonth,
   setYear,
@@ -22,13 +25,19 @@ import { subscribeToCalendarNav } from '../lib/calendarNav'
 import { showToast } from '../lib/toastBus'
 
 export function CalendarView() {
-  const { state, addVacation, removeVacation, updateVacation, addPastAbsence, removePastAbsence, adjustActualHours } = useAppState()
-  const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
+  const {
+    state,
+    addVacation,
+    removeVacation,
+    updateVacation,
+    addPastAbsence,
+    removePastAbsence,
+    adjustActualHours,
+  } = useAppState()
+  const today = parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate)
+  const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(today))
 
-  useEffect(
-    () => subscribeToCalendarNav((date) => setCurrentMonth(startOfMonth(date))),
-    [],
-  )
+  useEffect(() => subscribeToCalendarNav((date) => setCurrentMonth(startOfMonth(date))), [])
 
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentMonth)
@@ -59,12 +68,13 @@ export function CalendarView() {
       const isWorkDay = state.policy.workDaysPerWeek.includes(dow)
       const isHol = isHoliday(state.policy, d)
       if (!isWorkDay || isHol) continue
-      const v = state.plannedVacations.find(
-        (x) => dateStr >= x.startDate && dateStr <= x.endDate,
-      )
+      const v = state.plannedVacations.find((x) => dateStr >= x.startDate && dateStr <= x.endDate)
       if (!v) continue
       const hrs =
-        v.actualHoursUsed ??
+        (v.actualHoursUsed !== undefined
+          ? v.actualHoursUsed /
+            Math.max(1, countWorkDays(parseISO(v.startDate), parseISO(v.endDate), state.policy))
+          : undefined) ??
         v.hoursPerDay ??
         state.policy.hoursPerWorkDay
       if (hrs >= state.policy.hoursPerWorkDay) fullDays++
@@ -78,7 +88,8 @@ export function CalendarView() {
   const monthLabel = (() => {
     const { fullDays, partialDays, totalHours } = monthStats
     if (fullDays === 0 && partialDays === 0) return 'No planned time off this month'
-    const fmtH = (h: number) => (Number.isInteger(h) ? String(h) : (Math.round(h * 100) / 100).toString())
+    const fmtH = (h: number) =>
+      Number.isInteger(h) ? String(h) : (Math.round(h * 100) / 100).toString()
     const totalDays = fullDays + partialDays
     if (partialDays === 0) {
       return `${fullDays} full day${fullDays === 1 ? '' : 's'} off · ${fmtH(totalHours)}h`
@@ -143,9 +154,13 @@ export function CalendarView() {
     // Editing an existing MULTI-day planned entry must NOT collapse the whole
     // span to a single day. Update its editable fields in place across the
     // entire entry, preserving startDate/endDate/kind/actualHoursUsed.
-    if (popoverExisting && popoverExisting.startDate !== popoverExisting.endDate) {
+    if (popoverExisting) {
       updateVacation(popoverExisting.id, {
         hoursPerDay: config.hoursPerDay,
+        actualHoursUsed:
+          config.hoursPerDay === popoverExisting.hoursPerDay
+            ? popoverExisting.actualHoursUsed
+            : undefined,
         timeOffStart: config.timeOffStart,
         timeOffEnd: config.timeOffEnd,
         hourSource: config.hourSource,
@@ -155,12 +170,7 @@ export function CalendarView() {
       return
     }
 
-    // Single-day entry (or brand-new day): remove the old entry, if any, and
-    // add the edited single-day entry.
-    if (popoverExisting) {
-      removeVacation(popoverExisting.id)
-    }
-
+    // New entries start with no recorded deductions.
     addVacation({
       id: crypto.randomUUID(),
       startDate: dateStr,
@@ -265,7 +275,8 @@ export function CalendarView() {
               <div className="grid grid-cols-3 gap-1">
                 {Array.from({ length: 12 }, (_, i) => {
                   const isActive = currentMonth.getMonth() === i
-                  const isCurrent = new Date().getMonth() === i && currentMonth.getFullYear() === new Date().getFullYear()
+                  const isCurrent =
+                    today.getMonth() === i && currentMonth.getFullYear() === today.getFullYear()
                   return (
                     <button
                       key={i}
@@ -299,7 +310,7 @@ export function CalendarView() {
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setCurrentMonth(startOfMonth(new Date()))}
+            onClick={() => setCurrentMonth(startOfMonth(today))}
             className="p-2.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
             aria-label="Go to current month"
             title="Go to current month"
@@ -319,7 +330,7 @@ export function CalendarView() {
 
       <div
         className="grid grid-cols-7 flex-1 min-h-0 border-l border-t border-gray-300/60 dark:border-gray-600/40"
-        style={{ gridTemplateRows: `auto repeat(6, minmax(5rem, 1fr))` }}
+        style={{ gridTemplateRows: `auto repeat(6, minmax(var(--calendar-row-min, 5rem), 1fr))` }}
       >
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
           <div

@@ -434,7 +434,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
             className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Sick hours above this amount carry into next year; the excess is forfeited on Jan 1 (sick time is never paid out). Set this equal to the max balance for no forfeiture.
+            Sick hours up to this amount carry into next year; the excess is forfeited on Jan 1 (sick time is never paid out). Set this equal to the max balance for no forfeiture.
           </p>
         </div>
       </div>

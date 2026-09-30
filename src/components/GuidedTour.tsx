@@ -14,7 +14,7 @@ const ALL_STEPS: TourStep[] = [
     target: '[data-tour="status-cards"]',
     title: 'Your Balances at a Glance',
     description:
-      'See your total available hours across all pools — vacation, sick, and bank hours. The year-end card warns you if you might exceed your carryover cap.',
+      'Available now includes scheduled time off through today. Open Balance details to see exactly which pools were used. Future plans and accruals are included in the Year-end forecast and chart. The insights bar highlights useful planning reminders.',
     placement: 'bottom',
   },
   {
@@ -35,7 +35,7 @@ const ALL_STEPS: TourStep[] = [
     target: '[data-tour="bank-hours"]',
     title: 'Bank Hours',
     description:
-      'Log extra hours you work beyond your regular day. Bank hours can be used for time off and are used first when you select "Auto". They get paid out during the Dec-Feb window.',
+      'Log extra hours you work beyond your regular day. Bank hours can be used for time off and are used first when you select "Auto". Payouts follow the dates configured in your policy.',
     placement: 'left',
   },
   {
@@ -56,8 +56,7 @@ export function GuidedTour() {
   const steps = useMemo(
     () =>
       ALL_STEPS.filter(
-        (s) =>
-          s.target !== '[data-tour="bank-hours"]' || !state.policy.hideBankHours,
+        (s) => s.target !== '[data-tour="bank-hours"]' || !state.policy.hideBankHours,
       ),
     [state.policy.hideBankHours],
   )
@@ -182,14 +181,7 @@ export function GuidedTour() {
             )}
           </mask>
         </defs>
-        <rect
-          x="0"
-          y="0"
-          width={vw}
-          height={vh}
-          fill="rgba(0,0,0,0.55)"
-          mask="url(#tour-mask)"
-        />
+        <rect x="0" y="0" width={vw} height={vh} fill="rgba(0,0,0,0.55)" mask="url(#tour-mask)" />
       </svg>
 
       {spotlightRect && (
@@ -202,8 +194,7 @@ export function GuidedTour() {
             height: spotlightRect.height + 4,
             borderRadius: BORDER_R + 2,
             border: '2px solid rgba(59, 130, 246, 0.5)',
-            boxShadow:
-              '0 0 24px rgba(59, 130, 246, 0.35), 0 0 60px rgba(59, 130, 246, 0.12)',
+            boxShadow: '0 0 24px rgba(59, 130, 246, 0.35), 0 0 60px rgba(59, 130, 246, 0.12)',
           }}
         />
       )}
@@ -248,9 +239,7 @@ export function GuidedTour() {
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-sm text-gray-400 leading-relaxed mb-5">
-          {step.description}
-        </p>
+        <p className="text-sm text-gray-400 leading-relaxed mb-5">{step.description}</p>
         <div className="flex items-center justify-between">
           <span className="text-xs text-gray-500 font-medium">
             {currentStep + 1} of {steps.length}

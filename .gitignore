@@ -44,3 +44,7 @@ pnpm-debug.log*
 
 # Serena MCP local index/cache — editor tooling, not project source.
 /.serena/
+
+# Browser verification artifacts
+/test-results/
+/playwright-report/

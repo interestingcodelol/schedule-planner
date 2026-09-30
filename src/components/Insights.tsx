@@ -1,6 +1,10 @@
+import { getNowInZone } from '../lib/timeUtils'
 import { useMemo } from 'react'
 import {
   addDays,
+  addMonths,
+  addYears,
+  differenceInCalendarDays,
   differenceInDays,
   differenceInYears,
   endOfYear,
@@ -13,6 +17,7 @@ import { Lightbulb } from 'lucide-react'
 import { useAppState } from '../context'
 import {
   projectBalance,
+  getEffectiveCurrentBalances,
   computeAccrualTier,
   countWorkDays,
   getCarryoverOutlook,
@@ -33,7 +38,10 @@ export function Insights() {
   const { state } = useAppState()
 
   const insights = useMemo(() => {
-    const today = startOfDay(new Date())
+    const today = startOfDay(
+      parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate),
+    )
+    const effective = getEffectiveCurrentBalances(state)
     const yearEnd = endOfYear(today)
     const hireDate = parseISO(state.profile.hireDate)
     const yos = differenceInYears(today, hireDate)
@@ -56,9 +64,7 @@ export function Insights() {
     const projectedRemaining = Number.isFinite(yearEndProj?.totalAvailable)
       ? yearEndProj.totalAvailable
       : 0
-    const projectedShortfall = Number.isFinite(yearEndProj?.shortfall)
-      ? yearEndProj.shortfall
-      : 0
+    const projectedShortfall = Number.isFinite(yearEndProj?.shortfall) ? yearEndProj.shortfall : 0
     const sickDaysBuffer = Math.floor(Math.max(0, projectedRemaining) / hoursPerDay)
 
     // Tier-aware carry-over picture for the next payout (correct cap + exact
@@ -93,21 +99,32 @@ export function Insights() {
     }
 
     // Tier transition coming up within 6 months
-    pool.push((() => {
-      const tiers = state.policy.accrualTiers
-      const idx = tiers.findIndex(
-        (t) => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears),
-      )
-      if (idx < 0 || idx >= tiers.length - 1) return null
-      const nextTier = tiers[idx + 1]
-      const yearsToNext = nextTier.minYears - yos
-      if (yearsToNext <= 0 || yearsToNext > 0.5) return null
-      const daysToNext = Math.max(1, Math.ceil(yearsToNext * 365.25))
-      return {
-        text: `Accrual rate increases to **${fmt(nextTier.hoursPerPayPeriod)} hrs/period** in ${daysToNext} day${daysToNext !== 1 ? 's' : ''} (work anniversary)`,
-        type: 'positive',
-      }
-    })())
+    pool.push(
+      (() => {
+        const tiers = state.policy.accrualTiers
+        const idx = tiers.findIndex(
+          (t) => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears),
+        )
+        if (idx < 0 || idx >= tiers.length - 1) return null
+        const nextTier = tiers
+          .slice(idx + 1)
+          .find((t) => t.hoursPerPayPeriod > tier.hoursPerPayPeriod)
+        if (!nextTier) return null
+        // Match projection's completed-service-year convention. addYears clamps
+        // Feb 29 to Feb 28, but differenceInYears advances on Mar 1 in a
+        // non-leap year, so move to that actual transition date when needed.
+        let transitionDate = addYears(hireDate, Math.ceil(nextTier.minYears))
+        if (differenceInYears(transitionDate, hireDate) < nextTier.minYears) {
+          transitionDate = addDays(transitionDate, 1)
+        }
+        const daysToNext = differenceInCalendarDays(transitionDate, today)
+        if (daysToNext <= 0 || transitionDate > addMonths(today, 6)) return null
+        return {
+          text: `Accrual rate increases to **${fmt(nextTier.hoursPerPayPeriod)} hrs/period** in ${daysToNext} day${daysToNext !== 1 ? 's' : ''} (work anniversary)`,
+          type: 'positive',
+        }
+      })(),
+    )
 
     if (carryover.cap !== null) {
       const surplus = yearEndProj.vacationBalance - carryover.cap
@@ -119,46 +136,64 @@ export function Insights() {
       }
     }
 
-    if (state.profile.currentBankHours > 0 && !state.policy.hideBankHours) {
+    if (effective.bank > 0 && !state.policy.hideBankHours) {
       const payoutMonth = state.policy.bankHoursPayoutStart.month
-      const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      const monthNames = [
+        '',
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ]
       pool.push({
-        text: `**${fmt(state.profile.currentBankHours)} bank hrs** in your account — payout window opens in ${monthNames[payoutMonth]}`,
+        text: `**${fmt(effective.bank)} bank hrs** in your account — payout window opens in ${monthNames[payoutMonth]}`,
         type: 'info',
       })
     }
 
-    pool.push((() => {
-      const yStart = startOfYear(today)
-      const yEnd = endOfYear(today)
-      const totalDays = Math.max(1, differenceInDays(yEnd, yStart))
-      const daysIn = differenceInDays(today, yStart)
-      const yearPct = Math.round((daysIn / totalDays) * 100)
-      const periodsSoFar = Math.max(
-        0,
-        Math.floor(differenceInDays(today, yStart) / state.policy.payPeriodLengthDays),
-      )
-      const ytdAccrual = periodsSoFar * tier.hoursPerPayPeriod
-      if (yearPct < 5 || ytdAccrual < 1) return null
-      return {
-        text: `${yearPct}% through the year — you've accrued **~${fmt(ytdAccrual)} vacation hrs** so far`,
-        type: 'info',
-      }
-    })())
+    pool.push(
+      (() => {
+        const yStart = startOfYear(today)
+        const yEnd = endOfYear(today)
+        const totalDays = Math.max(1, differenceInDays(yEnd, yStart))
+        const daysIn = differenceInDays(today, yStart)
+        const yearPct = Math.round((daysIn / totalDays) * 100)
+        const periodsSoFar = Math.max(
+          0,
+          Math.floor(differenceInDays(today, yStart) / state.policy.payPeriodLengthDays),
+        )
+        const ytdAccrual = periodsSoFar * tier.hoursPerPayPeriod
+        if (yearPct < 5 || ytdAccrual < 1) return null
+        return {
+          text: `${yearPct}% through the year — you've accrued **~${fmt(ytdAccrual)} vacation hrs** so far`,
+          type: 'info',
+        }
+      })(),
+    )
 
-    pool.push((() => {
-      const lookahead = addDays(today, 90)
-      const all = [
-        ...computeHolidayDates(state.policy, today.getFullYear()),
-        ...computeHolidayDates(state.policy, today.getFullYear() + 1),
-      ]
-      const upcoming = all.filter((d) => d > today && d <= lookahead).length
-      if (upcoming === 0) return null
-      return {
-        text: `**${upcoming} paid holiday${upcoming !== 1 ? 's' : ''}** on the calendar in the next 90 days`,
-        type: 'positive',
-      }
-    })())
+    pool.push(
+      (() => {
+        const lookahead = addDays(today, 90)
+        const all = [
+          ...computeHolidayDates(state.policy, today.getFullYear()),
+          ...computeHolidayDates(state.policy, today.getFullYear() + 1),
+        ]
+        const upcoming = all.filter((d) => d > today && d <= lookahead).length
+        if (upcoming === 0) return null
+        return {
+          text: `**${upcoming} paid holiday${upcoming !== 1 ? 's' : ''}** on the calendar in the next 90 days`,
+          type: 'positive',
+        }
+      })(),
+    )
 
     const monthlyAccrual = (tier.hoursPerPayPeriod * 30) / state.policy.payPeriodLengthDays
     pool.push({
@@ -169,55 +204,60 @@ export function Insights() {
     // PTO + holidays as a ratio of total time off in the year. Holidays are
     // "free" days off; PTO scheduled by the user costs hours. Ratio gives a
     // sense of how much of their year-end time-off mix comes from each.
-    pool.push((() => {
-      const yearStart = startOfYear(today)
-      const yearEnd2 = endOfYear(today)
-      const holidayCount = computeHolidayDates(state.policy, today.getFullYear())
-        .filter((d) => d >= yearStart && d <= yearEnd2 && state.policy.workDaysPerWeek.includes(d.getDay()))
-        .length
-      const plannedDays = state.plannedVacations
-        .filter((v) => v.kind !== 'logged_past')
-        .filter((v) => parseISO(v.startDate) >= yearStart && parseISO(v.endDate) <= yearEnd2)
-        .reduce((sum, v) => {
-          const s = parseISO(v.startDate)
-          const e = parseISO(v.endDate)
-          return sum + countWorkDays(s, e, state.policy)
-        }, 0)
-      const totalOff = holidayCount + plannedDays
-      if (totalOff < 1) return null
-      const holidayPct = Math.round((holidayCount / totalOff) * 100)
-      const ptoPct = 100 - holidayPct
-      return {
-        text: `**${holidayPct}%** of your year-off days come from holidays · **${ptoPct}%** from your own PTO (${holidayCount} holidays + ${plannedDays} planned)`,
-        type: 'info',
-      }
-    })())
+    pool.push(
+      (() => {
+        const yearStart = startOfYear(today)
+        const yearEnd2 = endOfYear(today)
+        const holidayCount = computeHolidayDates(state.policy, today.getFullYear()).filter(
+          (d) =>
+            d >= yearStart && d <= yearEnd2 && state.policy.workDaysPerWeek.includes(d.getDay()),
+        ).length
+        const plannedDays = state.plannedVacations
+          .filter((v) => v.kind !== 'logged_past')
+          .filter((v) => parseISO(v.startDate) >= yearStart && parseISO(v.endDate) <= yearEnd2)
+          .reduce((sum, v) => {
+            const s = parseISO(v.startDate)
+            const e = parseISO(v.endDate)
+            return sum + countWorkDays(s, e, state.policy)
+          }, 0)
+        const totalOff = holidayCount + plannedDays
+        if (totalOff < 1) return null
+        const holidayPct = Math.round((holidayCount / totalOff) * 100)
+        const ptoPct = 100 - holidayPct
+        return {
+          text: `**${holidayPct}%** of your year-off days come from holidays · **${ptoPct}%** from your own PTO (${holidayCount} holidays + ${plannedDays} planned)`,
+          type: 'info',
+        }
+      })(),
+    )
 
     // YTD utilization: how much of your annual PTO accrual you've already
     // committed to (used + scheduled-future). Pairs with the YTD-accrual
     // tip already in the pool — accrued vs spent gives both halves.
-    pool.push((() => {
-      const yearStart = startOfYear(today)
-      const yearEnd2 = endOfYear(today)
-      const totalDays = Math.max(1, differenceInDays(yearEnd2, yearStart))
-      const yearPct = Math.round((differenceInDays(today, yearStart) / totalDays) * 100)
-      const usedAndScheduledHrs = state.plannedVacations
-        .filter((v) => parseISO(v.startDate) >= yearStart && parseISO(v.endDate) <= yearEnd2)
-        .reduce((sum, v) => {
-          const s = parseISO(v.startDate)
-          const e = parseISO(v.endDate)
-          const wd = countWorkDays(s, e, state.policy)
-          const perDay = v.actualHoursUsed ?? v.hoursPerDay ?? hoursPerDay
-          return sum + wd * perDay
-        }, 0)
-      if (annualAccrual < 1) return null
-      const utilPct = Math.round((usedAndScheduledHrs / annualAccrual) * 100)
-      if (utilPct < 1) return null
-      return {
-        text: `You've used **${utilPct}%** of your annual PTO (${fmt(usedAndScheduledHrs)} of ${fmt(annualAccrual)} hrs) — year is ${yearPct}% done`,
-        type: 'info',
-      }
-    })())
+    pool.push(
+      (() => {
+        const yearStart = startOfYear(today)
+        const yearEnd2 = endOfYear(today)
+        const totalDays = Math.max(1, differenceInDays(yearEnd2, yearStart))
+        const yearPct = Math.round((differenceInDays(today, yearStart) / totalDays) * 100)
+        const usedAndScheduledHrs = state.plannedVacations
+          .filter((v) => parseISO(v.startDate) >= yearStart && parseISO(v.endDate) <= yearEnd2)
+          .reduce((sum, v) => {
+            const s = parseISO(v.startDate)
+            const e = parseISO(v.endDate)
+            const wd = countWorkDays(s, e, state.policy)
+            // Actual hours are the total for the entry, not a daily rate.
+            return sum + (v.actualHoursUsed ?? wd * (v.hoursPerDay ?? hoursPerDay))
+          }, 0)
+        if (annualAccrual < 1) return null
+        const utilPct = Math.round((usedAndScheduledHrs / annualAccrual) * 100)
+        if (utilPct < 1) return null
+        return {
+          text: `You've used **${utilPct}%** of your annual PTO (${fmt(usedAndScheduledHrs)} of ${fmt(annualAccrual)} hrs) — year is ${yearPct}% done`,
+          type: 'info',
+        }
+      })(),
+    )
 
     return pool.filter((x): x is Insight => x !== null).slice(0, 4)
   }, [state])
@@ -240,24 +280,33 @@ export function Insights() {
   }
 
   return (
-    <div className="glass-card rounded-xl px-3 py-2 sm:px-4 sm:py-3 flex items-center gap-2 sm:gap-3">
+    <section
+      aria-label="Planning insights"
+      className="glass-card rounded-xl px-3 py-1.5 sm:px-4 flex items-center gap-2 sm:gap-3"
+    >
       <Lightbulb className="w-4 h-4 text-amber-500 shrink-0" />
       {/* Responsive, scrollbar-free at every width:
        *  - Mobile/tablet: wraps into a tidy multi-line block (no horizontal
        *    scroll, so no scrollbar) — text wraps so nothing overflows.
        *  - lg+: a single row; if the tips don't all fit they scroll
        *    horizontally with the scrollbar hidden (never grows to two rows). */}
-      <div className="flex flex-wrap lg:flex-nowrap items-start lg:items-center gap-x-4 sm:gap-x-6 gap-y-1.5 lg:overflow-x-auto no-scrollbar flex-1 min-w-0">
+      <div
+        tabIndex={0}
+        aria-label="Planning insight messages"
+        className="flex flex-wrap lg:flex-nowrap items-start lg:items-center gap-x-4 sm:gap-x-6 gap-y-1.5 lg:overflow-x-auto no-scrollbar flex-1 min-w-0"
+      >
         {insights.map((insight, i) => (
           <div
             key={i}
-            className="flex items-start lg:items-center gap-1.5 shrink-0 whitespace-normal lg:whitespace-nowrap"
+            className="flex items-start lg:items-center gap-1.5 min-w-0 max-w-full lg:max-w-none lg:shrink-0 whitespace-normal lg:whitespace-nowrap"
           >
-            <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 mt-1 lg:mt-0 rounded-full shrink-0 ${dotMap[insight.type]}`} />
+            <span
+              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 mt-1 lg:mt-0 rounded-full shrink-0 ${dotMap[insight.type]}`}
+            />
             {/* Base text is a calm muted gray; only the key value(s) wrapped in
              *  **…** get the semantic accent color, so each tip highlights what
              *  matters without flooding the row with color. */}
-            <span className="text-xs sm:text-sm leading-snug text-gray-500 dark:text-gray-400">
+            <span className="text-xs leading-snug text-gray-500 dark:text-gray-400">
               {insight.text.split('**').map((seg, j) =>
                 j % 2 === 1 ? (
                   <span key={j} className={`font-semibold ${colorMap[insight.type]}`}>
@@ -271,6 +320,6 @@ export function Insights() {
           </div>
         ))}
       </div>
-    </div>
+    </section>
   )
 }
