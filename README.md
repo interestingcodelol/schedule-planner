@@ -73,6 +73,28 @@ Key behaviors:
 
 See [the balance model and release checklist](docs/balance-model.md) for the accounting rules and verification coverage.
 
+## Calendar export
+
+Settings → Data → Calendar export downloads a one-time `.ics` snapshot. Single-day
+partial absences with saved clock times export at those times in your profile's
+timezone. Full days, multi-day entries and partial entries without a valid saved
+clock interval remain all-day events; untimed partial entries say so in their
+description. Time-off events retain the existing Out-of-Office hint, while
+informational events remain free. Actual availability/presence depends on the
+calendar app and destination account, including Outlook/Teams.
+
+Repeated file imports can create duplicates. Editing or deleting an entry here
+does not update or remove an earlier imported copy. For refreshes, use a separate
+calendar containing **only** Schedule Planner imports, remove its previous imported
+events, then import the new snapshot. Never clear a calendar containing personal
+or work appointments. If you already imported into your main calendar, review and
+remove only the specific old planner copies yourself before importing again.
+
+Stable event IDs are retained for compatibility, but are not a synchronization
+guarantee. The app does not publish a subscription URL or send cancellation
+messages. [Microsoft explains the difference between importing a snapshot and
+subscribing to a calendar](https://support.microsoft.com/en-us/office/import-or-subscribe-to-a-calendar-in-outlook-com-or-outlook-on-the-web-cff1429c-5af6-41ec-a5b4-74f2c278e98c).
+
 ## Data persistence
 
 All data lives in your browser. The app writes every change to two stores in parallel:

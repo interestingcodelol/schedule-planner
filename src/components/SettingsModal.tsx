@@ -156,9 +156,16 @@ export function SettingsModal({ onClose }: Props) {
   }
 
   const handleIcalExport = () => {
-    const filename = downloadIcal(state, icalOptions)
-    updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
-    showToast({ message: `Calendar exported (${filename})`, duration: 5000 })
+    try {
+      const filename = downloadIcal(state, icalOptions)
+      updateProfile({ lastExportDate: format(new Date(), 'yyyy-MM-dd') })
+      showToast({ message: `Calendar snapshot exported (${filename})`, duration: 5000 })
+    } catch (error) {
+      showToast({
+        message: error instanceof Error ? error.message : 'Calendar export failed. Please try again.',
+        duration: 10000,
+      })
+    }
   }
 
   const toggleIcal = (key: keyof IcalExportOptions) => {
@@ -518,8 +525,12 @@ export function SettingsModal({ onClose }: Props) {
                   Calendar export
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-snug">
-                  Generate an .ics file you can import into Outlook (it will appear in
-                  Teams calendar too), Google Calendar, or Apple Calendar.
+                  Download an .ics snapshot for Outlook, Google Calendar, or Apple Calendar.
+                  Importing again may create duplicates. Changes and deletions here do not
+                  update earlier imports. Use a separate calendar containing only planner
+                  imports, and replace its old imported events before importing a fresh file.
+                  Never clear a calendar containing other appointments. Outlook/Teams
+                  availability depends on the calendar and account you import into.
                 </p>
                 <div className="space-y-2.5">
                   <button
