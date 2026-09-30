@@ -270,6 +270,9 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     const balanceToggle = page.getByLabel('Balance details', { exact: true })
     await balanceToggle.evaluate((summary) => {
       summary.addEventListener('click', () => {
+        // This target listener runs before React's delegated toggle. Sample only
+        // openings so a prior closing sampler cannot overwrite the next result.
+        if ((summary.parentElement as HTMLDetailsElement).open) return
         const panel = summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
         delete panel.dataset.qaFrameBounds
         const frames: { top: number; bottom: number; maxHeight: string }[] = []
