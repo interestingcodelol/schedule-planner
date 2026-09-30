@@ -51,7 +51,11 @@ into the current app; do not unwrap them or change their version manually.
 
 Automated checks cover immediate same-day usage, midnight/DST and differing host/profile timezones, partial and explicit/Auto pools, shortages, multi-day paydays/payouts/year boundaries, reload, edit/delete/Undo, legacy and backup migration, calendar summaries, chat, observed holidays and iCalendar export. CI runs tests, TypeScript, ESLint and the production build in UTC, America/Los_Angeles and Pacific/Auckland.
 
-The public release was exercised with disposable demo data. **The modified build has not yet received rendered desktop/mobile visual QA:** the available cloud browser rejected the local preview URL with `ERR_BLOCKED_BY_CLIENT`. Component tests and a successful production build do not substitute for that check. Keep the PR in draft until a supported preview environment is used to check 360px/mobile, desktop, expanded balance details, modal focus, overflow, keyboard controls and long notes. No production deployment is part of this change.
+The public release was exercised with disposable demo data. The local cloud-browser preview was unavailable, so the modified build was validated separately in GitHub-hosted Chromium. The [visual verification run](https://github.com/interestingcodelol/schedule-planner/actions/runs/36651492936) passed four browser flows at 1440×1000 desktop and 360×800 mobile on application commit `844114f44a120359be15a096dd16ecb662097363`. Captured PNGs were inspected, not only the assertions. This exposed and fixed mobile label/time clipping and a calendar-contained dialog; the final day editor is page-level and its full bounds are asserted inside the viewport.
+
+Screenshots cover the dashboard, balance details, partial-day editor, bank management, what-if planner, chat, profile/data settings, lower settings controls and a populated upcoming month. Browser assertions cover edit/reload stability, no horizontal overflow, v1 migration, real JSON export contents, settings scrolling and Escape/focus restoration. The 222 unit/component/integration tests also pass in UTC, Los Angeles and Auckland; TypeScript, ESLint and production builds pass.
+
+**This is a preview, not a deployment. Keep the PR draft and wait for the user's approval of the visual preview before any merge or production publication.** The checks do not claim exhaustive cross-browser/device testing; Safari/Firefox, real personal records and deployment/update-banner end-to-end behavior were not exercised.
 
 ### Public-release audit coverage (demo data only)
 
@@ -66,7 +70,7 @@ The public release was exercised with disposable demo data. **The modified build
 | Chat | Parse a dated trip, add, clear and close | Current/date/year-end/sick parser tests, interrupted-response and duplicate-add tests |
 | Forecasts | Vacation/Sick tabs and cap labels | Projection, carryover, payout and year-boundary regressions |
 | Settings | Profile, policy and data surfaces | Policy/date/import validation; cross-tab policy sync |
-| Backup/export | JSON export updates last-backup UI; file bytes not verified in browser | JSON migration/roundtrip/isolation and iCalendar content tests |
+| Backup/export | Public release export updates last-backup UI; modified Chromium test verifies actual JSON bytes | JSON migration/roundtrip/isolation and iCalendar content tests |
 | Help/update | Changelog open/close; tour Next/Previous/Skip | Release notes updated; deployment/update-banner end-to-end not exercised |
 
-No real PTO records were accessed. Clear-all and production update/deployment were not executed. Modified-build responsive screenshots remain a release gate, not a claimed pass.
+No real PTO records were accessed. Clear-all and production update/deployment were not executed. The final modified-build desktop/mobile screenshots were reviewed after the fixes above. Production publication still requires the user to approve this preview.
