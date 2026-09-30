@@ -273,15 +273,16 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
         // This target listener runs before React's delegated toggle. Sample only
         // openings so a prior closing sampler cannot overwrite the next result.
         if ((summary.parentElement as HTMLDetailsElement).open) return
-        const panel = summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
+        const getPanel = () => summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
         summary.ownerDocument.addEventListener('click', (dispatched) => {
-          panel.dataset.qaClickPrevented = String(dispatched.defaultPrevented)
+          getPanel().dataset.qaClickPrevented = String(dispatched.defaultPrevented)
         }, { once: true })
-        delete panel.dataset.qaFrameBounds
-        const frames: { top: number; bottom: number; maxHeight: string }[] = []
+        delete getPanel().dataset.qaFrameBounds
+        const frames: { top: number; bottom: number; maxHeight: string; connected: boolean; open: boolean }[] = []
         const sample = () => {
+          const panel = getPanel()
           const bounds = panel.getBoundingClientRect()
-          frames.push({ top: bounds.top, bottom: bounds.bottom, maxHeight: getComputedStyle(panel).maxHeight })
+          frames.push({ top: bounds.top, bottom: bounds.bottom, maxHeight: getComputedStyle(panel).maxHeight, connected: panel.isConnected, open: (summary.parentElement as HTMLDetailsElement).open })
           if (frames.length < 6) requestAnimationFrame(sample)
           else panel.dataset.qaFrameBounds = JSON.stringify(frames)
         }
@@ -310,9 +311,12 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     expect(breakdownBounds!.y + breakdownBounds!.height).toBeLessThanOrEqual(size.height + 1)
     const breakdown = page.getByRole('region', { name: 'Balance breakdown', exact: true })
     await expect(breakdown).toHaveAttribute('data-qa-frame-bounds', /./)
-    const paintedFrames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number; maxHeight: string }[]
+    const paintedFrames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number; maxHeight: string; connected: boolean; open: boolean }[]
     await info.attach(`${size.name}-opening-frames`, { body: JSON.stringify(paintedFrames), contentType: 'application/json' })
     for (const frame of paintedFrames) {
+      expect(frame.connected).toBe(true)
+      expect(frame.open).toBe(true)
+      expect(frame.bottom).toBeGreaterThan(frame.top)
       expect(frame.top, `opening frame ${JSON.stringify(frame)}`).toBeGreaterThanOrEqual(0)
       expect(frame.bottom, `opening frame ${JSON.stringify(frame)}`).toBeLessThanOrEqual(size.height + 1)
     }
@@ -344,8 +348,11 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
         expect(opened.y).toBeGreaterThanOrEqual(0)
         expect(opened.y + opened.height).toBeLessThanOrEqual(size.height + 1)
         await expect(breakdown).toHaveAttribute('data-qa-frame-bounds', /./)
-        const frames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number }[]
+        const frames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number; connected: boolean; open: boolean }[]
         for (const frame of frames) {
+          expect(frame.connected).toBe(true)
+          expect(frame.open).toBe(true)
+          expect(frame.bottom).toBeGreaterThan(frame.top)
           expect(frame.top).toBeGreaterThanOrEqual(0)
           expect(frame.bottom).toBeLessThanOrEqual(size.height + 1)
         }

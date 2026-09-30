@@ -14,6 +14,7 @@ function fmt(hours: number): string {
 export function BalanceSummary({ children }: { children?: ReactNode }) {
   const { state } = useAppState()
   const detailsRef = useRef<HTMLDetailsElement>(null)
+  const [detailsGeneration, setDetailsGeneration] = useState(0)
   const [detailsPosition, setDetailsPosition] = useState<{ maxHeight: number; above: boolean }>()
   const sizeDetails = useCallback(() => {
     const details = detailsRef.current
@@ -95,7 +96,12 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
               if (!details) return
               details.open = !details.open
               if (details.open) {
-                flushSync(sizeDetails)
+                flushSync(() => {
+                  sizeDetails()
+                  // Recreate the noninteractive region after opening so Chromium
+                  // cannot paint the cached layout of the formerly hidden subtree.
+                  setDetailsGeneration((generation) => generation + 1)
+                })
                 // Resolve the newly exposed subtree before its first painted frame.
                 details.querySelector('[aria-label="Balance breakdown"]')?.getBoundingClientRect()
               }
@@ -128,6 +134,7 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
             </div>
           </summary>
           <div
+            key={detailsGeneration}
             role="region"
             aria-label="Balance breakdown"
             tabIndex={0}

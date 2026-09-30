@@ -108,6 +108,8 @@ describe('BalanceSummary', () => {
     expect(region.style.maxHeight).toBe('246px')
     fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
     expect(details).not.toHaveAttribute('open')
+    fireEvent.click(screen.getByLabelText('Balance details', { exact: true }))
+    expect(screen.getByRole('region', { name: 'Balance breakdown' })).not.toBe(region)
   })
 
   it('shows immediate morning deductions by pool and an auditable balance equation', () => {
