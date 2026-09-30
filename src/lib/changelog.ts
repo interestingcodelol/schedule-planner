@@ -16,6 +16,18 @@ export type ChangelogEntry = {
  */
 export const changelog: ChangelogEntry[] = [
   {
+    id: '2026-09-30',
+    date: 'September 2026',
+    title: 'A clearer picture of your time off',
+    changes: [
+      { type: 'improved', text: 'Available now, today’s usage, and future forecasts are clearly separated. Open Balance details to see where every hour went.' },
+      { type: 'fixed', text: 'Today’s PTO is reflected immediately across the calendar, bank hours, and chat, using your profile timezone.' },
+      { type: 'fixed', text: 'Multi-day trips now record each elapsed day once, so reopening during a payday or payout does not change your balance.' },
+      { type: 'fixed', text: 'More reliable edits, Undo, partial-day previews, observed holidays, and calendar exports.' },
+      { type: 'improved', text: 'Backups now protect the daily balance history from older app versions. Close older tabs after updating and export a fresh backup.' },
+    ],
+  },
+  {
     id: '2026-06-08-2',
     date: 'June 2026',
     title: 'A cleaner, faster dashboard',

@@ -16,8 +16,12 @@ import { showToast } from './lib/toastBus'
 import { getNowInZone } from './lib/timeUtils'
 import { migrateState } from './lib/migrate'
 import { applyDebit, applyRefund, applyBreakdownRefund } from './lib/balances'
+import { unbookPlannedEntry, unbookPlannedDates, preparePlannedEdit } from './lib/plannedLedger'
+import { countWorkDays } from './lib/projection'
+import { parseISO } from 'date-fns'
 
 const CATCH_UP_HISTORY_LIMIT = 50
+const r2 = (n: number) => Math.round(n * 100) / 100
 
 function appendCatchUpHistory(state: AppState, result: ReturnType<typeof catchUpState>): AppState {
   if (!result.applied) return result.state
@@ -95,12 +99,19 @@ export default function App() {
   // and let a stale store win). Cross-tab updates also point this at the
   // incoming snapshot to suppress an echo-save loop between tabs.
   const lastPersistedRef = useRef<AppState | null>(state)
+  const initialHydrationRef = useRef(state)
 
   useEffect(() => {
     loadStateAsync().then((idbState) => {
       if (idbState) {
         setAppData((prev) => {
-          if (prev.state) return prev
+          if (prev.state) {
+            // A fresher IDB snapshot may win after synchronous localStorage
+            // render. Apply it only while that initial snapshot is untouched;
+            // never overwrite an edit made while async hydration was pending.
+            if (prev.state !== initialHydrationRef.current) return prev
+            if ((idbState.savedAt ?? 0) <= (prev.state.savedAt ?? 0)) return prev
+          }
           return {
             state: reconcile(migrateState(idbState)),
             isDemo: idbState.profile.displayName === 'Demo User',
@@ -187,6 +198,7 @@ export default function App() {
         // save.
         const same =
           JSON.stringify(prev.state.profile) === JSON.stringify(migrated.profile) &&
+          JSON.stringify(prev.state.policy) === JSON.stringify(migrated.policy) &&
           JSON.stringify(prev.state.plannedVacations) ===
             JSON.stringify(migrated.plannedVacations) &&
           JSON.stringify(prev.state.bankHoursLog) === JSON.stringify(migrated.bankHoursLog)
@@ -335,6 +347,9 @@ export default function App() {
             ? `${mergedNote} · ${sourceNote}`
             : sourceNote ?? mergedNote
 
+        // Undo elapsed, recorded days before replacing overlapping plans.
+        // The merged plan's current deduction is then derived exactly once.
+        const unbooked = overlapping.reduce((current, entry) => unbookPlannedEntry(current, entry.id), prev.state)
         const firstOverlap = overlapping[0]
         const mergedEntry: PlannedVacation = {
           ...firstOverlap,
@@ -342,6 +357,8 @@ export default function App() {
           startDate: mergedStart,
           endDate: mergedEnd,
           kind: 'planned',
+          appliedDeductions: undefined,
+          debitedFrom: undefined,
           note: finalNote,
           hoursPerDay: mergedHoursPerDay,
           // Prefer incoming display/time fields, but keep an overlapped value
@@ -362,10 +379,23 @@ export default function App() {
             duration: 6000,
           })
         }, 0)
-        return { ...prev, state: { ...prev.state, plannedVacations: filtered } }
+        return { ...prev, state: { ...unbooked, plannedVacations: filtered } }
       }
 
-      return { ...prev, state: { ...prev.state, plannedVacations: [...newVacations, vacation] } }
+      // Undo of an active trip must restore its exact dated draws, including
+      // zero-draw shortages. Replaying those days against later accruals would
+      // change history merely by deleting and undoing.
+      const restoredDraw = (vacation.appliedDeductions ?? []).reduce((sum, row) => ({
+        vacation: sum.vacation + row.drawn.vacation,
+        sick: sum.sick + row.drawn.sick,
+        bank: sum.bank + row.drawn.bank,
+      }), {vacation:0,sick:0,bank:0})
+      return { ...prev, state: { ...prev.state,
+        profile: {...prev.state.profile,
+          currentVacationHours:r2(prev.state.profile.currentVacationHours-restoredDraw.vacation),
+          currentSickHours:r2(prev.state.profile.currentSickHours-restoredDraw.sick),
+          currentBankHours:r2(prev.state.profile.currentBankHours-restoredDraw.bank)},
+        plannedVacations: [...newVacations, vacation] } }
     })
   }, [])
 
@@ -390,19 +420,20 @@ export default function App() {
             ...prev.state,
             profile: {
               ...prev.state.profile,
-              currentVacationHours: refunded.vacation,
-              currentSickHours: refunded.sick,
-              currentBankHours: refunded.bank,
+              currentVacationHours: r2(refunded.vacation),
+              currentSickHours: r2(refunded.sick),
+              currentBankHours: r2(refunded.bank),
             },
             plannedVacations: prev.state.plannedVacations.filter((v) => v.id !== id),
           },
         }
       }
+      const unbooked = unbookPlannedEntry(prev.state, id)
       return {
         ...prev,
         state: {
-          ...prev.state,
-          plannedVacations: prev.state.plannedVacations.filter((v) => v.id !== id),
+          ...unbooked,
+          plannedVacations: unbooked.plannedVacations.filter((v) => v.id !== id),
         },
       }
     })
@@ -411,26 +442,38 @@ export default function App() {
   const addPastAbsence = useCallback((vacation: PlannedVacation) => {
     setAppData((prev) => {
       if (!prev.state) return prev
+      const base = unbookPlannedDates(prev.state, vacation.startDate, vacation.endDate)
       const hrs = vacation.actualHoursUsed ?? vacation.hoursPerDay ?? prev.state.policy.hoursPerWorkDay
-      const debited = applyDebit(prev.state, hrs, vacation.hourSource || 'sick')
+      // Undo restores exactly what the removed entry actually drew. A
+      // scheduled shortage can have requested 8h but drawn only 3h; replaying
+      // the request as a new logged absence would create 5h of false debt.
+      const debited = vacation.debitedFrom ? {
+        drawn: vacation.debitedFrom,
+        balances: {
+          vacation: base.profile.currentVacationHours - vacation.debitedFrom.vacation,
+          sick: base.profile.currentSickHours - vacation.debitedFrom.sick,
+          bank: base.profile.currentBankHours - vacation.debitedFrom.bank,
+        },
+      } : applyDebit(base, hrs, vacation.hourSource || 'sick')
       // Record exactly which pools were drawn so a later delete/edit refunds
       // the same buckets instead of dumping everything back into vacation.
       const entry: PlannedVacation = {
         ...vacation,
         kind: 'logged_past',
+        appliedDeductions: vacation.debitedFrom ? vacation.appliedDeductions : undefined,
         debitedFrom: debited.drawn,
       }
       return {
         ...prev,
         state: {
-          ...prev.state,
+          ...base,
           profile: {
-            ...prev.state.profile,
-            currentVacationHours: debited.balances.vacation,
-            currentSickHours: debited.balances.sick,
-            currentBankHours: debited.balances.bank,
+            ...base.profile,
+            currentVacationHours: r2(debited.balances.vacation),
+            currentSickHours: r2(debited.balances.sick),
+            currentBankHours: r2(debited.balances.bank),
           },
-          plannedVacations: [...prev.state.plannedVacations, entry],
+          plannedVacations: [...base.plannedVacations, entry],
         },
       }
     })
@@ -444,13 +487,16 @@ export default function App() {
       const entry = prev.state.plannedVacations.find((v) => v.id === id)
       if (!entry) return prev
 
+      const effectiveTotal = entry.actualHoursUsed ?? (entry.hoursPerDay ?? prev.state.policy.hoursPerWorkDay) * countWorkDays(parseISO(entry.startDate), parseISO(entry.endDate), prev.state.policy)
+      if (r2(actualHoursUsed) === r2(effectiveTotal)) return prev
       if (entry.kind !== 'logged_past') {
-        const newEntries = prev.state.plannedVacations.map((v) =>
+        const base = preparePlannedEdit(prev.state, id, {actualHoursUsed})
+        const newEntries = base.plannedVacations.map((v) =>
           v.id === id ? { ...v, actualHoursUsed } : v,
         )
         return {
           ...prev,
-          state: { ...prev.state, plannedVacations: newEntries },
+          state: { ...base, plannedVacations: newEntries },
         }
       }
 
@@ -469,14 +515,14 @@ export default function App() {
         ...prev.state,
         profile: {
           ...prev.state.profile,
-          currentVacationHours: refunded.vacation,
-          currentSickHours: refunded.sick,
-          currentBankHours: refunded.bank,
+          currentVacationHours: r2(refunded.vacation),
+          currentSickHours: r2(refunded.sick),
+          currentBankHours: r2(refunded.bank),
         },
       }
       const debited = applyDebit(refundedState, actualHoursUsed, entry.hourSource || 'sick')
       const newEntries = prev.state.plannedVacations.map((v) =>
-        v.id === id ? { ...v, actualHoursUsed, debitedFrom: debited.drawn } : v,
+        v.id === id ? { ...v, actualHoursUsed, debitedFrom: debited.drawn, appliedDeductions: undefined } : v,
       )
       return {
         ...prev,
@@ -484,9 +530,9 @@ export default function App() {
           ...prev.state,
           profile: {
             ...prev.state.profile,
-            currentVacationHours: debited.balances.vacation,
-            currentSickHours: debited.balances.sick,
-            currentBankHours: debited.balances.bank,
+            currentVacationHours: r2(debited.balances.vacation),
+            currentSickHours: r2(debited.balances.sick),
+            currentBankHours: r2(debited.balances.bank),
           },
           plannedVacations: newEntries,
         },
@@ -498,11 +544,12 @@ export default function App() {
     (id: string, updates: Partial<PlannedVacation>) => {
       setAppData((prev) => {
         if (!prev.state) return prev
+        const base = preparePlannedEdit(prev.state, id, updates)
         return {
           ...prev,
           state: {
-            ...prev.state,
-            plannedVacations: prev.state.plannedVacations.map((v) =>
+            ...base,
+            plannedVacations: base.plannedVacations.map((v) =>
               v.id === id ? { ...v, ...updates } : v,
             ),
           },

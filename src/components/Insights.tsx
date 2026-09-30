@@ -1,3 +1,4 @@
+import { getNowInZone } from '../lib/timeUtils'
 import { useMemo } from 'react'
 import {
   addDays,
@@ -13,6 +14,7 @@ import { Lightbulb } from 'lucide-react'
 import { useAppState } from '../context'
 import {
   projectBalance,
+  getEffectiveCurrentBalances,
   computeAccrualTier,
   countWorkDays,
   getCarryoverOutlook,
@@ -33,7 +35,8 @@ export function Insights() {
   const { state } = useAppState()
 
   const insights = useMemo(() => {
-    const today = startOfDay(new Date())
+    const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
+    const effective = getEffectiveCurrentBalances(state)
     const yearEnd = endOfYear(today)
     const hireDate = parseISO(state.profile.hireDate)
     const yos = differenceInYears(today, hireDate)
@@ -119,11 +122,11 @@ export function Insights() {
       }
     }
 
-    if (state.profile.currentBankHours > 0 && !state.policy.hideBankHours) {
+    if (effective.bank > 0 && !state.policy.hideBankHours) {
       const payoutMonth = state.policy.bankHoursPayoutStart.month
       const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
       pool.push({
-        text: `**${fmt(state.profile.currentBankHours)} bank hrs** in your account — payout window opens in ${monthNames[payoutMonth]}`,
+        text: `**${fmt(effective.bank)} bank hrs** in your account — payout window opens in ${monthNames[payoutMonth]}`,
         type: 'info',
       })
     }

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import { useAppState } from '../context'
 import { showToast } from '../lib/toastBus'
-import { roundToQuarter } from '../lib/timeUtils'
+import { roundToQuarter, getNowInZone } from '../lib/timeUtils'
 import {
   analyzeTripImpact,
   countWorkDays,
@@ -33,7 +33,7 @@ function fmt(n: number): string {
 
 export function VacationPlanner() {
   const { state, addVacation } = useAppState()
-  const today = startOfDay(new Date())
+  const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
 
   const [whatIfStart, setWhatIfStart] = useState('')
   const [whatIfEnd, setWhatIfEnd] = useState('')
@@ -47,13 +47,16 @@ export function VacationPlanner() {
     const start = parseISO(whatIfStart)
     const end = parseISO(whatIfEnd)
 
-    if (isBefore(end, start)) return null
+    if (isBefore(end, start)) return { error: 'End date must be on or after start date' }
+    if (isBefore(start, today)) return { error: 'Choose today or a future date. Use the calendar to log past absences.' }
 
     const daySpan = differenceInDays(end, start)
     if (daySpan > 365) return { error: 'Vacation cannot exceed 1 year' }
 
     const workDays = countWorkDays(start, end, state.policy)
-    const hrsPerDay = whatIfHours ? Number(whatIfHours) : state.policy.hoursPerWorkDay
+    const rawHours = whatIfHours ? Number(whatIfHours) : state.policy.hoursPerWorkDay
+    if (!Number.isFinite(rawHours) || rawHours < 0.25 || rawHours > state.policy.hoursPerWorkDay) return { error: `Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}` }
+    const hrsPerDay = roundToQuarter(rawHours)
     const hoursNeeded = workDays * hrsPerDay
     const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
 
@@ -112,7 +115,7 @@ export function VacationPlanner() {
         const vEnd = parseISO(v.endDate)
         const tripWorkDays = countWorkDays(vStart, vEnd, state.policy)
         const tripHrs =
-          (v.actualHoursUsed ?? v.hoursPerDay ?? state.policy.hoursPerWorkDay) * tripWorkDays
+          v.actualHoursUsed ?? (v.hoursPerDay ?? state.policy.hoursPerWorkDay) * tripWorkDays
 
         const baselineEnd = projectBalance(state, vEnd)
         const stateMinusV: AppState = {
@@ -223,6 +226,10 @@ export function VacationPlanner() {
     const end = parseISO(whatIfEnd)
     const daySpan = differenceInDays(end, start)
 
+    if (isBefore(start, today)) {
+      setWhatIfError('Choose today or a future date. Use the calendar to log past absences.')
+      return
+    }
     if (isBefore(end, start)) {
       setWhatIfError('End date must be after start date')
       return
@@ -239,7 +246,7 @@ export function VacationPlanner() {
     const rawHrs = whatIfHours ? Number(whatIfHours) : undefined
     if (
       rawHrs !== undefined &&
-      (!Number.isFinite(rawHrs) || rawHrs <= 0 || rawHrs > state.policy.hoursPerWorkDay)
+      (!Number.isFinite(rawHrs) || rawHrs < 0.25 || rawHrs > state.policy.hoursPerWorkDay)
     ) {
       setWhatIfError(
         `Hours per day must be between 0.25 and ${state.policy.hoursPerWorkDay}`,
@@ -282,10 +289,11 @@ export function VacationPlanner() {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label htmlFor="planner-start" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Start
             </label>
             <input
+              id="planner-start"
               type="date"
               value={whatIfStart}
               onChange={(e) => setWhatIfStart(e.target.value)}
@@ -294,10 +302,11 @@ export function VacationPlanner() {
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label htmlFor="planner-end" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               End
             </label>
             <input
+              id="planner-end"
               type="date"
               value={whatIfEnd}
               onChange={(e) => setWhatIfEnd(e.target.value)}
@@ -309,11 +318,12 @@ export function VacationPlanner() {
 
         {/* Hour source + partial day */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <div className="col-span-2">
-            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+          <div className="sm:col-span-2">
+            <label htmlFor="planner-source" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Use hours from
             </label>
             <select
+              id="planner-source"
               value={whatIfSource}
               onChange={(e) => setWhatIfSource(e.target.value as typeof whatIfSource)}
               className="w-full px-3 py-2.5 text-sm bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -325,10 +335,11 @@ export function VacationPlanner() {
             </select>
           </div>
           <div>
-            <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
+            <label htmlFor="planner-hours" className="block text-sm text-gray-500 dark:text-gray-400 mb-1 font-medium">
               Hrs/day
             </label>
             <input
+              id="planner-hours"
               type="number"
               step="0.25"
               min="0.25"
@@ -344,6 +355,7 @@ export function VacationPlanner() {
 
         <input
           type="text"
+          aria-label="Note (optional)"
           placeholder="Note (optional)"
           value={whatIfNote}
           onChange={(e) => setWhatIfNote(e.target.value)}
@@ -409,8 +421,7 @@ export function VacationPlanner() {
                         {fmt(whatIfResult.firstConflict.shortBy)} hr
                         {whatIfResult.firstConflict.shortBy === 1 ? '' : 's'} short
                       </span>{' '}
-                      — it needs {fmt(whatIfResult.firstConflict.neededHrs)} hrs but you'd only
-                      have {fmt(whatIfResult.firstConflict.availableHrs)} hrs left by then.
+                      using its selected leave pool, after accounting for scheduled accruals.
                       {whatIfResult.conflictCount > 1 && (
                         <>
                           {' '}

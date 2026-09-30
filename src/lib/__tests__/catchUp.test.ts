@@ -28,8 +28,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
 
 function mockToday(iso: string) {
   vi.useFakeTimers()
-  // Pick a time well past the EOD cutoff so timezone wobble doesn't move us
-  // across a day boundary.
+  // Use an explicit midday UTC instant, safely within the profile-local day.
   vi.setSystemTime(new Date(`${iso}T15:00:00Z`))
 }
 
@@ -303,8 +302,8 @@ describe('catchUpState', () => {
     expect(jan6).toHaveLength(0)
   })
 
-  it('leaves an active vacation alone (endDate >= today)', () => {
-    // Vacation runs through today — should not be processed.
+  it('books elapsed days of an active vacation and keeps its future days planned', () => {
+    // Only Mon–Wed are booked through today; Thu–Fri remain scheduled.
     mockToday('2026-01-07')
     const state = makeState({
       profile: {
@@ -332,9 +331,14 @@ describe('catchUpState', () => {
     const deductions = result.events.filter(
       (e) => e.type === 'vacation_deduction',
     )
-    expect(deductions).toHaveLength(0)
+    expect(deductions).toHaveLength(3)
+    expect(result.state.profile.currentVacationHours).toBe(76)
     const updated = result.state.plannedVacations.find((v) => v.id === 'active-1')
     expect(updated?.kind).toBe('planned')
+    expect(updated?.appliedDeductions?.map((d) => d.date)).toEqual([
+      '2026-01-05', '2026-01-06', '2026-01-07',
+    ])
+    expect(catchUpState(result.state).events).toEqual([])
   })
 
   it('is idempotent — running twice with the same now does nothing', () => {

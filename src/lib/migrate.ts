@@ -16,10 +16,12 @@ import { CURRENT_VERSION } from './storage'
  *    backfill below — add one line per new scalar field. Keep it idempotent: the
  *    backfilled value must itself be a valid stored value so re-running migration
  *    is a no-op (e.g. don't use `undefined` to mean a real configured state).
- *  - **Schema-breaking change:** bump `CURRENT_VERSION` (in storage.ts) and add a
- *    version-keyed upgrade step here. Load is downgrade-safe (storage's
- *    `isPlausibleAppState` accepts any structurally-valid version), so a stale
- *    cached build can't wipe newer data.
+ *  - **Schema-breaking change:** bump `CURRENT_VERSION` (in storage.ts) and add
+ *    the corresponding migration. V2's daily ledger changes balance semantics;
+ *    storage.ts/indexedDb.ts isolate its records from pre-ledger builds and
+ *    promote the newest legacy snapshot once. New backups use a wrapper that
+ *    older root-only importers reject. Future incompatible schemas need their
+ *    own isolation; merely accepting a higher version is not downgrade-safe.
  */
 
 export function detectTimezone(): string {

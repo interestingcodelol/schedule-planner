@@ -14,9 +14,9 @@ import { differenceInYears } from 'date-fns'
 import { Lock, Unlock } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
 import { useAppState } from '../context'
-import { computeAccrualTier, getCarryoverPayoutDate, projectBalance } from '../lib/projection'
+import { computeAccrualTier, countWorkDays, getCarryoverPayoutDate, projectBalance } from '../lib/projection'
 import { getHolidayName } from '../lib/holidays'
-import { formatTimeCompact, isWorkDayOverInZone } from '../lib/timeUtils'
+import { formatTimeCompact, getNowInZone } from '../lib/timeUtils'
 
 /** Pool a past/logged entry actually drew from. For an 'any'-source entry the
  *  literal source tells us nothing (it drains bank → vacation → sick), so use
@@ -80,13 +80,11 @@ function getHolidayEmoji(name: string): string {
 
 export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
   const { state, updateVacation } = useAppState()
-  const today = startOfDay(new Date())
+  const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
   const isToday = isSameDay(date, today)
   const isCurrentMonth = isSameMonth(date, currentMonth)
-  const isTodayWorkDayOver =
-    isToday &&
-    isWorkDayOverInZone(state.profile.timezone || 'America/New_York', state.policy.hoursPerWorkDay)
-  const isPast = isBefore(date, today) || isTodayWorkDayOver
+  // Today stays editable as planned time off for the entire profile-local day.
+  const isPast = isBefore(date, today)
   const dow = getDay(date)
   const isWeekend = !state.policy.workDaysPerWeek.includes(dow)
   const weekNum = getWeek(date)
@@ -110,7 +108,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
 
   const isPayday = useMemo(() => {
     const lastPayday = parseISO(state.profile.lastPaydayDate)
-    const periodDays = state.policy.payPeriodLengthDays
+    const periodDays = Math.max(1, state.policy.payPeriodLengthDays)
     let payday = addDays(lastPayday, periodDays)
     while (isBefore(payday, date)) {
       payday = addDays(payday, periodDays)
@@ -166,18 +164,15 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
     ? dominantSource(plannedVacation) === 'sick'
     : false
   const deductHours =
-    plannedVacation?.actualHoursUsed ??
+    (plannedVacation?.actualHoursUsed !== undefined
+      ? plannedVacation.actualHoursUsed / Math.max(1, countWorkDays(parseISO(plannedVacation.startDate), parseISO(plannedVacation.endDate), state.policy))
+      : undefined) ??
     plannedVacation?.hoursPerDay ??
     state.policy.hoursPerWorkDay
-  // `projectedBalance` is `projectBalance(state, date).totalAvailable`, which
-  // ALREADY has this day's planned deduction applied (the deduction event
-  // fires on/before `date`). So a day is only truly unaffordable when the
-  // post-deduction balance goes negative — comparing against `deductHours`
-  // here would count the deduction a second time and wrongly flag
-  // exactly-affordable days (balance lands at 0) as "Can't afford".
+  // Pools floor at zero, so shortfall must come from the projection ledger.
   const isUnaffordable =
     isPlannedVacation && !isWeekend && !isHolidayDay &&
-    projectedBalance !== null && projectedBalance < -0.001
+    (projection?.shortfall ?? 0) > 0.001
 
   const isLocked = !!plannedVacation?.locked
   const canPlanNew = !isWeekend && !isHolidayDay && isCurrentMonth && !isPast
@@ -259,7 +254,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         else if (days >= 4) parts.push('✨ Mini vacation!')
       }
       if (isUnaffordable) {
-        parts.push(`⚠️ Not enough hours — ${fmt(Math.abs(projectedBalance ?? 0))} hrs short after this day's time off`)
+        parts.push(`⚠️ Not enough hours — ${fmt(projection?.shortfall ?? 0)} hrs of planned time off cannot be covered by this date`)
       }
     }
 
@@ -341,7 +336,7 @@ export function CalendarDay({ date, currentMonth, onDayClick }: Props) {
         transition-colors duration-75
       `}
       title={buildTooltip()}
-      aria-label={`${format(date, 'MMMM d, yyyy')}${isToday ? ', today' : ''}${isHolidayDay ? `, ${holidayName}` : ''}${isPlannedVacation ? ', planned time off' : ''}${isPayday ? ', payday' : ''}${carryoverPayout && carryoverPayout.amount > 0 ? `, vacation carryover payout of ${fmt(carryoverPayout.amount)} hours` : ''}`}
+      aria-label={`${format(date, 'MMMM d, yyyy')}${isToday ? ', today' : ''}${isHolidayDay ? `, ${holidayName}` : ''}${isPlannedVacation ? ', planned time off' : ''}${isUnaffordable ? ', insufficient hours' : ''}${isPayday ? ', payday' : ''}${carryoverPayout && carryoverPayout.amount > 0 ? `, vacation carryover payout of ${fmt(carryoverPayout.amount)} hours` : ''}`}
     >
       {/* Day number row */}
       <div className="flex items-center justify-between">

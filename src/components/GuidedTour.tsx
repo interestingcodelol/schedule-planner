@@ -14,7 +14,7 @@ const ALL_STEPS: TourStep[] = [
     target: '[data-tour="status-cards"]',
     title: 'Your Balances at a Glance',
     description:
-      'See your total available hours across all pools — vacation, sick, and bank hours. The year-end card warns you if you might exceed your carryover cap.',
+      'Available now includes scheduled time off through today. Open Balance details to see exactly which pools were used. Future plans and accruals are shown separately in Looking ahead.',
     placement: 'bottom',
   },
   {
@@ -35,7 +35,7 @@ const ALL_STEPS: TourStep[] = [
     target: '[data-tour="bank-hours"]',
     title: 'Bank Hours',
     description:
-      'Log extra hours you work beyond your regular day. Bank hours can be used for time off and are used first when you select "Auto". They get paid out during the Dec-Feb window.',
+      'Log extra hours you work beyond your regular day. Bank hours can be used for time off and are used first when you select "Auto". Payouts follow the dates configured in your policy.',
     placement: 'left',
   },
   {

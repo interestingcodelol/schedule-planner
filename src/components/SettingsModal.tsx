@@ -293,6 +293,11 @@ export function SettingsModal({ onClose }: Props) {
                   className={inputClass}
                 />
               </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                Recorded balances are the starting point for your plan. Available now
+                subtracts scheduled time off through today. Do not subtract those same
+                planned hours again here; use the calendar to edit or remove the entry.
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1.5 font-medium">

@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
-import { format, parseISO, subDays } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { X, Clock, CalendarOff, CalendarCheck, Pencil, History } from 'lucide-react'
 import type { PlannedVacation } from '../lib/types'
 import {
@@ -9,6 +9,7 @@ import {
   roundToQuarter,
   getNowInZone,
 } from '../lib/timeUtils'
+import { preparePlannedEdit } from '../lib/plannedLedger'
 import { useFocusTrap } from '../lib/useFocusTrap'
 import { useAppState } from '../context'
 import {
@@ -108,37 +109,49 @@ export function DayPopover({
       ? hoursPerWorkDay
       : Math.max(0, roundToQuarter(hhmmToHours(endTime) - hhmmToHours(startTime)))
 
-  // Auto-mode preview: simulate the bank → vacation → sick drain so users
-  // know exactly which pool will pay before they save. For past days
-  // (logged absences) we use the live current balance; for future days we
-  // project balances forward to the day BEFORE the entry, since mid-day
-  // accruals don't help cover that day.
+  // Ask the same chronological engine used by forecasts for this day's
+  // actual draw: payday accruals precede PTO; payouts follow it. Editing first
+  // unwinds any recorded part, then previews the replacement exactly once.
   const autoSplit = useMemo(() => {
-    if (source !== 'any') return null
-    if (hoursOff <= 0) return null
-    let bank: number
-    let vacation: number
-    let sick: number
-    if (mode === 'log_past') {
-      const eff = getEffectiveCurrentBalances(state)
-      bank = eff.bank
-      vacation = eff.vacation
-      sick = eff.sick
-    } else {
-      const projection = projectBalance(state, subDays(date, 1))
-      bank = projection.bankBalance
-      vacation = projection.vacationBalance
-      sick = projection.sickBalance
+    if (source !== 'any' || hoursOff <= 0) return null
+    if (mode !== 'log_past') {
+      const updates = {
+        hoursPerDay: partialOrFull === 'partial' ? hoursOff : undefined,
+        actualHoursUsed: existing?.hoursPerDay === (partialOrFull === 'partial' ? hoursOff : undefined) ? existing?.actualHoursUsed : undefined,
+        hourSource: 'any' as const,
+      }
+      const base = existing ? preparePlannedEdit(state, existing.id, updates) : state
+      const retained = existing ? base.plannedVacations.find((v) => v.id === existing.id) : undefined
+      const proposal: PlannedVacation = {
+        ...retained,
+        ...updates,
+        id: existing?.id ?? '__day-preview__',
+        startDate: existing?.startDate ?? format(date, 'yyyy-MM-dd'),
+        endDate: existing?.endDate ?? format(date, 'yyyy-MM-dd'),
+        hourSource: 'any',
+        locked: false,
+        kind: 'planned',
+      }
+      const projection = projectBalance({
+        ...base,
+        plannedVacations: [...base.plannedVacations.filter((v) => v.id !== proposal.id), proposal],
+      }, date)
+      const pending = projection.events.find((e) => e.vacationId === proposal.id && e.date === format(date, 'yyyy-MM-dd'))
+      const booked = proposal.appliedDeductions?.find((row) => row.date === format(date, 'yyyy-MM-dd'))
+      const event = pending ?? (booked ? { drawn: booked.drawn, requestedHours: booked.hours } : undefined)
+      if (!event?.drawn) return { bank: 0, vacation: 0, sick: 0, short: 0 }
+      const { bank, vacation, sick } = event.drawn
+      return { bank, vacation, sick, short: Math.max(0, (event.requestedHours ?? hoursOff) - bank - vacation - sick) }
     }
+    const eff = getEffectiveCurrentBalances(state)
     let remaining = hoursOff
-    const fromBank = Math.min(remaining, Math.max(0, bank))
-    remaining -= fromBank
-    const fromVac = Math.min(remaining, Math.max(0, vacation))
-    remaining -= fromVac
-    const fromSick = Math.min(remaining, Math.max(0, sick))
-    remaining -= fromSick
-    return { bank: fromBank, vacation: fromVac, sick: fromSick, short: Math.max(0, remaining) }
-  }, [source, hoursOff, mode, state, date])
+    const bank = Math.min(remaining, Math.max(0, eff.bank))
+    remaining -= bank
+    const vacation = Math.min(remaining, Math.max(0, eff.vacation))
+    remaining -= vacation
+    const sick = Math.min(remaining, Math.max(0, eff.sick))
+    return { bank, vacation, sick, short: Math.max(0, remaining - sick) }
+  }, [source, hoursOff, mode, state, date, existing, partialOrFull])
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -380,6 +393,11 @@ export function DayPopover({
         </div>
 
         <div className="p-5 space-y-5 overflow-y-auto scroll-panel">
+          {existing && existing.startDate !== existing.endDate && (
+            <p className="rounded-xl bg-blue-500/10 p-3 text-xs text-blue-300">
+              Editing this entire entry: {format(parseISO(existing.startDate), 'MMM d')}–{format(parseISO(existing.endDate), 'MMM d')}. Hours apply to each workday; removing it removes the whole entry.
+            </p>
+          )}
           {mode === 'log_past' && (
             <div className="rounded-xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200/50 dark:border-rose-800/30 px-3 py-2.5 text-xs text-rose-700 dark:text-rose-300">
               This will deduct hours from your current balance to keep the planner in sync with your timecard system.

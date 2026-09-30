@@ -86,8 +86,8 @@ export type UserProfile = {
   /** ISO date the catch-up engine last reconciled the stored balances
    *  through. On every app load, `catchUpState` walks events strictly
    *  after this date up to "today" and applies any paydays, sick grants,
-   *  carryover payouts, bank payouts, and finished planned-vacation
-   *  deductions that occurred while the tab was closed. Optional for
+   *  carryover payouts and bank payouts. Scheduled PTO uses a per-day entry
+   *  ledger so elapsed days, including today, are applied only once. Optional for
    *  backward compatibility; migrateState backfills it. */
   lastSyncDate?: string
   /** ISO date the user last downloaded a backup (JSON or iCal). Drives
@@ -97,6 +97,13 @@ export type UserProfile = {
   backupRemindersDisabled?: boolean
   /** How many days between backup reminders. Default 30. */
   backupReminderDays?: number
+}
+
+/** One scheduled workday already reconciled into the stored balance. */
+export type AppliedTimeOffDeduction = {
+  date: string
+  hours: number
+  drawn: { vacation: number; sick: number; bank: number }
 }
 
 export type PlannedVacation = {
@@ -117,13 +124,17 @@ export type PlannedVacation = {
    *  'logged_past' = retroactively logged absence; decrements the matching
    *  balance pool when created. */
   kind?: 'planned' | 'logged_past'
-  /** Actual hours used on a past entry, when different from `hoursPerDay`. */
+  /** Total actual hours for the entry's whole workday span, overriding
+   *  hoursPerDay. Prorated by day while planned; finalized to reconciled hours. */
   actualHoursUsed?: number
-  /** When a `logged_past` entry actually debited the stored balances, this
+  /** Daily debits already included in stored balances. Absent on older
+   *  planned entries, whose elapsed days have not yet been booked. */
+  appliedDeductions?: AppliedTimeOffDeduction[]
+  /** When an entry actually debited the stored balances, this
    *  records how many hours were drawn from each pool. Lets a later refund
    *  reverse the deduction EXACTLY (re-crediting each pool by the recorded
-   *  amount) instead of guessing the split. Absent on entries that never
-   *  debited (e.g. still `planned`) or that predate this field. */
+   *  amount) instead of guessing the split. Active planned entries accumulate
+   *  this alongside appliedDeductions. Absent on never-debited/legacy entries. */
   debitedFrom?: { vacation: number; sick: number; bank: number }
 }
 
@@ -174,6 +185,10 @@ export type ProjectionEvent = {
   delta: number
   runningBalance: number
   label?: string
+  /** Allocation metadata for a scheduled time-off event. */
+  vacationId?: string
+  requestedHours?: number
+  drawn?: { vacation: number; sick: number; bank: number }
 }
 
 export type ProjectionResult = {

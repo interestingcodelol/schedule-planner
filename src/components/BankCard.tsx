@@ -3,6 +3,8 @@ import { format, parseISO } from 'date-fns'
 import { Wallet, Plus, X } from 'lucide-react'
 import { useAppState } from '../context'
 import { showToast } from '../lib/toastBus'
+import { getCurrentBalanceSummary } from '../lib/projection'
+import { getNowInZone } from '../lib/timeUtils'
 
 function fmt(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
@@ -15,7 +17,7 @@ function fmt(n: number): string {
  * and no inner scrollbar (the whole page scrolls). Only rendered when bank
  * hours are enabled.
  */
-export function BankCard() {
+export function BankCard({ embedded = false }: { embedded?: boolean }) {
   const { state, addBankHours, removeBankHours, updateProfile } = useAppState()
   const [open, setOpen] = useState(false)
   const [hours, setHours] = useState('')
@@ -47,7 +49,7 @@ export function BankCard() {
     }
     addBankHours({
       id: crypto.randomUUID(),
-      date: format(new Date(), 'yyyy-MM-dd'),
+      date: getNowInZone(state.profile.timezone || 'America/New_York').isoDate,
       hours: h,
       note: note || undefined,
     })
@@ -59,43 +61,51 @@ export function BankCard() {
   const entries = [...(state.bankHoursLog || [])].sort((a, b) =>
     b.date.localeCompare(a.date),
   )
-  const balance = state.profile.currentBankHours
-  const hasBalanceNoLog = entries.length === 0 && balance > 0
+  const summary = getCurrentBalanceSummary(state)
+  const balance = summary.available.bank
+  const recordedBalance = summary.stored.bank
+  const hasBalanceNoLog = entries.length === 0 && recordedBalance > 0
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={`relative ${embedded ? 'h-full' : ''}`}>
       <button
         type="button"
         data-tour="bank-hours"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={`Bank hours: ${fmt(balance)} hours — click to manage`}
-        className="glass-card w-full text-left rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 relative overflow-hidden min-h-[4.5rem] sm:min-h-[5.5rem] flex flex-col hover:bg-white/90 dark:hover:bg-gray-900/70 transition-colors"
+        className={`w-full text-left rounded-xl relative overflow-hidden flex flex-col hover:bg-white/90 dark:hover:bg-gray-900/70 transition-colors ${
+          embedded
+            ? 'h-full p-3 sm:p-4 min-h-[7.5rem] border border-gray-200/60 dark:border-gray-700/50 bg-gray-50/70 dark:bg-gray-800/35'
+            : 'glass-card px-3 py-2.5 sm:px-4 sm:py-3 min-h-[4.5rem] sm:min-h-[5.5rem]'
+        }`}
       >
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-cyan-500" />
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 text-xs sm:text-sm font-medium">
+        {!embedded && <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-cyan-500" />}
+        <div className="flex w-full items-center justify-between gap-1 mb-1">
+          <div className="flex min-w-0 items-center gap-1 sm:gap-1.5 text-gray-500 dark:text-gray-400 text-xs sm:text-sm font-medium">
             <Wallet className="w-3.5 h-3.5 shrink-0 text-teal-500" />
-            <span className="truncate">Bank Hours</span>
+            <span className="truncate">{embedded ? 'Bank' : 'Bank Hours'}</span>
           </div>
           {/* Clear, button-like affordance so it's obvious you can add/manage
               here (the whole card is the toggle; this is a styled span, not a
               nested button). */}
           <span className="flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-600 dark:text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded-md shrink-0">
             <Plus className="w-3 h-3" />
-            {open ? 'Close' : 'Add'}
+            <span className={embedded ? 'hidden sm:inline' : ''}>{open ? 'Close' : 'Add'}</span>
           </span>
         </div>
-        <div className="text-lg sm:text-xl font-bold tabular-nums tracking-tight">
-          {fmt(balance)} hrs
+        <div className={`${embedded ? 'text-xl sm:text-2xl mt-2' : 'text-lg sm:text-xl'} font-bold tabular-nums tracking-tight`}>
+          {fmt(balance)} <span className={embedded ? 'text-xs font-normal text-gray-400' : ''}>hrs</span>
         </div>
-        <div className="text-xs sm:text-[13px] text-gray-400 dark:text-gray-500 mt-0.5 leading-snug truncate">
-          Extra hours worked
+        <div className={`text-xs sm:text-[13px] text-gray-400 dark:text-gray-500 mt-0.5 leading-snug ${embedded ? '' : 'truncate'}`}>
+          {!embedded && summary.deductions.bank > 0
+            ? `${fmt(recordedBalance)} recorded − ${fmt(summary.deductions.bank)} scheduled`
+            : 'Extra hours worked'}
         </div>
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1.5 z-40 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up">
+        <div className={`absolute top-full mt-1.5 z-40 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl p-2 animate-slide-up ${embedded ? 'right-0 w-[min(20rem,calc(100vw-3rem))]' : 'left-0 w-full'}`}>
           <div className="flex gap-1.5">
             <input
               type="number"
@@ -176,7 +186,7 @@ export function BankCard() {
               </p>
               <button
                 onClick={() => {
-                  if (window.confirm(`Reset bank balance from ${fmt(balance)} hrs to 0?`)) {
+                  if (window.confirm(`Reset recorded bank balance from ${fmt(recordedBalance)} hrs to 0?`)) {
                     updateProfile({ currentBankHours: 0 })
                     showToast({ message: 'Bank balance reset to 0' })
                   }

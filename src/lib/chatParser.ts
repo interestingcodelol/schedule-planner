@@ -9,7 +9,6 @@ import {
   endOfMonth,
   isValid,
   parseISO,
-  startOfDay,
   endOfYear,
   getDay,
   differenceInYears,
@@ -24,8 +23,11 @@ import {
   countWorkDays,
   earliestAffordableTripStart,
   getSickOutlook,
+  getEffectiveCurrentBalances,
+  getCarryoverOutlook,
   projectBalance,
 } from './projection'
+import { getNowInZone } from './timeUtils'
 
 export type ChatResponse = {
   text: string
@@ -38,21 +40,64 @@ export type ChatResponse = {
 }
 
 const MONTH_MAP: Record<string, number> = {
-  january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2,
-  april: 3, apr: 3, may: 4, june: 5, jun: 5, july: 6, jul: 6,
-  august: 7, aug: 7, september: 8, sep: 8, sept: 8,
-  october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11,
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sep: 8,
+  sept: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
 }
 
 const ORDINAL_MAP: Record<string, number> = {
-  first: 1, '1st': 1, second: 2, '2nd': 2, third: 3, '3rd': 3,
-  fourth: 4, '4th': 4, fifth: 5, '5th': 5, last: -1,
+  first: 1,
+  '1st': 1,
+  second: 2,
+  '2nd': 2,
+  third: 3,
+  '3rd': 3,
+  fourth: 4,
+  '4th': 4,
+  fifth: 5,
+  '5th': 5,
+  last: -1,
 }
 
 const DAY_MAP: Record<string, number> = {
-  sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2,
-  wednesday: 3, wed: 3, thursday: 4, thu: 4, thur: 4, thurs: 4,
-  friday: 5, fri: 5, saturday: 6, sat: 6,
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6,
 }
 
 function fmt(n: number): string {
@@ -91,8 +136,7 @@ function getNthWeekOfMonth(month: number, n: number, year: number): { start: Dat
   }
 }
 
-function tryParseDate(text: string): Date | null {
-  const today = startOfDay(new Date())
+function tryParseDate(text: string, today: Date): Date | null {
   const thisYear = today.getFullYear()
   const cleaned = text.replace(/(st|nd|rd|th)\b/gi, '').trim()
 
@@ -143,8 +187,8 @@ function tryParseDate(text: string): Date | null {
 
 function extractDateRange(
   input: string,
+  today: Date,
 ): { start: Date; end: Date; rolledForward?: boolean } | null {
-  const today = startOfDay(new Date())
   const lower = input.toLowerCase().trim()
   const thisYear = today.getFullYear()
 
@@ -154,7 +198,7 @@ function extractDateRange(
   if (/\btomorrow\b/.test(lower)) return { start: addDays(today, 1), end: addDays(today, 1) }
 
   // "today"
-  if (/\btoday\b/.test(lower) && lower.length < 20) return { start: today, end: today }
+  if (/\btoday\b/.test(lower)) return { start: today, end: today }
 
   // "next week"
   if (/\bnext\s+week\b/.test(lower) && !findMonthInText(lower)) {
@@ -181,9 +225,7 @@ function extractDateRange(
   // Only counts as resolved when the leading word is a REAL ordinal — otherwise
   // a filler word like "a" in "a week in August" matches (\w+) and must not
   // block the generic "a week in <month>" fallback below.
-  const nthWeekMonth = lower.match(
-    /(?:the\s+)?(\w+)\s+week\s+(?:of|in)\s+(\w+)/i,
-  )
+  const nthWeekMonth = lower.match(/(?:the\s+)?(\w+)\s+week\s+(?:of|in)\s+(\w+)/i)
   let nthWeekResolved = false
   if (nthWeekMonth) {
     const ord = ORDINAL_MAP[nthWeekMonth[1].toLowerCase()]
@@ -249,18 +291,6 @@ function extractDateRange(
     }
   }
 
-  // "next [day name]" / "this [day name]"
-  for (const [name, dow] of Object.entries(DAY_MAP)) {
-    const re = new RegExp(`\\b(?:next|this|coming)?\\s*${name}\\b`)
-    if (re.test(lower) && lower.length < 40) {
-      let d = addDays(today, 1)
-      for (let i = 0; i < 7; i++) {
-        if (getDay(d) === dow) return { start: d, end: d }
-        d = addDays(d, 1)
-      }
-    }
-  }
-
   // "[day] through/to [day]" with day names — "monday through friday", "wed to fri"
   for (const [startName, startDow] of Object.entries(DAY_MAP)) {
     for (const [endName, endDow] of Object.entries(DAY_MAP)) {
@@ -279,10 +309,22 @@ function extractDateRange(
     }
   }
 
+  // "next [day name]" / "this [day name]"
+  for (const [name, dow] of Object.entries(DAY_MAP)) {
+    const re = new RegExp(`\\b(?:next|this|coming)?\\s*${name}\\b`)
+    if (re.test(lower) && lower.length < 40) {
+      let d = addDays(today, 1)
+      for (let i = 0; i < 7; i++) {
+        if (getDay(d) === dow) return { start: d, end: d }
+        d = addDays(d, 1)
+      }
+    }
+  }
+
   // "week of July 14" / "week of 7/14"
   const weekOf = lower.match(/week\s+of\s+(.+)/i)
   if (weekOf) {
-    const d = tryParseDate(weekOf[1].trim())
+    const d = tryParseDate(weekOf[1].trim(), today)
     if (d) {
       const start = startOfWeek(d, { weekStartsOn: 1 })
       return { start, end: addDays(start, 4) }
@@ -339,9 +381,7 @@ function extractDateRange(
   }
 
   // "4/14-4/17", "4/14 to 4/17"
-  const slashRange = lower.match(
-    /(\d{1,2})[/-](\d{1,2})\s*[-–]\s*(\d{1,2})[/-](\d{1,2})/,
-  )
+  const slashRange = lower.match(/(\d{1,2})[/-](\d{1,2})\s*[-–]\s*(\d{1,2})[/-](\d{1,2})/)
   if (slashRange) {
     const m1 = parseInt(slashRange[1]) - 1
     const sd = parseInt(slashRange[2])
@@ -371,12 +411,13 @@ function extractDateRange(
   for (const sep of separators) {
     const parts = lower.split(sep)
     if (parts.length === 2) {
-      const startDate = tryParseDate(parts[0].trim())
+      const startDate = tryParseDate(parts[0].trim(), today)
       if (startDate) {
-        let endDate = tryParseDate(parts[1].trim())
+        let endDate = tryParseDate(parts[1].trim(), today)
         if (!endDate) {
           const numMatch = parts[1].trim().match(/^(\d{1,2})(?:st|nd|rd|th)?$/)
-          if (numMatch) endDate = new Date(startDate.getFullYear(), startDate.getMonth(), parseInt(numMatch[1]))
+          if (numMatch)
+            endDate = new Date(startDate.getFullYear(), startDate.getMonth(), parseInt(numMatch[1]))
         }
         if (endDate && isValid(endDate)) return { start: startDate, end: endDate }
       }
@@ -391,10 +432,10 @@ function extractDateRange(
     d.getFullYear() > thisYear && new Date(thisYear, d.getMonth(), d.getDate()) < today
   const tokens = lower.replace(/[,?!.]/g, '').split(/\s+/)
   for (let i = 0; i < tokens.length; i++) {
-    const single = tryParseDate(tokens[i])
+    const single = tryParseDate(tokens[i], today)
     if (single) return { start: single, end: single, rolledForward: singleRolled(single) }
     if (i + 1 < tokens.length) {
-      const pair = tryParseDate(`${tokens[i]} ${tokens[i + 1]}`)
+      const pair = tryParseDate(`${tokens[i]} ${tokens[i + 1]}`, today)
       if (pair) return { start: pair, end: pair, rolledForward: singleRolled(pair) }
     }
   }
@@ -403,10 +444,9 @@ function extractDateRange(
 }
 
 function getBalanceSummary(state: AppState): string {
-  const v = state.profile.currentVacationHours
-  const s = state.profile.currentSickHours
-  const b = state.profile.currentBankHours
-  return `You currently have **${fmt(v + s + b)} total hours** available:\n- Vacation: **${fmt(v)}** hrs\n- Sick: **${fmt(s)}** hrs\n- Bank: **${fmt(b)}** hrs`
+  const { vacation: v, sick: s, bank: b, total } = getEffectiveCurrentBalances(state)
+  const bankLine = !state.policy.hideBankHours || b !== 0 ? `\n- Bank: **${fmt(b)}** hrs` : ''
+  return `You currently have **${fmt(total)} total hours** available:\n- Vacation: **${fmt(v)}** hrs\n- Sick: **${fmt(s)}** hrs${bankLine}\n\nTime off through today is already included. Future plans only affect forecasts.`
 }
 
 function describeDateRange(start: Date, end: Date): string {
@@ -438,8 +478,7 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
     const e = parseISO(v.endDate)
     return e > latest ? e : latest
   }, end)
-  const horizon =
-    endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
+  const horizon = endOfYear(start) > latestPlannedEnd ? endOfYear(start) : latestPlannedEnd
 
   const impact = analyzeTripImpact(state, proposedTrip, horizon)
   const tripShort = impact.tripItselfShortfall < SHORTFALL_EPSILON ? 0 : impact.tripItselfShortfall
@@ -449,8 +488,7 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
   const conflictsLater = tripShort === 0 && downstreamShort > 0
   const allHolidayOrWeekend = workDays === 0
   const remaining = Math.max(0, impact.balanceAfterTrip)
-  const earliest =
-    tripShort > 0 ? earliestAffordableTripStart(state, proposedTrip, start) : null
+  const earliest = tripShort > 0 ? earliestAffordableTripStart(state, proposedTrip, start) : null
 
   // Synthesised projection-shape for chat's existing string templates.
   // `totalAvailable` here is the hours available FOR the trip (start balance
@@ -479,13 +517,20 @@ function analyzeRange(state: AppState, start: Date, end: Date) {
 }
 
 export function processChat(input: string, state: AppState): ChatResponse {
-  const lower = input.toLowerCase().trim().replace(/[?!]+$/, '').trim()
-  const today = startOfDay(new Date())
+  const lower = input
+    .toLowerCase()
+    .trim()
+    .replace(/[?!]+$/, '')
+    .trim()
+  const today = parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate)
   const hoursPerDay = state.policy.hoursPerWorkDay
+  const isYearEndQuestion = /\b(year.?end|dec(ember)?\s+31|end\s+of\s+(the\s+)?year|eoy)\b/.test(
+    lower,
+  )
 
   // --- Greetings ---
   if (/^(hi|hello|hey|yo|sup|good\s+(morning|afternoon|evening))\b/.test(lower)) {
-    const total = state.profile.currentVacationHours + state.profile.currentSickHours + state.profile.currentBankHours
+    const total = getEffectiveCurrentBalances(state).total
     return {
       text: `Hey! You have **${fmt(total)} hours** available. What would you like to plan?\n\nYou can ask things like:\n- "Can I take the second week of December off?"\n- "Book 4/15-4/17"\n- "How many sick days can I take?"`,
     }
@@ -500,33 +545,54 @@ export function processChat(input: string, state: AppState): ChatResponse {
 
   // --- "Tell me more about [dates]" ---
   if (/\b(tell\s+me\s+more|more\s+details|breakdown|explain)\b/.test(lower)) {
-    const range = extractDateRange(lower)
+    const range = extractDateRange(lower, today)
     if (range) {
       const label = describeDateRange(range.start, range.end)
       const a = analyzeRange(state, range.start, range.end)
       let text = `**Details for ${label}:**\n\n- **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}**, ${fmt(a.needed)} hrs needed\n- Projected balance on ${format(range.start, 'MMM d')}: **${fmt(a.projection.totalAvailable)} hrs**\n- After time off: **${fmt(a.remaining)} hrs** remaining`
-      if (a.projection.vacationBalance > 0) text += `\n\nBreakdown: ${fmt(a.projection.vacationBalance)} vacation + ${fmt(a.projection.sickBalance)} sick + ${fmt(a.projection.bankBalance)} bank`
+      if (a.projection.vacationBalance > 0)
+        text += `\n\nBreakdown: ${fmt(a.projection.vacationBalance)} vacation + ${fmt(a.projection.sickBalance)} sick + ${fmt(a.projection.bankBalance)} bank`
       if (!a.affordable && a.earliest) {
         text += `\n\nYou'd need to wait until **${format(a.earliest, 'MMM d')}** to have enough.`
       }
-      return { text, action: a.affordable ? { type: 'plan_vacation', startDate: format(range.start, 'yyyy-MM-dd'), endDate: format(range.end, 'yyyy-MM-dd') } : undefined }
+      return {
+        text,
+        action: a.affordable
+          ? {
+              type: 'plan_vacation',
+              startDate: format(range.start, 'yyyy-MM-dd'),
+              endDate: format(range.end, 'yyyy-MM-dd'),
+            }
+          : undefined,
+      }
     }
   }
 
   // --- Balance ---
-  if (/\b(balance|how\s+many\s+hours|how\s+much\s+do\s+i\s+have|what.*hours|my\s+hours|what.*balance)\b/.test(lower) && !/\bafford\b/.test(lower) && !/\bsick\b/.test(lower)) {
+  if (
+    /\b(balance|how\s+many\s+hours|how\s+much\s+do\s+i\s+have|what.*hours|my\s+hours|what.*balance)\b/.test(
+      lower,
+    ) &&
+    !/\bafford\b/.test(lower) &&
+    !/\bsick\b/.test(lower) &&
+    !isYearEndQuestion
+  ) {
     const summary = getBalanceSummary(state)
     const hireDate = parseISO(state.profile.hireDate)
     const yos = differenceInYears(today, hireDate)
     const tier = computeAccrualTier(state.policy, yos)
     const monthly = (tier.hoursPerPayPeriod * 30) / state.policy.payPeriodLengthDays
-    return { text: `${summary}\n\nYou're earning **${fmt(tier.hoursPerPayPeriod)} hrs** per pay period (~${fmt(monthly)} hrs/month) at the **${tier.label}** tier.` }
+    return {
+      text: `${summary}\n\nYou're earning **${fmt(tier.hoursPerPayPeriod)} hrs** per pay period (~${fmt(monthly)} hrs/month) at the **${tier.label}** tier.`,
+    }
   }
 
   // --- Sick days ---
   if (/\bsick\b/.test(lower)) {
     // Forfeiture / carry-over question — "will I lose sick hours?"
-    if (/\b(lose|losing|forfeit|carry.?over|expire|roll\s*over|use\s+it\s+or\s+lose)\b/.test(lower)) {
+    if (
+      /\b(lose|losing|forfeit|carry.?over|expire|roll\s*over|use\s+it\s+or\s+lose)\b/.test(lower)
+    ) {
       const o = getSickOutlook(state)
       if (o.projectedForfeit > 0) {
         return {
@@ -538,58 +604,66 @@ export function processChat(input: string, state: AppState): ChatResponse {
       }
     }
 
-    const total = state.profile.currentVacationHours + state.profile.currentSickHours + state.profile.currentBankHours
-    const plannedHours = state.plannedVacations
-      .filter((v) => parseISO(v.endDate) >= today)
-      .reduce((sum, v) => sum + countWorkDays(parseISO(v.startDate), parseISO(v.endDate), state.policy) * hoursPerDay, 0)
-    const buffer = total - plannedHours
-    const sickDays = Math.floor(Math.max(0, buffer) / hoursPerDay)
+    const available = getEffectiveCurrentBalances(state).sick
+    const sickDays = Math.floor(Math.max(0, available) / hoursPerDay)
+    const projected = getSickOutlook(state).projectedYearEnd
+
+    if (isYearEndQuestion) {
+      return {
+        text: `Your projected **Dec 31 sick balance is ${fmt(projected)} hrs**, after scheduled time off. You have **${fmt(available)} sick hrs** available now.`,
+      }
+    }
 
     if (/\b(what\s+if|what\s+happens|if\s+i\s+(take|get))\b/.test(lower)) {
       const numMatch = lower.match(/(\d+)\s*(?:sick|days?)/)
       const count = numMatch ? parseInt(numMatch[1]) : 2
       const sickHoursUsed = count * hoursPerDay
-      const afterSick = buffer - sickHoursUsed
+      const afterSick = available - sickHoursUsed
       if (afterSick >= 0) {
-        return { text: `**${count} sick day${count !== 1 ? 's' : ''}** would use ${fmt(sickHoursUsed)} hrs, leaving **${fmt(afterSick)} hrs** of buffer above your planned time off.` }
+        return {
+          text: `**${count} sick day${count !== 1 ? 's' : ''}** would use ${fmt(sickHoursUsed)} sick hrs, leaving **${fmt(afterSick)} sick hrs** from your available-now balance. Future plans may also use this pool; specific dates are needed to check their impact.`,
+        }
       }
-      return { text: `**${count} sick day${count !== 1 ? 's' : ''}** would put you **${fmt(Math.abs(afterSick))} hrs short** of covering your planned time off.` }
+      return {
+        text: `**${count} sick day${count !== 1 ? 's' : ''}** would need ${fmt(sickHoursUsed)} sick hrs. Your available-now sick balance is **${fmt(available)} hrs**, so you'd be **${fmt(Math.abs(afterSick))} sick hrs short**. Vacation and bank hours are separate pools.`,
+      }
     }
 
     return {
-      text: sickDays >= 1
-        ? `Your current balance has room for about **${sickDays} sick day${sickDays !== 1 ? 's' : ''}** beyond your planned time off (**${fmt(buffer)} hrs** buffer).`
-        : `Your planned time off accounts for nearly all of your available hours (**${fmt(buffer)} hrs** buffer).`,
+      text: `You have **${fmt(available)} sick hrs** available now, enough for **${sickDays} full sick day${sickDays !== 1 ? 's' : ''}** at ${fmt(hoursPerDay)} hrs/day. Today's time off is already included. With existing plans, your projected Dec 31 sick balance is **${fmt(projected)} hrs**.`,
     }
   }
 
   // --- Year-end ---
-  if (/\b(year.?end|dec(ember)?\s+31|end\s+of\s+(the\s+)?year|eoy)\b/.test(lower)) {
+  if (isYearEndQuestion) {
     const yearEnd = endOfYear(today)
     const proj = projectBalance(state, yearEnd)
-    const hireDate = parseISO(state.profile.hireDate)
-    const yos = differenceInYears(today, hireDate)
-    const tier = computeAccrualTier(state.policy, yos)
-    const periodsPerYear = Math.round(365 / state.policy.payPeriodLengthDays)
-    const cap = state.policy.carryoverCapStrategy === 'annual_accrual' ? tier.hoursPerPayPeriod * periodsPerYear
-      : state.policy.carryoverCapStrategy === 'fixed_hours' ? (state.policy.carryoverFixedCap ?? 0) : null
-
-    let text = `**Year-end projection (Dec 31):**\n- Vacation: **${fmt(proj.vacationBalance)} hrs**\n- Sick: **${fmt(proj.sickBalance)} hrs**\n- Bank: **${fmt(proj.bankBalance)} hrs**`
-    if (cap !== null) {
-      const surplus = proj.vacationBalance - cap
-      if (surplus > 0) {
-        text += `\n\nProjected to exceed the **${fmt(cap)} hr** carryover cap by **${fmt(surplus)} hrs**. Excess is paid out on the configured payout date.`
+    const carryover = getCarryoverOutlook(state)
+    const bankLine =
+      !state.policy.hideBankHours || proj.bankBalance !== 0
+        ? `\n- Bank: **${fmt(proj.bankBalance)} hrs**`
+        : ''
+    let text = `**Year-end projection (Dec 31):**\n- Vacation: **${fmt(proj.vacationBalance)} hrs**\n- Sick: **${fmt(proj.sickBalance)} hrs**${bankLine}`
+    if (carryover.cap !== null) {
+      if (carryover.projectedPayout > 0) {
+        text += `\n\nAt the next carryover payout, **${fmt(carryover.projectedPayout)} vacation hrs** are projected to be paid out if unused (cap **${fmt(carryover.cap)} hrs**${carryover.payoutDate ? `; ${format(carryover.payoutDate, 'MMM d, yyyy')}` : ''}).`
       } else {
-        text += `\n\nProjected vacation is under the **${fmt(cap)} hr** carryover cap.`
+        text += `\n\nNo excess vacation payout is projected at the next carryover date (cap **${fmt(carryover.cap)} hrs**).`
       }
     }
     return { text }
   }
 
   // --- For everything else: try to extract dates first, then decide intent ---
-  const range = extractDateRange(lower)
-  const isQuestion = /\b(can\s+i|afford|enough|do\s+i\s+have|is\s+it\s+possible|able\s+to|will\s+i|would\s+i|could\s+i|should\s+i)\b/.test(lower)
-  const isRequest = /\b(take\s+off|plan|schedule|book|i\s+want|i.?d\s+like|need|request|time\s+off|want\s+to|day\s+off|put\s+in|submit|use|block\s+off)\b/.test(lower) || /\bthe\s+day\b/.test(lower)
+  const range = extractDateRange(lower, today)
+  const isQuestion =
+    /\b(can\s+i|afford|enough|do\s+i\s+have|is\s+it\s+possible|able\s+to|will\s+i|would\s+i|could\s+i|should\s+i)\b/.test(
+      lower,
+    )
+  const isRequest =
+    /\b(take\s+off|plan|schedule|book|i\s+want|i.?d\s+like|need|request|time\s+off|want\s+to|day\s+off|put\s+in|submit|use|block\s+off)\b/.test(
+      lower,
+    ) || /\bthe\s+day\b/.test(lower)
 
   if (range) {
     const label = describeDateRange(range.start, range.end)
@@ -611,7 +685,7 @@ export function processChat(input: string, state: AppState): ChatResponse {
 
     if (isQuestion && !isRequest) {
       if (a.affordable) {
-        const tightness = a.remaining < 0.5 ? ' — it\'s a tight fit with nothing to spare.' : ''
+        const tightness = a.remaining < 0.5 ? " — it's a tight fit with nothing to spare." : ''
         return {
           text: `${rolledNotice}**Yes.** ${label} is **${a.workDays} work day${a.workDays !== 1 ? 's' : ''}** (${fmt(a.needed)} hrs). You'll have **${fmt(a.projection.totalAvailable)} hrs** available, leaving **${fmt(a.remaining)} hrs** after.${tightness}`,
           action,
@@ -658,8 +732,14 @@ export function processChat(input: string, state: AppState): ChatResponse {
   }
 
   // --- General conversation / thanks / acknowledgement ---
-  if (/\b(thanks|thank\s+you|thx|ty|appreciate|great|perfect|awesome|cool|nice|ok|okay|got\s+it|sounds\s+good)\b/.test(lower)) {
-    return { text: `You're welcome! Let me know if you need anything else — I'm here to help with planning, balance checks, or anything time-off related.` }
+  if (
+    /\b(thanks|thank\s+you|thx|ty|appreciate|great|perfect|awesome|cool|nice|ok|okay|got\s+it|sounds\s+good)\b/.test(
+      lower,
+    )
+  ) {
+    return {
+      text: `You're welcome! Let me know if you need anything else — I'm here to help with planning, balance checks, or anything time-off related.`,
+    }
   }
 
   if (/\b(bye|goodbye|see\s+ya|later|done|that.?s\s+all)\b/.test(lower)) {

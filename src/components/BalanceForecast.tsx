@@ -1,3 +1,4 @@
+import { getNowInZone } from '../lib/timeUtils'
 import { useMemo, useState } from 'react'
 import {
   addDays,
@@ -31,7 +32,8 @@ export function BalanceForecast() {
   const { state } = useAppState()
   const [mode, setMode] = useState<Mode>('vacation')
 
-  const today = useMemo(() => startOfDay(new Date()), [])
+  const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
+  const today = useMemo(() => startOfDay(parseISO(todayIso)), [todayIso])
   const yearEnd = useMemo(() => endOfYear(today), [today])
 
   // Tier-boundary anniversaries inside the range — inserted as explicit sample

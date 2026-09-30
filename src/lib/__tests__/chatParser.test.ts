@@ -29,7 +29,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
 
 function mockToday(dateStr: string) {
   vi.useFakeTimers()
-  vi.setSystemTime(new Date(dateStr + 'T12:00:00').getTime())
+  vi.setSystemTime(new Date(dateStr + 'T15:00:00Z').getTime())
 }
 
 beforeEach(() => {
@@ -289,5 +289,95 @@ describe('chat: balance + help + greetings', () => {
     expect(r.text).toMatch(/47\.3/)
     expect(r.text).toMatch(/20/)
     expect(r.text).toMatch(/8/)
+  })
+})
+
+describe('chat: current balance and profile-local dates', () => {
+  it('uses the profile timezone for today, tomorrow, and explicit same-day dates', () => {
+    vi.setSystemTime(new Date('2026-04-23T02:00:00Z'))
+    const state = makeState()
+    state.profile.timezone = 'America/Los_Angeles'
+    expect(processChat('I would like to take off today', state).action?.startDate).toBe(
+      '2026-04-22',
+    )
+    expect(processChat('take tomorrow off', state).action?.startDate).toBe('2026-04-23')
+    expect(processChat('take April 22 off', state).action?.startDate).toBe('2026-04-22')
+  })
+
+  it('includes immediate same-day deductions in balances and greetings', () => {
+    const state = makeState()
+    state.plannedVacations = [
+      {
+        id: 'today',
+        startDate: '2026-04-22',
+        endDate: '2026-04-22',
+        hoursPerDay: 4,
+        hourSource: 'vacation',
+        locked: false,
+      },
+    ]
+    const balance = processChat("what's my balance?", state)
+    expect(balance.text).toContain('**36 total hours**')
+    expect(balance.text).toContain('Time off through today is already included')
+    expect(processChat('hello', state).text).toContain('**36 hours**')
+  })
+
+  it('does not intercept a year-end balance request as a current balance', () => {
+    const state = makeState()
+    const response = processChat("What's my year-end balance?", state)
+    expect(response.text).toContain('Year-end projection (Dec 31)')
+    expect(response.text).not.toContain('You currently have')
+  })
+
+  it('answers sick questions with the sick pool, including partial-day deductions', () => {
+    const state = makeState()
+    state.profile.currentSickHours = 20
+    state.plannedVacations = [
+      {
+        id: 'sick',
+        startDate: '2026-04-22',
+        endDate: '2026-04-22',
+        hoursPerDay: 4,
+        hourSource: 'sick',
+        locked: false,
+      },
+    ]
+    const response = processChat('How many sick days can I take?', state)
+    expect(response.text).toContain('**16 sick hrs** available now')
+    expect(response.text).toContain('**2 full sick days**')
+    expect(processChat('What happens if I take 3 sick days?', state).text).toContain(
+      '**8 sick hrs short**',
+    )
+  })
+
+  it('keeps future sick plans in the projected balance rather than available now', () => {
+    const state = makeState()
+    state.profile.currentSickHours = 16
+    state.plannedVacations = [
+      {
+        id: 'future',
+        startDate: '2026-04-23',
+        endDate: '2026-04-23',
+        hoursPerDay: 4,
+        hourSource: 'sick',
+        locked: false,
+      },
+    ]
+    const response = processChat('How many sick days can I take?', state)
+    expect(response.text).toContain('**16 sick hrs** available now')
+    expect(response.text).toContain('projected Dec 31 sick balance is **12 hrs**')
+  })
+
+  it('reads weekday ranges before matching a single weekday', () => {
+    const response = processChat('plan Wednesday through Friday', makeState())
+    expect(response.action?.startDate).toBe('2026-04-29')
+    expect(response.action?.endDate).toBe('2026-05-01')
+  })
+
+  it('does not expose a zero bank pool when bank management is hidden', () => {
+    const state = makeState()
+    state.policy.hideBankHours = true
+    expect(processChat("what's my balance", state).text).not.toContain('- Bank:')
+    expect(processChat('year-end balance', state).text).not.toContain('- Bank:')
   })
 })

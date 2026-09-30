@@ -1,3 +1,4 @@
+import { getNowInZone } from '../lib/timeUtils'
 import {
   useEffect,
   useLayoutEffect,
@@ -53,7 +54,7 @@ export function UpcomingMenu({ renderTrigger, align = 'left' }: Props = {}) {
     top: 0,
     left: 0,
   })
-  const today = startOfDay(new Date())
+  const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
 
   const hasUnaffordable = useMemo(() => {
     return sortedVacations.some((v) => {

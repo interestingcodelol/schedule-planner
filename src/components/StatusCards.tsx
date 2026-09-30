@@ -1,180 +1,115 @@
 import { useMemo } from 'react'
-import { format, parseISO, endOfYear, differenceInYears, startOfDay } from 'date-fns'
-import { Clock, TrendingUp, Calendar, AlertTriangle, Layers, HeartPulse } from 'lucide-react'
-import { BankCard } from './BankCard'
+import { format, parseISO, endOfYear, differenceInYears, subDays } from 'date-fns'
+import { Calendar, TrendingUp, ArrowUpRight, AlertTriangle } from 'lucide-react'
 import { useAppState } from '../context'
 import {
   projectBalance,
   getNextPayday,
   computeAccrualTier,
   getCarryoverOutlook,
-  getEffectiveCurrentBalances,
+  accrualForPeriod,
 } from '../lib/projection'
 import { getNowInZone } from '../lib/timeUtils'
+import { BalanceSummary } from './BalanceSummary'
 
-function fmt(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(2)
-}
-
-function Card({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  accent,
-  glow,
-  iconClass,
-  badge,
-  className,
-}: {
-  icon: React.ElementType
-  label: string
-  value: string
-  sub: React.ReactNode
-  accent?: string
-  glow?: string
-  iconClass?: string
-  badge?: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div
-      className={`glass-card rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 relative overflow-hidden min-h-[4.5rem] sm:min-h-[5.5rem] flex flex-col ${glow || ''} ${className || ''}`}
-      aria-label={`${label}: ${value}`}
-    >
-      <div
-        className={`absolute top-0 left-0 right-0 h-0.5 ${accent || 'bg-gradient-to-r from-blue-500 to-cyan-500'}`}
-      />
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 text-xs sm:text-sm font-medium">
-          <Icon className={`w-3.5 h-3.5 shrink-0 ${iconClass ?? ''}`} />
-          <span className="truncate">{label}</span>
-        </div>
-        {badge}
-      </div>
-      <div className="text-lg sm:text-xl font-bold tabular-nums tracking-tight">{value}</div>
-      <div className="text-xs sm:text-[13px] text-gray-400 dark:text-gray-500 mt-0.5 leading-snug break-words whitespace-normal">
-        {sub}
-      </div>
-    </div>
-  )
+function fmt(hours: number): string {
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2)
 }
 
 export function StatusCards() {
   const { state } = useAppState()
-
-  const nextPayday = useMemo(
-    () =>
-      getNextPayday(
-        parseISO(state.profile.lastPaydayDate),
-        state.policy.payPeriodLengthDays,
-        startOfDay(
-          parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate),
-        ),
-      ),
-    [state.profile.lastPaydayDate, state.policy.payPeriodLengthDays, state.profile.timezone],
-  )
-
-  const currentTier = useMemo(() => {
-    const yos = differenceInYears(new Date(), parseISO(state.profile.hireDate))
-    return computeAccrualTier(state.policy, yos)
-  }, [state.profile.hireDate, state.policy])
-
-  const annualHours = useMemo(() => {
-    const periodsPerYear = Math.round(365 / state.policy.payPeriodLengthDays)
-    return currentTier.hoursPerPayPeriod * periodsPerYear
-  }, [currentTier, state.policy.payPeriodLengthDays])
-
-  const yearEnd = useMemo(() => endOfYear(new Date()), [])
-  const yearEndProjection = useMemo(
-    () => projectBalance(state, yearEnd),
-    [state, yearEnd],
-  )
-
-  // Tier-aware carry-over picture for the NEXT payout (correct cap + exact
-  // payout even when a service anniversary raises the cap before then).
-  const carryover = useMemo(() => getCarryoverOutlook(state), [state])
+  const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
+  const outlook = useMemo(() => {
+    const today = parseISO(todayIso)
+    const lastPayday = parseISO(state.profile.lastPaydayDate)
+    const hireDate = parseISO(state.profile.hireDate)
+    const nextPayday = getNextPayday(lastPayday, state.policy.payPeriodLengthDays, today)
+    const periodStart = subDays(nextPayday, Math.max(1, state.policy.payPeriodLengthDays))
+    const currentTier = computeAccrualTier(state.policy, differenceInYears(today, hireDate))
+    return {
+      nextPayday,
+      nextAccrual: accrualForPeriod(state.policy, hireDate, periodStart, nextPayday),
+      currentTier,
+      annualHours:
+        currentTier.hoursPerPayPeriod * Math.round(365 / state.policy.payPeriodLengthDays),
+      yearEnd: projectBalance(state, endOfYear(today)),
+      carryover: getCarryoverOutlook(state),
+    }
+  }, [state, todayIso])
+  const { nextPayday, nextAccrual, currentTier, annualHours, yearEnd, carryover } = outlook
   const exceedsCap = carryover.projectedPayout > 0
 
-  const effective = useMemo(() => getEffectiveCurrentBalances(state), [state])
-  const showBank = !state.policy.hideBankHours
-
   return (
-    <div
-      className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 ${
-        showBank ? 'xl:grid-cols-7' : 'xl:grid-cols-6'
-      } gap-3 sm:gap-4`}
-    >
-      <Card
-        icon={Layers}
-        label="Total Available"
-        value={`${fmt(effective.total)} hrs`}
-        sub={
-          showBank
-            ? `Vac: ${fmt(effective.vacation)} · Sick: ${fmt(effective.sick)} · Bank: ${fmt(effective.bank)}`
-            : `Vac: ${fmt(effective.vacation)} · Sick: ${fmt(effective.sick)}`
-        }
-        iconClass="text-emerald-500"
-        className="col-span-2 sm:col-span-3 md:col-span-2 xl:col-span-1"
-      />
-
-      <Card
-        icon={Clock}
-        label="Vacation"
-        value={`${fmt(effective.vacation)} hrs`}
-        sub={`Accruing ${fmt(currentTier.hoursPerPayPeriod)} hrs/period`}
-        iconClass="text-blue-500"
-      />
-
-      <Card
-        icon={HeartPulse}
-        label="Sick"
-        value={`${fmt(effective.sick)} hrs`}
-        sub={`Max: ${fmt(state.policy.sickLeaveMaxBalance)} hrs`}
-        iconClass="text-rose-500"
-      />
-
-      {showBank && <BankCard />}
-
-      <Card
-        icon={TrendingUp}
-        label="Accrual Rate"
-        value={`${Math.round(annualHours)} hrs/yr`}
-        sub={`${fmt(currentTier.hoursPerPayPeriod)} hrs/period · ${currentTier.label}`}
-      />
-
-      <Card
-        icon={Calendar}
-        label="Next Payday"
-        value={format(nextPayday, 'MMM d')}
-        sub={`+${fmt(currentTier.hoursPerPayPeriod)} hrs vacation`}
-      />
-
-      <Card
-        icon={TrendingUp}
-        label="Year-End"
-        value={`${fmt(yearEndProjection.totalAvailable)} hrs`}
-        sub={
-          exceedsCap
-            ? `Vac ${fmt(yearEndProjection.vacationBalance)} · cap ${Math.round(carryover.cap!)} · ${fmt(carryover.projectedPayout)}h will be paid out`
-            : showBank
-              ? `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)} · Bank ${fmt(yearEndProjection.bankBalance)}`
-              : `Vac ${fmt(yearEndProjection.vacationBalance)} · Sick ${fmt(yearEndProjection.sickBalance)}`
-        }
-        accent={
-          exceedsCap
-            ? 'bg-gradient-to-r from-amber-500 to-orange-500'
-            : 'bg-gradient-to-r from-blue-500 to-cyan-500'
-        }
-        glow={exceedsCap ? 'glow-amber' : undefined}
-        badge={
-          exceedsCap ? (
-            <span className="text-amber-500" title={`Vacation exceeds ${fmt(carryover.cap!)} hr carry-over cap — ${fmt(carryover.projectedPayout)} hrs will be paid out on the first pay date in February (if not used during January)`}>
-              <AlertTriangle className="w-4 h-4" />
-            </span>
-          ) : undefined
-        }
-      />
+    <div className="space-y-3">
+      <BalanceSummary />
+      <section aria-labelledby="outlook-title" className="px-1">
+        <div className="flex items-baseline justify-between flex-wrap gap-x-3 gap-y-1 mb-2">
+          <h2 id="outlook-title" className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+            Looking ahead
+          </h2>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Forecasts include future plans and accruals
+          </p>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="flex gap-2.5 items-start rounded-xl border border-gray-200/70 dark:border-gray-700/40 px-3 py-2.5">
+            <Calendar className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" aria-hidden />
+            <div className="min-w-0">
+              <h3 className="text-xs text-gray-500 dark:text-gray-400">Next payday</h3>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                {format(nextPayday, 'MMM d')}{' '}
+                <span className="font-normal text-gray-400 dark:text-gray-500">·</span> +
+                {fmt(nextAccrual)} hrs
+              </p>
+              <p className="text-[11px] mt-0.5 text-gray-500 dark:text-gray-400">
+                Vacation accrual
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2.5 items-start rounded-xl border border-gray-200/70 dark:border-gray-700/40 px-3 py-2.5">
+            <TrendingUp className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" aria-hidden />
+            <div className="min-w-0">
+              <h3 className="text-xs text-gray-500 dark:text-gray-400">Vacation earning rate</h3>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                {fmt(currentTier.hoursPerPayPeriod)} hrs{' '}
+                <span className="font-normal text-gray-500 dark:text-gray-400">/ period</span>
+              </p>
+              <p className="text-[11px] mt-0.5 text-gray-500 dark:text-gray-400">
+                ~{Math.round(annualHours)} hrs/year · {currentTier.label}
+              </p>
+            </div>
+          </div>
+          <div
+            className={`col-span-2 lg:col-span-1 flex gap-2.5 items-start rounded-xl border px-3 py-2.5 ${exceedsCap ? 'border-amber-400/40 dark:border-amber-500/30 bg-amber-500/5' : 'border-gray-200/70 dark:border-gray-700/40'}`}
+          >
+            {exceedsCap ? (
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" aria-hidden />
+            ) : (
+              <ArrowUpRight className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" aria-hidden />
+            )}
+            <div className="min-w-0">
+              <h3 className="text-xs text-gray-500 dark:text-gray-400">Projected Dec 31</h3>
+              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                {fmt(yearEnd.totalAvailable)} hrs{' '}
+                <span className="font-normal text-gray-500 dark:text-gray-400">
+                  across all pools
+                </span>
+              </p>
+              <p className="text-[11px] mt-0.5 text-gray-500 dark:text-gray-400">
+                Vacation {fmt(yearEnd.vacationBalance)} · Sick {fmt(yearEnd.sickBalance)}
+                {!state.policy.hideBankHours && ` · Bank ${fmt(yearEnd.bankBalance)}`}
+              </p>
+              {exceedsCap && (
+                <p className="text-[11px] mt-1 text-amber-700 dark:text-amber-400">
+                  {fmt(carryover.projectedPayout)} vacation hrs may be paid out
+                  {carryover.payoutDate ? ` ${format(carryover.payoutDate, 'MMM d')}` : ''} if
+                  unused (cap {fmt(carryover.cap!)} hrs)
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

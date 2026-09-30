@@ -1,3 +1,4 @@
+import { getNowInZone } from '../lib/timeUtils'
 import { useEffect, useRef, useState } from 'react'
 import {
   differenceInDays,
@@ -54,7 +55,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
   const [editEnd, setEditEnd] = useState(vacation.endDate)
   const [editError, setEditError] = useState('')
   const emojiRef = useRef<HTMLSpanElement>(null)
-  const today = startOfDay(new Date())
+  const today = startOfDay(parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate))
   const start = parseISO(vacation.startDate)
   const end = parseISO(vacation.endDate)
   const isPast = isBefore(end, today)
@@ -124,7 +125,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
 
   const workDays = countWorkDays(start, end, state.policy)
   const hrsPerDay = vacation.hoursPerDay ?? state.policy.hoursPerWorkDay
-  const hoursNeeded = workDays * hrsPerDay
+  const hoursNeeded = vacation.actualHoursUsed ?? workDays * hrsPerDay
   const isPartial = hrsPerDay < state.policy.hoursPerWorkDay
   // Run the trip through analyzeTripImpact so cross-year trips get credit
   // for the Jan 1 sick grant, mid-trip paydays, etc. The vacation is
@@ -152,10 +153,10 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
     impact.tripItselfShortfall === 0 && impact.downstreamShortfall > 0
   const balanceOnStart = impact.balanceBeforeTrip
   const balanceAfterTrip = impact.balanceAfterTrip
-  const replenishedDuringTrip = Math.max(
-    0,
-    balanceAfterTrip + hoursNeeded - balanceOnStart,
-  )
+  // For an ongoing trip, already-recorded days are in the starting balance.
+  // They are not future hours earned during the remaining trip.
+  const remainingHours = Math.max(0, hoursNeeded - (vacation.appliedDeductions ?? []).reduce((sum, row) => sum + row.hours, 0))
+  const replenishedDuringTrip = Math.max(0, balanceAfterTrip + remainingHours - balanceOnStart)
 
   const sourceLabel = SOURCE_LABELS[vacation.hourSource] || ''
 
@@ -256,7 +257,7 @@ export function UpcomingVacationRow({ vacation, onJump }: Props) {
               <span>
                 {format(start, 'MMM d')}
                 {vacation.startDate !== vacation.endDate && ` — ${format(end, 'MMM d')}`}
-                {start.getFullYear() !== new Date().getFullYear() && `, ${start.getFullYear()}`}
+                {start.getFullYear() !== today.getFullYear() && `, ${start.getFullYear()}`}
               </span>
             </div>
             {vacation.note && (

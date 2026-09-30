@@ -50,19 +50,19 @@ function applyDeduction(
   source: 'vacation' | 'sick' | 'bank' | 'any',
   pools: { vacation: number; sick: number; bank: number },
 ): void {
-  // Explicit sources floor at 0 like the 'any' branch already does — a
-  // shortfall on an explicit pool shouldn't drag that pool negative; the
-  // shortfall is tracked separately by the caller.
+  // A scheduled draw cannot create new debt. Preserve an already-negative
+  // recorded pool (e.g. a logged absence); flooring that pool to zero would
+  // incorrectly credit hours. The unmet request is tracked as shortfall.
   if (source === 'vacation') {
-    pools.vacation = Math.max(0, pools.vacation - hours)
+    pools.vacation -= Math.min(hours, Math.max(0, pools.vacation))
     return
   }
   if (source === 'sick') {
-    pools.sick = Math.max(0, pools.sick - hours)
+    pools.sick -= Math.min(hours, Math.max(0, pools.sick))
     return
   }
   if (source === 'bank') {
-    pools.bank = Math.max(0, pools.bank - hours)
+    pools.bank -= Math.min(hours, Math.max(0, pools.bank))
     return
   }
   let remaining = hours
@@ -95,67 +95,214 @@ function resolveDeductHours(
   return hoursPerWorkDay
 }
 
-/**
- * The user's currently-displayable balance, with same-day planned time off
- * applied only after the user's local end-of-work-day cutoff. `logged_past`
- * entries are excluded since they already mutated the stored balances when
- * created.
- */
-export function getEffectiveCurrentBalances(state: AppState): {
+export type BalancePools = {
   vacation: number
   sick: number
   bank: number
   total: number
-} {
-  const pools = {
+}
+
+export type CurrentBalanceSummary = {
+  /** Already reconciled balances, including logged absences. */
+  stored: BalancePools
+  /** Actual draws for scheduled days through today not yet stored. */
+  deductions: BalancePools
+  available: BalancePools
+  /** Today's known pool draws, including recorded days once. Legacy Auto
+   *  draws with an unknown split are separate in todayUnallocatedHours. */
+  todayDeductions: BalancePools
+  todayScheduledDeductions: BalancePools
+  todayLoggedDeductions: BalancePools
+  /** Legacy logged Auto usage with no recorded pool split; informational only. */
+  todayUnallocatedHours: number
+  /** Pending time-off event allocations, for same-day planning previews. */
+  events: ProjectionEvent[]
+  /** Scheduled hours through today that the selected pools cannot cover. */
+  shortfall: number
+}
+
+const withTotal = (pools: Omit<BalancePools, 'total'>): BalancePools => ({
+  vacation: r2(pools.vacation),
+  sick: r2(pools.sick),
+  bank: r2(pools.bank),
+  total: r2(pools.vacation + pools.sick + pools.bank),
+})
+
+export type ScheduledDeduction = {
+  date: Date
+  hours: number
+  vacation: PlannedVacation
+}
+
+/**
+ * The single calendar-day stream used by current balances, projections and
+ * catch-up. Logged entries already changed the stored balance, so their dates
+ * supersede matching scheduled dates. Actual hours are an entry TOTAL spread
+ * over the original workdays; skipping a logged day must not redistribute its
+ * share onto the remaining scheduled days.
+ */
+export function getScheduledDeductions(
+  state: AppState,
+  through: Date,
+): ScheduledDeduction[] {
+  const holidayCache = new Map<number, Date[]>()
+  const workDaysFor = (entry: PlannedVacation): Date[] => {
+    const start = parseISO(entry.startDate)
+    const end = parseISO(entry.endDate)
+    if (isAfter(start, end)) return []
+    return eachDayOfInterval({ start, end }).filter((day) => {
+      const year = day.getFullYear()
+      if (!holidayCache.has(year)) {
+        holidayCache.set(year, computeHolidayDates(state.policy, year))
+      }
+      return isWorkDay(day, state.policy, holidayCache.get(year)!)
+    })
+  }
+  const loggedDates = new Set<string>()
+  for (const entry of state.plannedVacations) {
+    if (entry.kind !== 'logged_past') continue
+    for (const day of workDaysFor(entry)) loggedDates.add(format(day, 'yyyy-MM-dd'))
+  }
+
+  const deductions: ScheduledDeduction[] = []
+  for (const vacation of state.plannedVacations) {
+    if (vacation.kind === 'logged_past' || isAfter(parseISO(vacation.startDate), through)) continue
+    const workDays = workDaysFor(vacation)
+    const hours = resolveDeductHours(vacation, state.policy.hoursPerWorkDay, workDays.length)
+    const appliedDates = new Set((vacation.appliedDeductions ?? []).map((d) => d.date))
+    for (let index = 0; index < workDays.length; index++) {
+      const date = workDays[index]
+      if (isAfter(date, through)) break
+      const dateIso = format(date, 'yyyy-MM-dd')
+      if (loggedDates.has(dateIso) || appliedDates.has(dateIso)) continue
+      // Allocate an entry total in hundredths, keeping the exact total even
+      // when each day is booked in a separate session (e.g. 1h over 3 days).
+      const dayHours = vacation.actualHoursUsed === undefined
+        ? hours
+        : r2((index + 1) * hours) - r2(index * hours)
+      deductions.push({ date, hours: r2(dayHours), vacation })
+    }
+  }
+  // Stable ordering also matches projections/catch-up for multiple entries
+  // drawing different pools. Processing whole entries in array order did not.
+  return deductions.sort((a, b) => a.date.getTime() - b.date.getTime())
+}
+
+function availableForSource(
+  pools: Omit<BalancePools, 'total'>,
+  source: PlannedVacation['hourSource'],
+): number {
+  return source === 'any'
+    ? Math.max(0, pools.vacation) + Math.max(0, pools.sick) + Math.max(0, pools.bank)
+    : Math.max(0, pools[source])
+}
+
+/**
+ * Recorded balances minus unbooked scheduled workdays through the user's
+ * local today. A scheduled day is included from local midnight, regardless of
+ * its display-only start/end time. This is derived state: editing/removing a
+ * planned entry recalculates it immediately without mutating stored balances.
+ */
+export function getCurrentBalanceSummary(
+  state: AppState,
+  now: Date = new Date(),
+): CurrentBalanceSummary {
+  const stored = {
     vacation: state.profile.currentVacationHours,
     sick: state.profile.currentSickHours,
     bank: state.profile.currentBankHours,
   }
-
-  const tz = state.profile.timezone || DEFAULT_TZ
-  const isoToday = getNowInZone(tz).isoDate
-  for (const v of state.plannedVacations) {
-    if (v.kind === 'logged_past') continue
-    // Only entries that SPAN today need same-day handling. Fully-past entries
-    // are already booked into the stored balance by catch-up; fully-future
-    // ones don't affect today.
-    if (!(v.startDate <= isoToday && v.endDate >= isoToday)) continue
-
-    const vStart = parseISO(v.startDate)
-    const vEnd = parseISO(v.endDate)
-    // catch-up only books a vacation once it has FULLY ended, so for a
-    // multi-day entry that merely spans today the stored balance reflects NONE
-    // of its elapsed days. Deduct every elapsed work day up to AND INCLUDING
-    // today (today is charged as soon as the entry exists — an explicitly
-    // planned/logged day off is "spent" the moment it's scheduled, so the
-    // displayed balance must reflect it immediately rather than waiting for an
-    // end-of-day cutoff). catch-up books the whole entry once it fully ends and
-    // flips it to logged_past, which this loop skips, so there is no double-count.
-    const holidays: Date[] = []
-    for (
-      let y = vStart.getFullYear();
-      y <= parseISO(isoToday).getFullYear();
-      y++
-    ) {
-      holidays.push(...computeHolidayDates(state.policy, y))
+  const pools = { ...stored }
+  const todayScheduled = { vacation: 0, sick: 0, bank: 0 }
+  const todayLogged = { vacation: 0, sick: 0, bank: 0 }
+  const isoToday = getNowInZone(state.profile.timezone || DEFAULT_TZ, now).isoDate
+  const today = parseISO(isoToday)
+  let shortfall = 0
+  const events: ProjectionEvent[] = []
+  let todayUnallocatedHours = 0
+  for (const deduction of getScheduledDeductions(state, today)) {
+    const source = deduction.vacation.hourSource || 'any'
+    shortfall += Math.max(0, deduction.hours - availableForSource(pools, source))
+    const before = { ...pools }
+    applyDeduction(deduction.hours, source, pools)
+    events.push({
+      date: format(deduction.date, 'yyyy-MM-dd'),
+      type: 'vacation_deduction',
+      delta: -deduction.hours,
+      runningBalance: pools.vacation,
+      label: deduction.vacation.note || 'Planned time off',
+      vacationId: deduction.vacation.id,
+      requestedHours: deduction.hours,
+      drawn: {
+        vacation: before.vacation - pools.vacation,
+        sick: before.sick - pools.sick,
+        bank: before.bank - pools.bank,
+      },
+    })
+    if (format(deduction.date, 'yyyy-MM-dd') === isoToday) {
+      todayScheduled.vacation += before.vacation - pools.vacation
+      todayScheduled.sick += before.sick - pools.sick
+      todayScheduled.bank += before.bank - pools.bank
     }
-    const entryWorkDays = countWorkDays(vStart, vEnd, state.policy)
-    const perDay = resolveDeductHours(v, state.policy.hoursPerWorkDay, entryWorkDays)
-    for (const day of eachDayOfInterval({ start: vStart, end: vEnd })) {
-      const dayIso = format(day, 'yyyy-MM-dd')
-      if (dayIso > isoToday) break
-      if (!isWorkDay(day, state.policy, holidays)) continue
-      applyDeduction(perDay, v.hourSource || 'any', pools)
+  }
+
+  // These are informational only: booked days are already in `stored` and
+  // must never be deducted again. Prefer the exact daily ledger; older logged
+  // entries without rows use today's even share of their recorded totals.
+  for (const entry of state.plannedVacations) {
+    if (entry.appliedDeductions) {
+      for (const applied of entry.appliedDeductions) {
+        if (entry.kind !== 'logged_past' && applied.date <= isoToday) {
+          shortfall += Math.max(0, applied.hours - applied.drawn.vacation - applied.drawn.sick - applied.drawn.bank)
+        }
+        if (applied.date !== isoToday) continue
+        todayLogged.vacation += applied.drawn.vacation
+        todayLogged.sick += applied.drawn.sick
+        todayLogged.bank += applied.drawn.bank
+      }
+      continue
+    }
+    if (entry.kind !== 'logged_past' || entry.startDate > isoToday || entry.endDate < isoToday) continue
+    if (countWorkDays(today, today, state.policy) === 0) continue
+    const workDays = countWorkDays(parseISO(entry.startDate), parseISO(entry.endDate), state.policy)
+    if (!workDays) continue
+    const recorded = entry.debitedFrom
+    if (recorded) {
+      todayLogged.vacation += recorded.vacation / workDays
+      todayLogged.sick += recorded.sick / workDays
+      todayLogged.bank += recorded.bank / workDays
+    } else if (entry.hourSource !== 'any') {
+      // Legacy explicit-source logs can still identify their pool precisely.
+      todayLogged[entry.hourSource] += resolveDeductHours(entry, state.policy.hoursPerWorkDay, workDays)
+    } else {
+      todayUnallocatedHours += resolveDeductHours(entry, state.policy.hoursPerWorkDay, workDays)
     }
   }
 
   return {
-    vacation: pools.vacation,
-    sick: pools.sick,
-    bank: pools.bank,
-    total: pools.vacation + pools.sick + pools.bank,
+    stored: withTotal(stored),
+    deductions: withTotal({
+      vacation: stored.vacation - pools.vacation,
+      sick: stored.sick - pools.sick,
+      bank: stored.bank - pools.bank,
+    }),
+    available: withTotal(pools),
+    todayDeductions: withTotal({
+      vacation: todayScheduled.vacation + todayLogged.vacation,
+      sick: todayScheduled.sick + todayLogged.sick,
+      bank: todayScheduled.bank + todayLogged.bank,
+    }),
+    todayScheduledDeductions: withTotal(todayScheduled),
+    todayLoggedDeductions: withTotal(todayLogged),
+    todayUnallocatedHours: r2(todayUnallocatedHours),
+    events,
+    shortfall: r2(shortfall),
   }
+}
+
+/** Available now, including scheduled time off through local today. */
+export function getEffectiveCurrentBalances(state: AppState): BalancePools {
+  return getCurrentBalanceSummary(state).available
 }
 
 /**
@@ -530,10 +677,14 @@ export function projectBalance(
   let bankBalance = state.profile.currentBankHours
   let totalCarryoverAdjustment = 0
   let totalBankPayout = 0
-  let totalShortfall = 0
+  let totalShortfall = state.plannedVacations
+    .filter((v) => v.kind !== 'logged_past')
+    .flatMap((v) => v.appliedDeductions ?? [])
+    .reduce((total, d) => total + Math.max(0, d.hours - d.drawn.vacation - d.drawn.sick - d.drawn.bank), 0)
 
   if (!isAfter(target, today)) {
-    const eff = getEffectiveCurrentBalances(state)
+    const summary = getCurrentBalanceSummary(state)
+    const eff = summary.available
     return {
       vacationBalance: r2(eff.vacation),
       sickBalance: r2(eff.sick),
@@ -541,22 +692,13 @@ export function projectBalance(
       totalAvailable: r2(eff.total),
       carryoverAdjustment: 0,
       bankPayout: 0,
-      shortfall: 0,
-      events: [],
+      shortfall: summary.shortfall,
+      events: summary.events,
     }
   }
 
   const startYear = today.getFullYear()
   const endYear = target.getFullYear()
-  const allHolidays: Date[] = []
-  for (let y = startYear; y <= endYear; y++) {
-    allHolidays.push(...computeHolidayDates(state.policy, y))
-  }
-
-  const futureVacations = state.plannedVacations.filter(
-    (v) => v.kind !== 'logged_past' && !isBefore(parseISO(v.endDate), today),
-  )
-
   const paydays = generatePaydays(lastPayday, target, state.policy.payPeriodLengthDays)
 
   type PendingEvent = {
@@ -571,6 +713,7 @@ export function projectBalance(
     process: () => number
     label?: string
     hourSource?: 'vacation' | 'sick' | 'bank' | 'any'
+    vacationId?: string
   }
   const pendingEvents: PendingEvent[] = []
 
@@ -612,42 +755,18 @@ export function projectBalance(
     })
   }
 
-  for (const vacation of futureVacations) {
-    const vStart = parseISO(vacation.startDate)
-    const vEnd = parseISO(vacation.endDate)
-    // Charge from the entry's true start (not from today): for an entry that
-    // SPANS today, its already-elapsed work days aren't in the stored balance
-    // yet (catch-up only books once fully past), so the projection must deduct
-    // them too — otherwise the projected balance is too high until the next
-    // reopen. Today itself is charged only once its work day is over.
-    const rangeEnd = isAfter(vEnd, target) ? target : vEnd
-    if (isAfter(vStart, rangeEnd)) continue
-
-    // Spread an entry total (`actualHoursUsed`) over ALL the entry's work days,
-    // not just the ones inside this projection range.
-    const entryWorkDays = countWorkDays(vStart, vEnd, state.policy)
-    const deductHours = resolveDeductHours(
-      vacation,
-      state.policy.hoursPerWorkDay,
-      entryWorkDays,
-    )
-    const days = eachDayOfInterval({ start: vStart, end: rangeEnd })
-    for (const day of days) {
-      // Today is charged immediately: an explicitly planned/logged day off is
-      // "spent" the moment it's scheduled, so the projection reflects it now
-      // rather than waiting for an end-of-day cutoff. (Matches
-      // getEffectiveCurrentBalances; catch-up books the entry once it fully
-      // ends and flips it to logged_past, so there is no double-count.)
-      if (isWorkDay(day, state.policy, allHolidays)) {
-        pendingEvents.push({
-          date: day,
-          type: 'vacation_deduction',
-          process: () => -deductHours,
-          label: vacation.note || 'Planned time off',
-          hourSource: vacation.hourSource || 'any',
-        })
-      }
-    }
+  // Start from stored pools and apply each unbooked day exactly once,
+  // including elapsed days of an active trip and local today immediately.
+  // Do not seed with effective balances as that would deduct today twice.
+  for (const { date, hours, vacation } of getScheduledDeductions(state, target)) {
+    pendingEvents.push({
+      date,
+      type: 'vacation_deduction',
+      process: () => -hours,
+      label: vacation.note || 'Planned time off',
+      hourSource: vacation.hourSource || 'any',
+      vacationId: vacation.id,
+    })
   }
 
   for (let y = startYear; y <= endYear; y++) {
@@ -813,19 +932,16 @@ export function projectBalance(
       // Compute the pool capacity available to cover this deduction. Pools are
       // floored at 0 so a previously over-drawn explicit source doesn't subsidize
       // a later draw.
-      const available =
-        source === 'vacation'
-          ? Math.max(0, vacationBalance)
-          : source === 'sick'
-            ? Math.max(0, sickBalance)
-            : source === 'bank'
-              ? Math.max(0, bankBalance)
-              : Math.max(0, vacationBalance) + Math.max(0, sickBalance) + Math.max(0, bankBalance)
+      const available = availableForSource(
+        { vacation: vacationBalance, sick: sickBalance, bank: bankBalance },
+        source,
+      )
       if (hours > available) {
         totalShortfall += hours - available
       }
 
-      const pools = { vacation: vacationBalance, sick: sickBalance, bank: bankBalance }
+      const before = { vacation: vacationBalance, sick: sickBalance, bank: bankBalance }
+      const pools = { ...before }
       applyDeduction(hours, source, pools)
       vacationBalance = pools.vacation
       sickBalance = pools.sick
@@ -837,6 +953,13 @@ export function projectBalance(
         delta: -hours,
         runningBalance: vacationBalance,
         label: pe.label,
+        vacationId: pe.vacationId,
+        requestedHours: hours,
+        drawn: {
+          vacation: before.vacation - pools.vacation,
+          sick: before.sick - pools.sick,
+          bank: before.bank - pools.bank,
+        },
       })
     } else {
       const delta = pe.process()
@@ -1060,12 +1183,10 @@ export function countWorkDays(
   policy: PolicyConfig,
 ): number {
   if (isAfter(startDate, endDate)) return 0
-  const holidays = computeHolidayDates(policy, startDate.getFullYear())
-  const holidays2 =
-    startDate.getFullYear() !== endDate.getFullYear()
-      ? computeHolidayDates(policy, endDate.getFullYear())
-      : []
-  const allHolidays = [...holidays, ...holidays2]
+  const allHolidays: Date[] = []
+  for (let year = startDate.getFullYear(); year <= endDate.getFullYear(); year++) {
+    allHolidays.push(...computeHolidayDates(policy, year))
+  }
 
   const days = eachDayOfInterval({ start: startDate, end: endDate })
   return days.filter((d) => isWorkDay(d, policy, allHolidays)).length

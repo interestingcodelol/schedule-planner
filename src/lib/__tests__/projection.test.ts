@@ -46,7 +46,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
 
 // Mock the current date for deterministic tests
 function mockToday(dateStr: string) {
-  const fakeNow = new Date(dateStr + 'T12:00:00').getTime()
+  const fakeNow = new Date(dateStr + 'T15:00:00Z').getTime()
   vi.useFakeTimers()
   vi.setSystemTime(fakeNow)
 }
@@ -522,7 +522,7 @@ describe('sick leave carryover cap', () => {
   it('forfeits hours above the carryover cap, then grants the new annual amount, capped at max', () => {
     // Project across a year boundary so the sick_grant event fires.
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2025-12-15T12:00:00'))
+    vi.setSystemTime(new Date('2025-12-15T15:00:00Z'))
 
     const state = makeState({
       profile: {
@@ -548,7 +548,7 @@ describe('sick leave carryover cap', () => {
 
   it('does NOT forfeit hours when balance is within the carryover cap', () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2025-12-15T12:00:00'))
+    vi.setSystemTime(new Date('2025-12-15T15:00:00Z'))
 
     const state = makeState({
       profile: {
@@ -1134,7 +1134,7 @@ describe('same-day time off is reflected immediately', () => {
       ],
     }
     // Run catch-up "the next day" — the entry has fully ended.
-    const result = catchUpState(withToday, new Date('2025-06-17T12:00:00'))
+    const result = catchUpState(withToday, new Date('2025-06-17T15:00:00Z'))
     expect(result.state.profile.currentVacationHours).toBe(32) // 40 - 8, no payday in window
     const entry = result.state.plannedVacations.find((v) => v.id === 't')
     expect(entry?.kind).toBe('logged_past')

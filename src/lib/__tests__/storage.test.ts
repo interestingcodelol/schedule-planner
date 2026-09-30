@@ -5,20 +5,35 @@ import { defaultPolicy } from '../defaultPolicy'
 // In-memory stand-in for the IndexedDB layer so we can drive both stores
 // independently and assert the timestamp arbitration in loadStateAsync.
 let idbValue: AppState | null = null
+let legacyIdbValue: AppState | null = null
+let idbMigrated = false
 vi.mock('../indexedDb', () => ({
   loadStateFromIdb: vi.fn(async () => idbValue),
+  loadLegacyStateFromIdb: vi.fn(async () => legacyIdbValue),
+  hasV2MigrationInIdb: vi.fn(async () => idbMigrated),
   saveStateToIdb: vi.fn(async (state: AppState) => {
     idbValue = state
+    idbMigrated = true
   }),
   clearIdbState: vi.fn(async () => {
     idbValue = null
+    legacyIdbValue = null
+    idbMigrated = true
   }),
 }))
 
 // Imported after the mock is registered.
-import { saveState, loadState, loadStateAsync } from '../storage'
+import { saveState, loadState, loadStateAsync, clearState, subscribeToCrossTabUpdates, CURRENT_VERSION } from '../storage'
 
-const STORAGE_KEY = 'schedule-planner-state-v1'
+const STORAGE_KEY = 'schedule-planner-state-v2'
+const LEGACY_KEY = 'schedule-planner-state-v1'
+
+beforeEach(() => {
+  localStorage.clear()
+  idbValue = null
+  legacyIdbValue = null
+  idbMigrated = false
+})
 
 function makeState(savedAt?: number): AppState {
   return {
@@ -37,7 +52,7 @@ function makeState(savedAt?: number): AppState {
     bankHoursLog: [],
     theme: 'dark',
     showTour: false,
-    version: 1,
+    version: CURRENT_VERSION,
     ...(savedAt !== undefined ? { savedAt } : {}),
   }
 }
@@ -89,21 +104,21 @@ describe('storage savedAt stamping', () => {
   })
 })
 
-describe('downgrade safety', () => {
+describe('schema safety', () => {
   beforeEach(() => {
     localStorage.clear()
     idbValue = null
   })
 
-  it('a snapshot from a NEWER app version is loaded, not wiped to Setup', () => {
+  it('rejects an unknown future schema without deleting the snapshot', () => {
     const s = makeState(123)
     // Simulate a future schema version written by a newer deployed build.
-    ;(s as unknown as { version: number }).version = 2
+    ;(s as unknown as { version: number }).version = 3
     s.profile.currentVacationHours = 55
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
     const loaded = loadState()
-    expect(loaded).not.toBeNull()
-    expect(loaded?.profile.currentVacationHours).toBe(55)
+    expect(loaded).toBeNull()
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).profile.currentVacationHours).toBe(55)
   })
 
   it('a structurally-broken snapshot is still rejected', () => {
@@ -172,5 +187,83 @@ describe('loadStateAsync arbitration', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(noStamp))
     const result = await loadStateAsync()
     expect(result?.profile.currentVacationHours).toBe(33)
+  })
+})
+
+
+describe('v2 migration and stale-tab isolation', () => {
+  function legacy(savedAt: number, hours: number): AppState {
+    const state = makeState(savedAt)
+    state.version = 1
+    state.profile.currentVacationHours = hours
+    return state
+  }
+
+  it('defers synchronous legacy loading until both stores can be compared', async () => {
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy(100, 10)))
+    legacyIdbValue = legacy(200, 20)
+    expect(loadState()).toBeNull()
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+    const loaded = await loadStateAsync()
+    expect(loaded?.profile.currentVacationHours).toBe(20)
+    expect(loaded?.version).toBe(2)
+    expect(loaded?.savedAt).toBe(200)
+    expect(idbValue).toEqual(loaded)
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual(loaded)
+  })
+
+  it('promotes the newest legacy local snapshot rather than stale legacy IDB', async () => {
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy(300, 30)))
+    localStorage.setItem('leave-lens-state-v1', JSON.stringify(legacy(50, 5)))
+    legacyIdbValue = legacy(200, 20)
+    expect((await loadStateAsync())?.profile.currentVacationHours).toBe(30)
+    expect(idbValue?.version).toBe(2)
+  })
+
+  it('ignores newer v1 writes after either v2 store is established', async () => {
+    putLocal(100, 10)
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy(900, 90)))
+    legacyIdbValue = legacy(1000, 100)
+    expect((await loadStateAsync())?.profile.currentVacationHours).toBe(10)
+    localStorage.removeItem(STORAGE_KEY)
+    expect((await loadStateAsync())?.profile.currentVacationHours).toBe(10)
+  })
+
+  it('never sends v2 writes to the legacy keys', () => {
+    const old = JSON.stringify(legacy(100, 10))
+    localStorage.setItem(LEGACY_KEY, old)
+    legacyIdbValue = legacy(100, 10)
+    saveState(makeState())
+    expect(localStorage.getItem(LEGACY_KEY)).toBe(old)
+    expect(legacyIdbValue.profile.currentVacationHours).toBe(10)
+    expect(idbValue?.version).toBe(2)
+  })
+
+  it('only syncs storage events from v2 tabs', () => {
+    const received = vi.fn()
+    const unsubscribe = subscribeToCrossTabUpdates(received)
+    window.dispatchEvent(new StorageEvent('storage', { key: LEGACY_KEY, newValue: JSON.stringify(legacy(100, 10)) }))
+    expect(received).not.toHaveBeenCalled()
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: JSON.stringify(makeState()) }))
+    expect(received).toHaveBeenCalledOnce()
+    unsubscribe()
+  })
+
+  it('reset prevents resurrecting legacy data written by an old tab afterward', async () => {
+    saveState(makeState())
+    clearState()
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy(9999, 99)))
+    legacyIdbValue = legacy(9999, 99)
+    expect(await loadStateAsync()).toBeNull()
+    // The independent IDB marker still protects a cleared/evicted local store.
+    localStorage.clear()
+    legacyIdbValue = legacy(9999, 99)
+    expect(await loadStateAsync()).toBeNull()
+  })
+
+  it('does not fall back to legacy when the v2 record is corrupt', async () => {
+    localStorage.setItem(STORAGE_KEY, '{broken')
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(legacy(9999, 99)))
+    expect(await loadStateAsync()).toBeNull()
   })
 })

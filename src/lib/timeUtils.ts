@@ -97,8 +97,8 @@ export function getNowInZone(timezone: string, now: Date = new Date()): ZonedNow
 
 /**
  * True once the user's local work day cutoff has passed (8 AM + hoursPerWorkDay).
- * Used to decide whether same-day time off should already be deducted from
- * displayed balances.
+ * A display-only indicator of whether an entry's work day has finished.
+ * Balance deductions use calendar dates and include today immediately.
  */
 export function isWorkDayOverInZone(
   timezone: string,
@@ -107,7 +107,7 @@ export function isWorkDayOverInZone(
 ): boolean {
   const zoned = getNowInZone(timezone, now)
   const cutoff = 8 + hoursPerWorkDay
-  return zoned.hour >= cutoff
+  return zoned.hour + zoned.minute / 60 >= cutoff
 }
 
 export const COMMON_TIMEZONES: Array<{ value: string; label: string }> = [

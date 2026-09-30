@@ -20,7 +20,7 @@ Schedule Planner solves this by projecting your balances forward day-by-day — 
 - **Balance Forecast chart** — compact visual of your total balance from today through year-end with carryover-cap overlay; hover any week to read the projected balance
 - **Interactive calendar** — click days to plan time off, each day shows projected total balance
 - **15-minute partial days** — schedule appointments down to quarter-hour precision (e.g. 10:00–11:45)
-- **Timezone-aware "today"** — same-day time off doesn't deduct from your available hours until after your local end-of-work-day, since timecards are filed at end of day
+- **Timezone-aware "today"** — scheduled time off for today reduces available hours immediately, using your profile timezone; future time off is included in forecasts
 - **Reconcile past entries** — click any past planned day to record the *actual* hours used (e.g. scheduled 8h but only took 5h), with the difference auto-credited back to the right pool
 - **Log unscheduled past absences** — click any past day to retroactively log a sick day; deducts from the matching pool and stays in sync with your timecard system
 - **Month picker** — click the month title to jump to any month/year instantly
@@ -60,12 +60,18 @@ The projection engine (`src/lib/projection.ts`) is a pure function that processe
 5. **Return** final balances, event trail, and totals
 
 Key behaviors:
-- **Tier transitions** take effect on the first payday on or after your service anniversary
+- **Tier transitions** are prorated across the pay period that contains your service anniversary
 - **Bank hours payout** zeros the bank balance at both payout window start and end dates
 - **Sick leave grant** applies the carryover cap on Jan 1, then adds the annual grant, then enforces the max-balance cap
 - **Vacation carryover** caps vacation hours on the payout date; the excess is paid out on the configured payout date
 - **"Any" pool deduction** uses bank first, then vacation, then sick
 - **Partial days** deduct the configured hours per day in 15-minute increments
+
+## Understanding your balances
+
+**Available now** includes scheduled PTO through today, immediately. Expand **Balance details** for the recorded balance, applied hours and resulting available hours per pool. **Looking ahead** shows future plans and accruals separately. Reopening the app records elapsed days once; it does not deduct them again.
+
+See [the balance model and release checklist](docs/balance-model.md) for the accounting rules and verification coverage.
 
 ## Data persistence
 

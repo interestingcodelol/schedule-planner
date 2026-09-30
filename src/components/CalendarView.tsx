@@ -1,3 +1,5 @@
+import { getNowInZone } from '../lib/timeUtils'
+import { countWorkDays } from '../lib/projection'
 import { useMemo, useState, useRef, useEffect } from 'react'
 import {
   addMonths,
@@ -8,6 +10,7 @@ import {
   endOfWeek,
   eachDayOfInterval,
   format,
+  parseISO,
   getDay,
   setMonth,
   setYear,
@@ -23,7 +26,8 @@ import { showToast } from '../lib/toastBus'
 
 export function CalendarView() {
   const { state, addVacation, removeVacation, updateVacation, addPastAbsence, removePastAbsence, adjustActualHours } = useAppState()
-  const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()))
+  const today = parseISO(getNowInZone(state.profile.timezone || 'America/New_York').isoDate)
+  const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(today))
 
   useEffect(
     () => subscribeToCalendarNav((date) => setCurrentMonth(startOfMonth(date))),
@@ -64,7 +68,7 @@ export function CalendarView() {
       )
       if (!v) continue
       const hrs =
-        v.actualHoursUsed ??
+        (v.actualHoursUsed !== undefined ? v.actualHoursUsed / Math.max(1, countWorkDays(parseISO(v.startDate), parseISO(v.endDate), state.policy)) : undefined) ??
         v.hoursPerDay ??
         state.policy.hoursPerWorkDay
       if (hrs >= state.policy.hoursPerWorkDay) fullDays++
@@ -143,9 +147,10 @@ export function CalendarView() {
     // Editing an existing MULTI-day planned entry must NOT collapse the whole
     // span to a single day. Update its editable fields in place across the
     // entire entry, preserving startDate/endDate/kind/actualHoursUsed.
-    if (popoverExisting && popoverExisting.startDate !== popoverExisting.endDate) {
+    if (popoverExisting) {
       updateVacation(popoverExisting.id, {
         hoursPerDay: config.hoursPerDay,
+        actualHoursUsed: config.hoursPerDay === popoverExisting.hoursPerDay ? popoverExisting.actualHoursUsed : undefined,
         timeOffStart: config.timeOffStart,
         timeOffEnd: config.timeOffEnd,
         hourSource: config.hourSource,
@@ -155,12 +160,7 @@ export function CalendarView() {
       return
     }
 
-    // Single-day entry (or brand-new day): remove the old entry, if any, and
-    // add the edited single-day entry.
-    if (popoverExisting) {
-      removeVacation(popoverExisting.id)
-    }
-
+    // New entries start with no recorded deductions.
     addVacation({
       id: crypto.randomUUID(),
       startDate: dateStr,
@@ -265,7 +265,7 @@ export function CalendarView() {
               <div className="grid grid-cols-3 gap-1">
                 {Array.from({ length: 12 }, (_, i) => {
                   const isActive = currentMonth.getMonth() === i
-                  const isCurrent = new Date().getMonth() === i && currentMonth.getFullYear() === new Date().getFullYear()
+                  const isCurrent = today.getMonth() === i && currentMonth.getFullYear() === today.getFullYear()
                   return (
                     <button
                       key={i}
@@ -299,7 +299,7 @@ export function CalendarView() {
             <ChevronLeft className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setCurrentMonth(startOfMonth(new Date()))}
+            onClick={() => setCurrentMonth(startOfMonth(today))}
             className="p-2.5 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-all duration-150"
             aria-label="Go to current month"
             title="Go to current month"
