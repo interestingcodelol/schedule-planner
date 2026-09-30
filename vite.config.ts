@@ -28,6 +28,7 @@ export default defineConfig({
   },
   plugins: [react(), tailwindcss(), versionPlugin()],
   test: {
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/test-setup.ts',
