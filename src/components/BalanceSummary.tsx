@@ -1,5 +1,6 @@
 import { useMemo, useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
+import { flushSync } from 'react-dom'
 import { AlertTriangle, ChevronDown, Clock, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
 import { getCurrentBalanceSummary } from '../lib/projection'
@@ -85,7 +86,11 @@ export function BalanceSummary({ children }: { children?: ReactNode }) {
           }}
         >
           <summary
-            onClick={sizeDetails}
+            onClick={() => {
+              // Commit bounds before the native details toggle paints its content.
+              // A batched update can otherwise expose the CSS fallback for one frame.
+              flushSync(sizeDetails)
+            }}
             aria-label="Balance details"
             className="list-none cursor-pointer px-3 py-2.5 h-full rounded-xl hover:bg-white/50 dark:hover:bg-gray-800/30 [&::-webkit-details-marker]:hidden"
           >

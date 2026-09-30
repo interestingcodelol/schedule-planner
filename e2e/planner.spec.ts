@@ -230,6 +230,9 @@ test('compact layout matches original density', async ({ page, browser }, info) 
   await originalContext.close()
 })
 
+test.describe('viewport opening-frame evidence', () => {
+  test.use({ trace: 'on' })
+
 test('viewport and accessible reflow audit', async ({ browser }, info) => {
   test.skip(info.project.name !== 'desktop', 'Run the viewport matrix once')
   test.setTimeout(180_000)
@@ -265,17 +268,56 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     const insightsBounds = await insights.boundingBox()
     expect(insightsBounds!.y - (cardsBounds!.y + cardsBounds!.height)).toBeLessThanOrEqual(16)
     const balanceToggle = page.getByLabel('Balance details', { exact: true })
+    await balanceToggle.evaluate((summary) => {
+      summary.addEventListener('click', () => {
+        const panel = summary.parentElement!.querySelector<HTMLElement>('[aria-label="Balance breakdown"]')!
+        const frames: { top: number; bottom: number; maxHeight: string }[] = []
+        const sample = () => {
+          const bounds = panel.getBoundingClientRect()
+          frames.push({ top: bounds.top, bottom: bounds.bottom, maxHeight: getComputedStyle(panel).maxHeight })
+          if (frames.length < 6) requestAnimationFrame(sample)
+          else panel.dataset.qaFrameBounds = JSON.stringify(frames)
+        }
+        requestAnimationFrame(sample)
+      }, { once: true })
+    })
     await balanceToggle.click()
     await expect(page.getByRole('table')).toBeVisible()
     const breakdownBounds = await page.getByRole('table').locator('..').boundingBox()
+    if (breakdownBounds && breakdownBounds.y + breakdownBounds.height > size.height + 1) {
+      const geometry = await page.getByRole('region', { name: 'Balance breakdown', exact: true }).evaluate((panel) => {
+        const rect = (element: Element) => element.getBoundingClientRect().toJSON()
+        const css = getComputedStyle(panel)
+        return { panel: rect(panel), card: rect(panel.parentElement!), viewport: { height: innerHeight, width: innerWidth, scrollY }, style: panel.getAttribute('style'), css: { maxHeight: css.maxHeight, height: css.height, boxSizing: css.boxSizing, padding: css.padding, position: css.position, top: css.top, bottom: css.bottom }, fonts: document.fonts.status }
+      })
+      await info.attach(`${size.name}-overflow-geometry`, { body: JSON.stringify({ measured: breakdownBounds, geometry }, null, 2), contentType: 'application/json' })
+    }
     expect(breakdownBounds!.x).toBeGreaterThanOrEqual(0)
     expect(breakdownBounds!.y).toBeGreaterThanOrEqual(0)
     expect(breakdownBounds!.x + breakdownBounds!.width).toBeLessThanOrEqual(size.width + 1)
     expect(breakdownBounds!.y + breakdownBounds!.height).toBeLessThanOrEqual(size.height + 1)
+    const breakdown = page.getByRole('region', { name: 'Balance breakdown', exact: true })
+    await expect(breakdown).toHaveAttribute('data-qa-frame-bounds', /./)
+    const paintedFrames = JSON.parse((await breakdown.getAttribute('data-qa-frame-bounds'))!) as { top: number; bottom: number; maxHeight: string }[]
+    await info.attach(`${size.name}-opening-frames`, { body: JSON.stringify(paintedFrames), contentType: 'application/json' })
+    for (const frame of paintedFrames) {
+      expect(frame.top, `opening frame ${JSON.stringify(frame)}`).toBeGreaterThanOrEqual(0)
+      expect(frame.bottom, `opening frame ${JSON.stringify(frame)}`).toBeLessThanOrEqual(size.height + 1)
+    }
     await page.screenshot({
       path: info.outputPath(`${size.name}-balance-details.png`),
       animations: 'disabled',
     })
+    if (size.name === 'reflow-200percent') {
+      for (const height of [614, 384]) {
+        await page.setViewportSize({ width: size.width, height })
+        await expect(async () => {
+          const bounds = (await breakdown.boundingBox())!
+          expect(bounds.y).toBeGreaterThanOrEqual(0)
+          expect(bounds.y + bounds.height).toBeLessThanOrEqual(height + 1)
+        }).toPass({ timeout: 1000 })
+      }
+    }
     await page.getByRole('region', { name: 'Balance breakdown', exact: true }).focus()
     await page.keyboard.press('End')
     await expect(page.getByText(/Sick leave limit:/)).toBeInViewport()
@@ -397,6 +439,8 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     info.outputPath('viewport-measurements.json'),
     JSON.stringify(measurements, null, 2),
   )
+})
+
 })
 
 test('original feature entry points remain visible and usable', async ({ page }, info) => {
