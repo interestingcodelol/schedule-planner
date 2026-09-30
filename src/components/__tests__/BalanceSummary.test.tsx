@@ -195,9 +195,11 @@ describe('BalanceSummary', () => {
 
     expect(screen.getByLabelText('Available now: 0 hours')).toBeInTheDocument()
     expect(screen.getByText('4 hrs used today, already included')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent(
-      '4 hrs of time off through today could not be covered',
-    )
+    expect(screen.getByRole('status')).toHaveTextContent('4h uncovered · details')
+    fireEvent.click(screen.getByText('Balance details'))
+    expect(
+      screen.getByText(/4 hrs of time off through today could not be covered/),
+    ).toBeInTheDocument()
   })
 
   it('respects hidden bank UI and the profile-local date', () => {

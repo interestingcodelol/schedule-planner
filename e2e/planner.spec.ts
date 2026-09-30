@@ -83,7 +83,7 @@ test('balance, editing, dialog, bank, planner and chat visual smoke', async ({ p
   await page.goto('/')
   await expect(page.getByLabel('Available now: 91.05 hours')).toBeVisible()
   await expect(page.getByRole('button', { name: /Bank hours: 0 hours/ })).toBeVisible()
-  await expect(page.getByText('8 hrs used today, already included')).toBeVisible()
+  await expect(page.getByText('8h used today · included')).toBeVisible()
   await capture(page, info, '01-dashboard')
   await page.locator('summary').filter({ hasText: 'Balance details' }).click()
   await expect(page.getByRole('table')).toBeVisible()
@@ -261,6 +261,24 @@ test('viewport and accessible reflow audit', async ({ browser }, info) => {
     await expect(insights).toBeVisible()
     expect(await insights.locator('xpath=ancestor::details').count()).toBe(0)
     expect(await insights.textContent()).not.toContain('4.75 bank hrs')
+    const cardsBounds = await page.getByTestId('balance-card-grid').boundingBox()
+    const insightsBounds = await insights.boundingBox()
+    expect(insightsBounds!.y - (cardsBounds!.y + cardsBounds!.height)).toBeLessThanOrEqual(16)
+    const balanceToggle = page.getByLabel('Balance details', { exact: true })
+    await balanceToggle.click()
+    await expect(page.getByRole('table')).toBeVisible()
+    const breakdownBounds = await page.getByRole('table').locator('..').boundingBox()
+    expect(breakdownBounds!.x).toBeGreaterThanOrEqual(0)
+    expect(breakdownBounds!.x + breakdownBounds!.width).toBeLessThanOrEqual(size.width + 1)
+    expect(breakdownBounds!.y + breakdownBounds!.height).toBeLessThanOrEqual(size.height + 1)
+    await page.screenshot({
+      path: info.outputPath(`${size.name}-balance-details.png`),
+      animations: 'disabled',
+    })
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('table')).not.toBeVisible()
+    await expect(balanceToggle).toBeFocused()
+
     const dimensions = await page.evaluate(() => {
       const rect = (selector: string) => {
         const r = document.querySelector(selector)!.getBoundingClientRect()
