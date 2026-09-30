@@ -2,6 +2,9 @@ import { getNowInZone } from '../lib/timeUtils'
 import { useMemo } from 'react'
 import {
   addDays,
+  addMonths,
+  addYears,
+  differenceInCalendarDays,
   differenceInDays,
   differenceInYears,
   endOfYear,
@@ -103,10 +106,19 @@ export function Insights() {
           (t) => yos >= t.minYears && (t.maxYears === null || yos < t.maxYears),
         )
         if (idx < 0 || idx >= tiers.length - 1) return null
-        const nextTier = tiers[idx + 1]
-        const yearsToNext = nextTier.minYears - yos
-        if (yearsToNext <= 0 || yearsToNext > 0.5) return null
-        const daysToNext = Math.max(1, Math.ceil(yearsToNext * 365.25))
+        const nextTier = tiers
+          .slice(idx + 1)
+          .find((t) => t.hoursPerPayPeriod > tier.hoursPerPayPeriod)
+        if (!nextTier) return null
+        // Match projection's completed-service-year convention. addYears clamps
+        // Feb 29 to Feb 28, but differenceInYears advances on Mar 1 in a
+        // non-leap year, so move to that actual transition date when needed.
+        let transitionDate = addYears(hireDate, Math.ceil(nextTier.minYears))
+        if (differenceInYears(transitionDate, hireDate) < nextTier.minYears) {
+          transitionDate = addDays(transitionDate, 1)
+        }
+        const daysToNext = differenceInCalendarDays(transitionDate, today)
+        if (daysToNext <= 0 || transitionDate > addMonths(today, 6)) return null
         return {
           text: `Accrual rate increases to **${fmt(nextTier.hoursPerPayPeriod)} hrs/period** in ${daysToNext} day${daysToNext !== 1 ? 's' : ''} (work anniversary)`,
           type: 'positive',
@@ -234,8 +246,8 @@ export function Insights() {
             const s = parseISO(v.startDate)
             const e = parseISO(v.endDate)
             const wd = countWorkDays(s, e, state.policy)
-            const perDay = v.actualHoursUsed ?? v.hoursPerDay ?? hoursPerDay
-            return sum + wd * perDay
+            // Actual hours are the total for the entry, not a daily rate.
+            return sum + (v.actualHoursUsed ?? wd * (v.hoursPerDay ?? hoursPerDay))
           }, 0)
         if (annualAccrual < 1) return null
         const utilPct = Math.round((usedAndScheduledHrs / annualAccrual) * 100)

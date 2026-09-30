@@ -5,7 +5,7 @@ The compact preview keeps the original feature entry points. No release is autho
 
 | Original feature | Current location and behavior | Evidence |
 | --- | --- | --- |
-| Visible insights bar | Restored directly below the balance cards, before calendar/planner; never collapsed behind Planning notes. All original insight categories and four-message priority selection retained. Bank amounts use available balance; profile timezone determines today. Desktop message row is keyboard focusable; smaller screens wrap messages. | `Insights.tsx`, `Dashboard.tsx`; eight-viewport visibility/overflow assertions |
+| Visible insights bar | Restored directly below the balance cards, before calendar/planner; never collapsed behind Planning notes. All original insight categories and four-message priority selection retained. Bank amounts use available balance; profile timezone determines today. Actual trip totals count once, and the upcoming rate-increase reminder uses the real service anniversary within six calendar months (including leap-day hires). Desktop message row is keyboard focusable; smaller screens wrap messages. | `Insights.tsx`, `Dashboard.tsx`; eight-viewport visibility/overflow assertions |
 | Total, Vacation, Sick, Bank balances | Same compact card grid, with immediate same-day deductions. Balance details adds a per-pool accounting explanation. | `BalanceSummary.tsx`; balance and lifecycle tests |
 | Accrual rate and next payday | Annual and per-period amounts, original tier label, next date and period accrual remain visible. | `StatusCards.tsx` |
 | Year-end forecast and payout warning | Total and Vacation/Sick/Bank breakdown, or payout warning, visible in the original card position. Forecast label distinguishes future amounts. | `StatusCards.tsx` |
