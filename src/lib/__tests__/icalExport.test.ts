@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { addDays, parseISO } from 'date-fns'
 import { buildIcalString, DEFAULT_ICAL_OPTIONS } from '../icalExport'
 import { defaultPolicy } from '../defaultPolicy'
+import { accrualForPeriod, projectBalance } from '../projection'
 import type { AppState, PlannedVacation } from '../types'
 
 function makeState(): AppState {
@@ -113,6 +115,64 @@ const onlyTimeOff = {
 function unfold(ics: string): string {
   return ics.replace(/\r\n /g, '')
 }
+
+describe('iCal payday accrual amounts', () => {
+  it.each([
+    ['mid-period anniversary', '2021-10-05', '2026-09-25', 14, '2026-10-09', '3.52'],
+    ['anniversary on payday', '2021-10-09', '2026-09-25', 14, '2026-10-09', '3.08'],
+    ['anniversary at period start', '2021-09-25', '2026-09-25', 14, '2026-10-09', '4.62'],
+    ['same-rate anniversary', '2023-10-05', '2026-09-25', 14, '2026-10-09', '3.08'],
+    ['ten-year tier change', '2016-10-05', '2026-09-25', 14, '2026-10-09', '5.05'],
+    ['weekly period', '2021-10-05', '2026-10-02', 7, '2026-10-09', '3.96'],
+    ['spring DST period', '2021-03-08', '2026-02-27', 14, '2026-03-13', '3.63'],
+    ['fall DST period', '2021-11-01', '2026-10-23', 14, '2026-11-06', '3.63'],
+    ['year-crossing period', '2022-01-01', '2026-12-25', 14, '2027-01-08', '3.85'],
+  ])('matches the established projection for %s', (_, hireDate, lastPayday, periodDays, payday, amount) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${lastPayday}T15:00:00Z`))
+    const state = makeState()
+    state.profile = { ...state.profile, hireDate, lastPaydayDate: lastPayday, timezone: 'America/New_York' }
+    state.policy = { ...state.policy, payPeriodLengthDays: periodDays }
+    state.plannedVacations = []
+    const before = structuredClone(state)
+    const projection = projectBalance(state, parseISO(payday))
+    const accrual = projection.events.find((event) => event.type === 'accrual' && event.date === payday)!
+    expect(accrual.delta.toFixed(2)).toBe(amount)
+    const ics = unfold(buildIcalString(state, { ...onlyTimeOff, includePaydays: true }))
+    const event = ics.split('BEGIN:VEVENT').find((entry) => entry.includes(`UID:payday-${payday.replaceAll('-', '')}@`))!
+    expect(event).toContain(`SUMMARY:💰 Payday (+${amount} hrs vacation)`)
+    expect(event).toContain(`Vacation accrual: +${amount} hrs.`)
+    expect(event).toContain('Tier on payday:')
+    expect(event).toContain('TRANSP:TRANSPARENT')
+    expect(state).toEqual(before)
+    expect(projectBalance(state, parseISO(payday))).toEqual(projection)
+  })
+
+  it.each(['America/Los_Angeles', 'UTC', 'Pacific/Auckland'])(
+    'uses the whole period for a payday on profile-local today in %s',
+    (timezone) => {
+      vi.useFakeTimers()
+      // It is Oct 9 in LA/UTC, but Oct 10 in Auckland. Host TZ must not affect inclusion.
+      vi.setSystemTime(new Date('2026-10-09T12:00:00Z'))
+      const state = makeState()
+      state.profile = { ...state.profile, hireDate: '2021-10-05', lastPaydayDate: '2026-10-09', timezone }
+      state.plannedVacations = []
+      const ics = unfold(buildIcalString(state, { ...onlyTimeOff, includePaydays: true }))
+      const events = ics.split('BEGIN:VEVENT')
+      const todayEvent = events.find((entry) => entry.includes('UID:payday-20261009@'))
+      if (timezone === 'Pacific/Auckland') {
+        expect(todayEvent).toBeUndefined()
+      } else {
+        expect(todayEvent).toContain('SUMMARY:💰 Payday (+3.52 hrs vacation)')
+        expect(todayEvent).toContain('Vacation accrual: +3.52 hrs.')
+      }
+      const ordinaryEvent = events.find((entry) => entry.includes('UID:payday-20261023@'))!
+      expect(ordinaryEvent).toContain('SUMMARY:💰 Payday (+4.62 hrs vacation)')
+      const payday = parseISO('2026-10-23')
+      expect(accrualForPeriod(state.policy, parseISO(state.profile.hireDate), addDays(payday, -14), payday)).toBe(4.615)
+    },
+  )
+})
 
 function makeTimedState(
   entry: Partial<PlannedVacation> = {},

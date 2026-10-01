@@ -2,7 +2,7 @@ import { addDays, addYears, differenceInYears, endOfYear, format, parseISO } fro
 import type { AppState } from './types'
 import { computeHolidayDates, getHolidayName } from './holidays'
 import { getNowInZone } from './timeUtils'
-import { computeAccrualTier, firstPaydayOnOrAfter } from './projection'
+import { accrualForPeriod, computeAccrualTier, firstPaydayOnOrAfter } from './projection'
 
 export type IcalExportOptions = {
   /** Scheduled future time off + logged past absences (toggled separately
@@ -240,10 +240,13 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
       if (payday >= today) {
         const yos = differenceInYears(payday, hireDate)
         const tier = computeAccrualTier(state.policy, yos)
+        // Match forecasting and catch-up, including anniversary-crossing periods.
+        const periodStart = addDays(payday, -state.policy.payPeriodLengthDays)
+        const accrued = accrualForPeriod(state.policy, hireDate, periodStart, payday)
         events.push({
           uid: `payday-${format(payday, 'yyyyMMdd')}@${UID_DOMAIN}`,
-          summary: `💰 Payday (+${fmtHrs(tier.hoursPerPayPeriod)} hrs vacation)`,
-          description: `Vacation accrual at ${tier.label}: +${fmtHrs(tier.hoursPerPayPeriod)} hrs.`,
+          summary: `💰 Payday (+${fmtHrs(accrued)} hrs vacation)`,
+          description: `Vacation accrual: +${fmtHrs(accrued)} hrs. Tier on payday: ${tier.label}.`,
           date: payday,
           categories: ['Payday'],
         })
