@@ -1,6 +1,6 @@
 import { getNowInZone } from '../lib/timeUtils'
 import { useMemo, useState } from 'react'
-import { addDays, endOfYear, format, parseISO, startOfDay } from 'date-fns'
+import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfYear, format, parseISO, startOfDay } from 'date-fns'
 import { TrendingUp, AlertTriangle, HeartPulse } from 'lucide-react'
 import { useAppState } from '../context'
 import {
@@ -29,6 +29,25 @@ export function BalanceForecast() {
   const todayIso = getNowInZone(state.profile.timezone || 'America/New_York').isoDate
   const today = useMemo(() => startOfDay(parseISO(todayIso)), [todayIso])
   const yearEnd = useMemo(() => endOfYear(today), [today])
+  const carryover = useMemo(() => getCarryoverOutlook(state), [state])
+  const sick = useMemo(() => getSickOutlook(state), [state])
+
+  // Chart horizon. Normally today → Dec 31, but late in the year that window
+  // shrinks to a few weeks and hides the January rollover (sick reset, new
+  // accruals) and the February carry-over payout — exactly what people want
+  // to see in November/December. With under 60 days left, look ~3 months
+  // ahead instead, stretched to include the next carry-over payout.
+  const rangeEnd = useMemo(() => {
+    if (differenceInCalendarDays(yearEnd, today) >= 60) return yearEnd
+    let end = endOfMonth(addMonths(today, 2))
+    const payout = carryover.payoutDate
+    if (payout && payout > end && differenceInCalendarDays(payout, today) <= 120) end = payout
+    return startOfDay(end)
+  }, [today, yearEnd, carryover.payoutDate])
+  const yearEndVacation = useMemo(
+    () => projectBalance(state, yearEnd).vacationBalance,
+    [state, yearEnd],
+  )
 
   // Tier-boundary anniversaries inside the range — inserted as explicit sample
   // x's so the vacation cap line steps crisply on the anniversary rather than
@@ -39,10 +58,10 @@ export function BalanceForecast() {
     for (const tier of state.policy.accrualTiers) {
       if (tier.minYears <= 0) continue
       const anniv = new Date(hire.getFullYear() + tier.minYears, hire.getMonth(), hire.getDate())
-      if (anniv > today && anniv <= yearEnd) out.push(anniv)
+      if (anniv > today && anniv <= rangeEnd) out.push(anniv)
     }
     return out
-  }, [state.profile.hireDate, state.policy.accrualTiers, today, yearEnd])
+  }, [state.profile.hireDate, state.policy.accrualTiers, today, rangeEnd])
 
   // Sample the active series weekly (plus today, year-end, and any anniversaries
   // for vacation). Only the selected mode is projected, so toggling is cheap.
@@ -54,11 +73,14 @@ export function BalanceForecast() {
 
     const dates: Date[] = [today]
     let cursor = addDays(today, 7)
-    while (cursor <= yearEnd) {
+    while (cursor <= rangeEnd) {
       dates.push(cursor)
       cursor = addDays(cursor, 7)
     }
-    dates.push(yearEnd)
+    dates.push(rangeEnd)
+    // Keep the Dec 31 point when the horizon runs past it, so the line shows
+    // the exact year-end balance before the Jan 1 changes.
+    if (rangeEnd > yearEnd) dates.push(yearEnd)
     if (mode === 'vacation') dates.push(...anniversaries)
 
     // Sort + dedup by ISO day.
@@ -72,7 +94,7 @@ export function BalanceForecast() {
         return true
       })
     return unique.map((d) => ({ date: d, value: pick(d) }))
-  }, [state, mode, today, yearEnd, anniversaries])
+  }, [state, mode, today, yearEnd, rangeEnd, anniversaries])
 
   const valueAt = (d: Date) =>
     mode === 'vacation'
@@ -90,7 +112,7 @@ export function BalanceForecast() {
     if (mode === 'vacation') {
       // Tier-aware cap → stepped line (null when unlimited omits it entirely).
       const sample = carryoverCapForDate(state, today)
-      if (sample === null && carryoverCapForDate(state, yearEnd) === null) return []
+      if (sample === null && carryoverCapForDate(state, rangeEnd) === null) return []
       return [{ key: 'vac-cap', valueAt: (d) => carryoverCapForDate(state, d) }]
     }
     const lines: ThresholdLine[] = [
@@ -100,14 +122,16 @@ export function BalanceForecast() {
       lines.push({ key: 'sick-carry', valueAt: () => state.policy.sickLeaveCarryoverCap ?? null })
     }
     return lines
-  }, [mode, state, today, yearEnd])
+  }, [mode, state, today, rangeEnd])
 
   const startVal = samples[0].value
   const endVal = samples[samples.length - 1].value
   const delta = endVal - startVal
 
-  const carryover = useMemo(() => getCarryoverOutlook(state), [state])
-  const sick = useMemo(() => getSickOutlook(state), [state])
+  // In January the next payout settles the year that just ended, so a
+  // "Year-end" figure (next Dec 31) would not belong to it.
+  const payoutSettlesComingYearEnd =
+    carryover.payoutDate !== null && carryover.payoutDate.getFullYear() > today.getFullYear()
 
   // When the vacation cap rises before the next payout (an anniversary lands in
   // between), surface the month so the higher cap on the chart makes sense.
@@ -161,7 +185,7 @@ export function BalanceForecast() {
 
         <div className="ml-auto flex items-baseline gap-2 text-sm tabular-nums">
           <span className="font-bold text-gray-700 dark:text-gray-100">{fmtH(startVal)}</span>
-          <span className="text-gray-400 dark:text-gray-500 text-xs">→ Dec 31</span>
+          <span className="text-gray-400 dark:text-gray-500 text-xs">→ {format(rangeEnd, 'MMM d')}</span>
           <span className="font-bold text-gray-700 dark:text-gray-100">{fmtH(endVal)}</span>
           <span
             className={`text-sm font-bold inline-flex items-center gap-0.5 ${
@@ -186,15 +210,15 @@ export function BalanceForecast() {
         thresholds={thresholds}
         valueAt={valueAt}
         today={today}
-        rangeEnd={yearEnd}
+        rangeEnd={rangeEnd}
         accentRgb={accent}
         formatValue={fmtH}
         tooltipSecondary={tooltipSecondary}
         fill
         ariaLabel={
           mode === 'vacation'
-            ? 'Projected vacation balance from today through end of year'
-            : 'Projected sick balance from today through end of year'
+            ? `Projected vacation balance from today through ${format(rangeEnd, 'MMMM d, yyyy')}`
+            : `Projected sick balance from today through ${format(rangeEnd, 'MMMM d, yyyy')}`
         }
       />
 
@@ -206,10 +230,12 @@ export function BalanceForecast() {
               {/* Reconciling breakdown: year-end balance → cap → amount paid out.
                   Only the over-the-cap amount is paid; new-year accruals carry on. */}
               <span>
-                Year-end{' '}
-                <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
-                  {fmtH(endVal)}
-                </span>
+                {payoutSettlesComingYearEnd ? 'Year-end' : `Carried over from ${today.getFullYear() - 1}`}{' '}
+                {payoutSettlesComingYearEnd && (
+                  <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
+                    {fmtH(yearEndVacation)}
+                  </span>
+                )}
                 {' → cap '}
                 <span className="text-gray-700 dark:text-gray-200 font-semibold tabular-nums">
                   {fmtHRound(carryover.cap)}
@@ -247,7 +273,7 @@ export function BalanceForecast() {
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtH(sick.projectedForfeit)}
                 </span>{' '}
-                forfeited on Jan 1 — over the{' '}
+                forfeited on {format(sick.forfeitDate, 'MMM d, yyyy')} — over the{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtHRound(sick.carryoverCap ?? 0)}
                 </span>{' '}

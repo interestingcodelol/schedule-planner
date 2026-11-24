@@ -142,7 +142,12 @@ export function ForecastChart({
       if (shouldShow) {
         const offset = differenceInCalendarDays(cursor, today)
         const frac = Math.max(0, Math.min(1, offset / totalDaysInRange))
-        ticks.push({ x: PAD_L + frac * innerW, label: format(cursor, 'MMM') })
+        // Mark the year change so a Nov–Feb horizon reads unambiguously.
+        const label =
+          cursor.getMonth() === 0 && cursor.getFullYear() !== today.getFullYear()
+            ? format(cursor, "MMM ''yy")
+            : format(cursor, 'MMM')
+        ticks.push({ x: PAD_L + frac * innerW, label })
       }
       cursor = addMonths(cursor, 1)
       idx++
@@ -268,7 +273,7 @@ export function ForecastChart({
                 {formatValue(hoverValue)}
               </span>
               <span className="text-gray-400 text-[10px]">
-                {format(hoverDate, 'MMM d')}
+                {format(hoverDate, hoverDate.getFullYear() !== today.getFullYear() ? 'MMM d, yyyy' : 'MMM d')}
               </span>
             </div>
             {secondary && (

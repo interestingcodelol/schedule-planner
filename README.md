@@ -28,7 +28,7 @@ Schedule Planner solves this by projecting your balances forward day-by-day — 
 - **Upcoming events dropdown** — top-bar pill showing the next planned time off plus a click-to-expand list of all future entries, holidays, and paydays
 - **Accrual tier tracking** — handles tier transitions based on years of service
 - **Carryover cap warnings** — alerts when vacation might exceed cap at year-end, plus an at-risk band on the forecast chart
-- **Holiday awareness** — 12 US federal holidays computed by formula, correct for any year
+- **Holiday awareness** — 12 US federal holidays computed by formula, correct for any year; weekend holidays that would land on another holiday (e.g. Christmas Eve/Day in 2027–2028) move to the next free weekday instead of being lost
 - **Bank hours** — track extra hours worked, with history view and undo on delete
 - **Sick leave** — annual grant with carryover cap and max-balance cap, projected across years
 - **Bank hours payout** — dual payout dates (e.g. Dec and Feb), balance zeros and resets
@@ -36,7 +36,7 @@ Schedule Planner solves this by projecting your balances forward day-by-day — 
 - **Fully customizable** — accrual tiers, rates, holidays, pay periods, work schedule, timezone
 - **Responsive layout** — reflows cleanly from mobile (360 px) up to ultra-wide
 - **Dark mode** — refined dark-first aesthetic with blue/teal GIS-inspired theme
-- **Import/Export** — backup and restore your data as JSON
+- **Import/Export** — backup and restore your data as JSON, including straight from the welcome screen after browser data is cleared
 - **Guided tour** — spotlight walkthrough of all features
 - **Auto-update** — gentle banner when a new version is deployed, no data loss
 - **Privacy-first** — all data stays in your browser (localStorage + IndexedDB, with JSON export for real backups), nothing is sent anywhere

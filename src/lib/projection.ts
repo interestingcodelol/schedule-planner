@@ -624,6 +624,44 @@ export function getSickOutlook(state: AppState): SickOutlook {
   }
 }
 
+export type BankPayoutOutlook = {
+  /** Next bank payout payday strictly after today (first payday on/after a
+   *  configured payout date), or null when none falls within two years. */
+  payoutDate: Date | null
+  /** Hours projected to be paid out on that payday (0 if the bank is empty). */
+  projectedPayout: number
+}
+
+/**
+ * When bank hours are next paid out and how much, using the same payday
+ * resolution as projection/catch-up (first payday on/after each configured
+ * payout date). Reads the projection's own bank_payout event so the amount
+ * includes hours banked between now and then.
+ */
+export function getNextBankPayout(state: AppState): BankPayoutOutlook {
+  const tz = state.profile.timezone || DEFAULT_TZ
+  const today = parseISO(getNowInZone(tz).isoDate)
+  const lastPayday = parseISO(state.profile.lastPaydayDate)
+  const candidates: Date[] = []
+  for (let y = today.getFullYear(); y <= today.getFullYear() + 2; y++) {
+    for (const anchor of [state.policy.bankHoursPayoutStart, state.policy.bankHoursPayoutEnd]) {
+      const payday = firstPaydayOnOrAfter(
+        lastPayday,
+        state.policy.payPeriodLengthDays,
+        isoMidnight(y, anchor.month, anchor.day),
+      )
+      if (isAfter(payday, today)) candidates.push(payday)
+    }
+  }
+  const payoutDate = candidates.sort((a, b) => a.getTime() - b.getTime())[0] ?? null
+  if (!payoutDate) return { payoutDate: null, projectedPayout: 0 }
+  const iso = format(payoutDate, 'yyyy-MM-dd')
+  const event = projectBalance(state, payoutDate).events.find(
+    (e) => e.type === 'bank_payout' && e.date === iso,
+  )
+  return { payoutDate, projectedPayout: event ? r2(Math.abs(event.delta)) : 0 }
+}
+
 /**
  * Check if a date falls within the bank hours payout window.
  * The payout window can span across year boundary (e.g., Dec 15 -> Feb 15).

@@ -16,6 +16,20 @@ export type ChangelogEntry = {
  */
 export const changelog: ChangelogEntry[] = [
   {
+    id: '2026-11-24',
+    date: 'November 2026',
+    title: 'Ready for the new year',
+    changes: [
+      { type: 'new', text: 'Restore a backup right from the welcome screen. If your browser data was cleared, choose “Restore from a backup” and pick your backup file (or paste its text). No need to set up or load the demo first.' },
+      { type: 'fixed', text: 'Christmas Eve and Christmas Day are both kept when they fall on a weekend. In 2027 Christmas is observed Thu Dec 23 (Christmas Eve stays Fri Dec 24), and in 2028 Christmas Eve moves to Tue Dec 26. Previously one of them was dropped, and planning that day off charged your PTO.' },
+      { type: 'fixed', text: 'The day after Thanksgiving now always falls the day after Thanksgiving, including years when November starts on a Friday.' },
+      { type: 'improved', text: 'In November and December the forecast looks past New Year’s, through the January sick-leave reset and the February carry-over payout.' },
+      { type: 'fixed', text: 'In January, the carry-over payout for the year that just ended is no longer shown next to the following year’s year-end balance.' },
+      { type: 'new', text: 'In November and December, the insights bar previews the new year: how many vacation hours carry over and where your sick leave lands after the Jan 1 reset.' },
+      { type: 'improved', text: 'The bank-hours insight now gives the actual payout date and amount. In Settings, the two bank payout dates are labelled clearly: bank hours are paid out on both dates, so set them the same if you get one payout a year.' },
+    ],
+  },
+  {
     id: '2026-09-30-calendar',
     date: 'September 2026',
     title: 'More accurate calendar exports',
