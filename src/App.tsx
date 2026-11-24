@@ -5,6 +5,7 @@ import {
   saveState,
   clearState,
   subscribeToCrossTabUpdates,
+  describeRestoredBackup,
 } from './lib/storage'
 import { SetupWizard } from './components/SetupWizard'
 import { Dashboard } from './components/Dashboard'
@@ -608,6 +609,18 @@ export default function App() {
     setAppData({ state: null, isDemo: false })
   }, [])
 
+  // Restore straight from the welcome screen (e.g. after clearing browser
+  // data). Uses the same migrate → catch-up path as Settings → Data, but needs
+  // no "replace your data?" confirmation because there is nothing to replace.
+  const handleWelcomeRestore = useCallback((incoming: AppState) => {
+    const reconciled = reconcile(migrateState(incoming))
+    setAppData({ state: reconciled, isDemo: reconciled.profile.displayName === 'Demo User' })
+    saveState(reconciled)
+    setTimeout(() => {
+      showToast({ message: describeRestoredBackup(reconciled), duration: 6000 })
+    }, 0)
+  }, [])
+
   const handleSetupComplete = useCallback(
     (newState: AppState, demo: boolean) => {
       setAppData({ state: newState, isDemo: demo })
@@ -633,7 +646,7 @@ export default function App() {
   }
 
   if (!state) {
-    return <SetupWizard onComplete={handleSetupComplete} />
+    return <SetupWizard onComplete={handleSetupComplete} onRestore={handleWelcomeRestore} />
   }
 
   return (

@@ -17,6 +17,7 @@ import { PolicyEditor } from './PolicyEditor'
 import {
   exportState,
   parseImportedBackup,
+  describeRestoredBackup,
   buildBackupJson,
   backupFilename,
   markExported,
@@ -136,22 +137,7 @@ export function SettingsModal({ onClose }: Props) {
     }
     importState(result.state)
     setImportError('')
-
-    const vacationCount = result.state.plannedVacations.length
-    const syncIso =
-      result.state.profile.lastSyncDate ?? result.state.profile.lastPaydayDate
-    let asOf = ''
-    try {
-      asOf = ` · balances as of ${format(parseISO(syncIso), 'MMM d, yyyy')}`
-    } catch {
-      asOf = ''
-    }
-    showToast({
-      message: `Restored — ${vacationCount} planned vacation${
-        vacationCount === 1 ? '' : 's'
-      }${asOf}`,
-      duration: 6000,
-    })
+    showToast({ message: describeRestoredBackup(result.state), duration: 6000 })
     return true
   }
 

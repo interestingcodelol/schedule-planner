@@ -29,6 +29,14 @@ function computeRawHolidayDate(rule: HolidayRule, year: number): Date {
       return isoMidnight(year, rule.month, rule.day)
 
     case 'nth_weekday': {
+      // "Day after Thanksgiving" has historically been stored as the 4th
+      // Friday of November, which is wrong whenever November starts on a
+      // Friday (2024, 2030, 2035…): the 4th Friday then falls BEFORE
+      // Thanksgiving. Interpret that legacy shape as the Friday after the 4th
+      // Thursday so saved policies stay correct without rewriting user data.
+      if (isLegacyDayAfterThanksgiving(rule)) {
+        return addDays(computeRawHolidayDate({ ...rule, weekday: 4, name: 'Thanksgiving Day' }, year), 1)
+      }
       // Find the nth occurrence of a weekday in a month
       const firstOfMonth = isoMidnight(year, rule.month, 1)
       const firstDow = firstOfMonth.getDay()
@@ -53,6 +61,17 @@ function computeRawHolidayDate(rule: HolidayRule, year: number): Date {
   }
 }
 
+/** The legacy "Day after Thanksgiving" rule shape: 4th Friday of November. */
+function isLegacyDayAfterThanksgiving(rule: HolidayRule): boolean {
+  return (
+    rule.type === 'nth_weekday' &&
+    rule.month === 11 &&
+    rule.weekday === 5 &&
+    rule.n === 4 &&
+    /thanksgiving/i.test(rule.name)
+  )
+}
+
 /**
  * Apply weekend observance policy to a holiday date.
  * "nearest_weekday": if Saturday, observe on Friday; if Sunday, observe on Monday.
@@ -68,46 +87,91 @@ function applyWeekendObservance(
   return date
 }
 
+type ObservedHoliday = { date: Date; name: string }
+
+const civilKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+
 /**
- * Expand all holiday rules into concrete dates for a given year.
+ * Observed holidays for the rules of `year - 1`, `year` and `year + 1`, with
+ * weekend observance applied and collisions resolved.
  *
- * Handles three edge cases that broke the naive map-and-observe path:
+ * A collision happens when a weekend-shifted holiday lands on another
+ * holiday — e.g. in 2027 Christmas Day (Sat) shifts onto Christmas Eve (Fri),
+ * and in 2028 Christmas Eve (Sun) shifts onto Christmas Day (Mon). Dropping
+ * one of them would silently take a paid holiday away (and charge PTO for a
+ * day the employee is actually off), so the shifted holiday keeps moving in
+ * its shift direction to the next free weekday instead: Christmas 2027 is
+ * observed Thu Dec 23, Christmas Eve 2028 Tue Dec 26. Holidays on their real
+ * date claim their day first. Two rules on the same real date (a duplicate
+ * rule) are still deduped.
+ *
+ * Neighbouring rule-years are included so a shift across Jan 1 (New Year's
+ * Day on a Saturday is observed Dec 31 of the previous year) lands on the
+ * right calendar year.
+ */
+function observedHolidaysAround(policy: PolicyConfig, year: number): ObservedHoliday[] {
+  type Candidate = { raw: Date; observed: Date; name: string; order: number }
+  const candidates: Candidate[] = []
+  let order = 0
+  for (const ruleYear of [year - 1, year, year + 1]) {
+    for (const rule of policy.holidays) {
+      if (rule.startYear !== undefined && rule.startYear > ruleYear) continue
+      const raw = computeRawHolidayDate(rule, ruleYear)
+      const observed = applyWeekendObservance(raw, rule.weekendObservance)
+      candidates.push({ raw, observed, name: rule.name, order: order++ })
+    }
+  }
+  const shifted = (c: Candidate) => civilKey(c.raw) !== civilKey(c.observed)
+  // Real-date holidays first; then shifted ones in date order.
+  candidates.sort((a, b) => {
+    const sa = shifted(a) ? 1 : 0
+    const sb = shifted(b) ? 1 : 0
+    if (sa !== sb) return sa - sb
+    return a.observed.getTime() - b.observed.getTime() || a.order - b.order
+  })
+  const taken = new Set<string>()
+  const seenRules = new Set<string>()
+  const out: ObservedHoliday[] = []
+  for (const c of candidates) {
+    // A duplicated rule (same real and observed date) is one holiday, not two.
+    const ruleKey = `${civilKey(c.raw)}>${civilKey(c.observed)}`
+    if (seenRules.has(ruleKey)) continue
+    seenRules.add(ruleKey)
+    let date = c.observed
+    if (taken.has(civilKey(date))) {
+      if (!shifted(c)) continue // duplicate rule on the same real date
+      const step = c.observed.getTime() < c.raw.getTime() ? -1 : 1
+      let guard = 0
+      do {
+        date = addDays(date, step)
+        guard++
+      } while (guard < 14 && (date.getDay() === 0 || date.getDay() === 6 || taken.has(civilKey(date))))
+      if (guard >= 14) continue
+    }
+    taken.add(civilKey(date))
+    out.push({ date, name: c.name })
+  }
+  return out.sort((a, b) => a.date.getTime() - b.date.getTime())
+}
+
+/** Observed holidays (date + name) that fall on the given calendar year. */
+export function getObservedHolidays(policy: PolicyConfig, year: number): ObservedHoliday[] {
+  return observedHolidaysAround(policy, year).filter((h) => h.date.getFullYear() === year)
+}
+
+/**
+ * Expand all holiday rules into concrete observed dates for a given year.
+ *
+ * Handles the edge cases that broke the naive map-and-observe path:
  *   1. Holidays that didn't exist yet (rule.startYear > year) are skipped.
- *   2. Two rules whose observed dates collide (e.g., Christmas Eve and
- *      Christmas Day both shifting onto the same Friday when Dec 25 is a
- *      Saturday) are deduped — calendar code only needs one entry per date.
+ *   2. Two holidays whose observed dates collide (e.g., Christmas Eve and
+ *      Christmas Day when Dec 25 is a Saturday) both stay — the shifted one
+ *      moves to the next free weekday (see observedHolidaysAround).
  *   3. New Year's Day landing on a Saturday is observed on Dec 31 of the
- *      *previous* year. We include both the requested year's observed dates
- *      AND the requested year's Dec-31-spillover from year+1's New Year, so
- *      the boundary day shows as a holiday from whichever year's loop runs.
+ *      *previous* year, so it appears in that year's list (and not in its own).
  */
 export function computeHolidayDates(policy: PolicyConfig, year: number): Date[] {
-  const seen = new Set<string>()
-  const out: Date[] = []
-  // Holiday dates are local-midnight civil dates; read their fields with the
-  // LOCAL getters so the year filter and dedup key match the construction.
-  const push = (d: Date) => {
-    if (d.getFullYear() !== year) return
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push(d)
-  }
-  for (const rule of policy.holidays) {
-    if (rule.startYear !== undefined && rule.startYear > year) continue
-    const raw = computeRawHolidayDate(rule, year)
-    push(applyWeekendObservance(raw, rule.weekendObservance))
-  }
-  // Pull next year's Jan 1 observance back into this year if it landed on
-  // Dec 31 (Saturday → Friday shift).
-  for (const rule of policy.holidays) {
-    if (rule.type !== 'fixed' || rule.month !== 1 || rule.day !== 1) continue
-    if (rule.startYear !== undefined && rule.startYear > year + 1) continue
-    const nextRaw = computeRawHolidayDate(rule, year + 1)
-    const nextObserved = applyWeekendObservance(nextRaw, rule.weekendObservance)
-    push(nextObserved)
-  }
-  return out
+  return getObservedHolidays(policy, year).map((h) => h.date)
 }
 
 /**
@@ -117,22 +181,8 @@ export function getHolidayName(
   policy: PolicyConfig,
   date: Date,
 ): string | undefined {
-  // Check the year the date is in, plus next year (for a Dec 31 New Year's
-  // observance which belongs to year+1's rule but lands on year's calendar).
-  // Compare on local civil-date fields since holiday dates are local-midnight.
-  const sameCivilDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  for (const checkYear of [date.getFullYear(), date.getFullYear() + 1]) {
-    for (const rule of policy.holidays) {
-      if (rule.startYear !== undefined && rule.startYear > checkYear) continue
-      const raw = computeRawHolidayDate(rule, checkYear)
-      const observed = applyWeekendObservance(raw, rule.weekendObservance)
-      if (sameCivilDay(observed, date)) return rule.name
-    }
-  }
-  return undefined
+  const key = civilKey(date)
+  return getObservedHolidays(policy, date.getFullYear()).find((h) => civilKey(h.date) === key)?.name
 }
 
 /**
@@ -150,6 +200,7 @@ export function formatHolidayRule(rule: HolidayRule): string {
     case 'fixed':
       return `${rule.name} (${format(new Date(2000, rule.month - 1, rule.day), 'MMM d')})`
     case 'nth_weekday': {
+      if (isLegacyDayAfterThanksgiving(rule)) return `${rule.name} (Fri after 4th Thu in Nov)`
       const ordinals = ['', '1st', '2nd', '3rd', '4th', '5th']
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
       const months = [

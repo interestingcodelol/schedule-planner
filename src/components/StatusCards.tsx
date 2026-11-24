@@ -64,8 +64,19 @@ export function StatusCards() {
               className="text-amber-700 dark:text-amber-400"
               title={`Vacation cap: ${fmt(carryover.cap!)} hrs; ${fmt(carryover.projectedPayout)} hrs may be paid out${carryover.payoutDate ? ` on ${format(carryover.payoutDate, 'MMM d')}` : ''} if unused`}
             >
-              Vac {fmt(yearEnd.vacationBalance)} · cap {fmt(carryover.cap!)} ·{' '}
-              {fmt(carryover.projectedPayout)}h payout
+              {carryover.payoutDate && carryover.payoutDate <= endOfYear(parseISO(todayIso)) ? (
+                // January: the pending payout settles LAST year's carry-over,
+                // so don't pair it with next Dec 31's balance and cap.
+                <>
+                  {fmt(carryover.projectedPayout)}h over cap paid out{' '}
+                  {format(carryover.payoutDate, 'MMM d')} · Vac {fmt(yearEnd.vacationBalance)}
+                </>
+              ) : (
+                <>
+                  Vac {fmt(yearEnd.vacationBalance)} · cap {fmt(carryover.cap!)} ·{' '}
+                  {fmt(carryover.projectedPayout)}h payout
+                </>
+              )}
             </span>
           ) : (
             `Vac ${fmt(yearEnd.vacationBalance)} · Sick ${fmt(yearEnd.sickBalance)}${!state.policy.hideBankHours ? ` · Bank ${fmt(yearEnd.bankBalance)}` : ''}`

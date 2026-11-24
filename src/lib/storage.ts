@@ -387,6 +387,19 @@ export function parseImportedBackup(raw: string): ParsedBackup {
   return { ok: true, state: stripped }
 }
 
+/** One-line confirmation shown after a successful restore. Shared by the
+ *  welcome screen and Settings → Data so both report the same thing. */
+export function describeRestoredBackup(state: AppState): string {
+  const vacationCount = state.plannedVacations.length
+  const syncIso = state.profile.lastSyncDate ?? state.profile.lastPaydayDate
+  let asOf = ''
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(syncIso) ? new Date(`${syncIso}T00:00:00`) : null
+  if (parsed && !isNaN(parsed.getTime())) {
+    asOf = ` · balances as of ${parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+  }
+  return `Restored — ${vacationCount} planned vacation${vacationCount === 1 ? '' : 's'}${asOf}`
+}
+
 export function validateImportedState(data: unknown): data is AppState {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return false
   const obj = data as Record<string, unknown>

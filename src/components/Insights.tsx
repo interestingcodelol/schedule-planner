@@ -8,6 +8,7 @@ import {
   differenceInDays,
   differenceInYears,
   endOfYear,
+  format,
   isBefore,
   parseISO,
   startOfDay,
@@ -76,14 +77,14 @@ export function Insights() {
 
     if (carryover.cap !== null && carryover.projectedPayout > 0) {
       pool.push({
-        text: `Projected to exceed the ${Math.round(carryover.cap)}h carry-over cap by **${fmt(carryover.projectedPayout)} hrs** — excess is paid out on the first February pay date`,
+        text: `Projected to exceed the ${Math.round(carryover.cap)}h carry-over cap by **${fmt(carryover.projectedPayout)} hrs** — excess is paid out ${carryover.payoutDate ? `on ${format(carryover.payoutDate, 'MMM d, yyyy')}` : 'on the first pay date after the carry-over date'}`,
         type: 'warning',
       })
     }
 
     if (sickOutlook.projectedForfeit > 0) {
       pool.push({
-        text: `Projected to forfeit **${fmt(sickOutlook.projectedForfeit)} hrs** of sick leave on Jan 1 — over the ${Math.round(sickOutlook.carryoverCap ?? 0)}h carry-over limit; sick time isn't paid out`,
+        text: `Projected to forfeit **${fmt(sickOutlook.projectedForfeit)} hrs** of sick leave on ${format(sickOutlook.forfeitDate, 'MMM d, yyyy')} — over the ${Math.round(sickOutlook.carryoverCap ?? 0)}h carry-over limit; sick time isn't paid out`,
         type: 'warning',
       })
     }

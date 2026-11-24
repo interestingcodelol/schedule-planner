@@ -1,16 +1,48 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { format, isBefore, differenceInDays, parseISO, startOfDay } from 'date-fns'
-import { Calendar, Sparkles, ArrowRight, ArrowLeft } from 'lucide-react'
+import { Calendar, Sparkles, ArrowRight, ArrowLeft, Upload, ClipboardPaste, FileJson } from 'lucide-react'
 import type { AppState } from '../lib/types'
 import { defaultPolicy } from '../lib/defaultPolicy'
 import { generateDemoState } from '../lib/demoData'
+import { parseImportedBackup } from '../lib/storage'
 
 type Props = {
   onComplete: (state: AppState, isDemo: boolean) => void
+  /** Restore a parsed, validated backup. When provided, the welcome screen
+   *  offers "Restore from a backup" so someone whose browser data was cleared
+   *  can get straight back in without setting up or loading the demo first. */
+  onRestore?: (state: AppState) => void
 }
 
-export function SetupWizard({ onComplete }: Props) {
+/** Step 3 is the restore screen; 0–2 are the welcome/setup steps. */
+const RESTORE_STEP = 3
+
+export function SetupWizard({ onComplete, onRestore }: Props) {
   const [step, setStep] = useState(0)
+  const [restoreError, setRestoreError] = useState('')
+  const [pasteText, setPasteText] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const restoreFromText = (raw: string): boolean => {
+    const result = parseImportedBackup(raw)
+    if (!result.ok) {
+      setRestoreError(result.error)
+      return false
+    }
+    setRestoreError('')
+    document.documentElement.classList.add('dark')
+    onRestore?.(result.state)
+    return true
+  }
+
+  const restoreFromFile = (file: File | undefined) => {
+    if (!file) return
+    file.text().then(
+      (text) => restoreFromText(text),
+      () => setRestoreError('Could not read that file. Try pasting the backup text instead.'),
+    )
+  }
   const [displayName, setDisplayName] = useState('')
   const [hireDate, setHireDate] = useState('')
   const [vacationHours, setVacationHours] = useState('')
@@ -147,6 +179,18 @@ export function SetupWizard({ onComplete }: Props) {
                 <Sparkles className="w-4 h-4" />
                 Try with demo data
               </button>
+              {onRestore && (
+                <button
+                  onClick={() => {
+                    setRestoreError('')
+                    setStep(RESTORE_STEP)
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 text-gray-300 hover:text-white hover:bg-gray-800/60 rounded-lg font-medium border border-dashed border-gray-700 transition-colors duration-150"
+                >
+                  <Upload className="w-4 h-4" />
+                  Restore from a backup
+                </button>
+              )}
             </div>
 
             <p className="text-xs text-gray-500">
@@ -315,6 +359,102 @@ export function SetupWizard({ onComplete }: Props) {
               className="text-sm text-gray-500 hover:text-gray-300 transition-colors duration-150"
             >
               Go back and edit
+            </button>
+          </div>
+        )}
+
+        {step === RESTORE_STEP && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold">Restore from a backup</h2>
+              <p className="text-sm text-gray-400 mt-1">
+                Choose the <span className="font-mono text-gray-300">schedule-planner-backup-….json</span>{' '}
+                file you exported earlier (Settings → Data). Your balances, plans and
+                settings come back exactly as saved, and any paydays since then are
+                applied automatically.
+              </p>
+            </div>
+
+            <div
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragging(true)
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragging(false)
+                restoreFromFile(e.dataTransfer.files?.[0])
+              }}
+              className={`rounded-xl border-2 border-dashed p-6 text-center space-y-3 transition-colors duration-150 ${
+                dragging ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 bg-gray-900/60'
+              }`}
+            >
+              <FileJson className="w-8 h-8 mx-auto text-blue-400" aria-hidden />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors duration-150"
+              >
+                <Upload className="w-4 h-4" />
+                Choose backup file
+              </button>
+              <p className="text-xs text-gray-500">or drag and drop it here</p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                aria-label="Backup file"
+                onChange={(e) => {
+                  restoreFromFile(e.target.files?.[0])
+                  e.target.value = ''
+                }}
+                className="hidden"
+              />
+            </div>
+
+            <details className="rounded-xl border border-gray-800 bg-gray-900/40 p-3">
+              <summary className="cursor-pointer text-sm text-gray-300 flex items-center gap-2">
+                <ClipboardPaste className="w-4 h-4" />
+                Paste backup text instead
+              </summary>
+              <div className="mt-3 space-y-2.5">
+                <p className="text-xs text-gray-500">
+                  Emailed yourself the backup? Open it, copy everything, and paste it below.
+                </p>
+                <textarea
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  rows={5}
+                  aria-label="Backup text"
+                  placeholder="Paste your backup JSON here (starts with { … )"
+                  spellCheck={false}
+                  className="w-full px-3 py-2 text-xs font-mono bg-gray-950 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
+                />
+                <button
+                  onClick={() => restoreFromText(pasteText)}
+                  disabled={!pasteText.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-lg border border-gray-700 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Restore pasted backup
+                </button>
+              </div>
+            </details>
+
+            {restoreError && (
+              <p role="alert" className="text-red-400 text-sm">
+                {restoreError}
+              </p>
+            )}
+
+            <button
+              onClick={() => {
+                setRestoreError('')
+                setStep(0)
+              }}
+              className="flex items-center gap-1 px-4 py-2 text-gray-400 hover:text-gray-200 transition-colors duration-150"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
             </button>
           </div>
         )}
