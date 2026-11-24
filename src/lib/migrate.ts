@@ -32,6 +32,18 @@ export function detectTimezone(): string {
   }
 }
 
+/** The bank payout schedule shipped as the default before Dec 31 became the
+ *  default: first payday on/after Dec 15 and Feb 15, with no timing chosen. */
+function hasUntouchedLegacyBankDefault(policy: AppState['policy']): boolean {
+  return (
+    policy.bankHoursPayoutTiming === undefined &&
+    policy.bankHoursPayoutStart?.month === 12 &&
+    policy.bankHoursPayoutStart?.day === 15 &&
+    policy.bankHoursPayoutEnd?.month === 2 &&
+    policy.bankHoursPayoutEnd?.day === 15
+  )
+}
+
 export function migrateState(loaded: AppState): AppState {
   const tz = loaded.profile.timezone ?? detectTimezone()
   // Existing users without a lastSyncDate get one anchored to lastPaydayDate
@@ -62,6 +74,20 @@ export function migrateState(loaded: AppState): AppState {
       carryoverPayoutDate: loaded.policy.carryoverPayoutDate ?? defaultPolicy.carryoverPayoutDate,
       bankHoursPayoutStart: loaded.policy.bankHoursPayoutStart ?? defaultPolicy.bankHoursPayoutStart,
       bankHoursPayoutEnd: loaded.policy.bankHoursPayoutEnd ?? defaultPolicy.bankHoursPayoutEnd,
+      // The one deliberate exception to "never rewrite customizations": the
+      // old shipped default bank schedule (Dec 15 + Feb 15 paydays) was wrong
+      // for the plan this app models, which pays bank hours out once, at the
+      // end of Dec 31. Only the untouched old default is moved; any schedule a
+      // user changed, or a timing they picked, is kept. Setting the timing
+      // makes this idempotent, and choosing "first payday" again in Settings
+      // keeps the old behaviour from then on.
+      ...(hasUntouchedLegacyBankDefault(loaded.policy)
+        ? {
+            bankHoursPayoutStart: defaultPolicy.bankHoursPayoutStart,
+            bankHoursPayoutEnd: defaultPolicy.bankHoursPayoutEnd,
+            bankHoursPayoutTiming: defaultPolicy.bankHoursPayoutTiming,
+          }
+        : {}),
       // Additive sick-leave scalars: backfill from defaults so the projection
       // (grant / carry-over forfeiture / max balance) works for users whose
       // saved policy predates these fields. Present values are kept as-is.

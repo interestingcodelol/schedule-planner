@@ -2,7 +2,7 @@ import { addDays, addYears, differenceInYears, endOfYear, format, parseISO } fro
 import type { AppState } from './types'
 import { computeHolidayDates, getHolidayName } from './holidays'
 import { getNowInZone } from './timeUtils'
-import { accrualForPeriod, computeAccrualTier, firstPaydayOnOrAfter } from './projection'
+import { accrualForPeriod, bankPayoutDates, computeAccrualTier, firstPaydayOnOrAfter } from './projection'
 
 export type IcalExportOptions = {
   /** Scheduled future time off + logged past absences (toggled separately
@@ -288,24 +288,28 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
     const startYear = today.getFullYear()
     const endYear = horizon.getFullYear()
     const lastPayday = parseISO(state.profile.lastPaydayDate)
-    const seenDates = new Set<string>()
+    const exact = state.policy.bankHoursPayoutTiming === 'exact_date'
     const anchors = [
       { date: state.policy.bankHoursPayoutStart, kind: 'start' },
       { date: state.policy.bankHoursPayoutEnd, kind: 'end' },
     ] as const
+    // Same dates the balance engine zeroes the bank on (bankPayoutDates).
+    // Keep the per-anchor UIDs stable for compatibility with older exports.
+    const engineDates = new Set(
+      bankPayoutDates(state.policy, lastPayday, startYear - 1, endYear).map((d) => format(d, 'yyyy-MM-dd')),
+    )
+    const seenDates = new Set<string>()
     for (let y = startYear - 1; y <= endYear; y++) {
       for (const anchor of anchors) {
         const triggerDate = parseISO(
           `${y}-${String(anchor.date.month).padStart(2, '0')}-${String(anchor.date.day).padStart(2, '0')}`,
         )
-        const payoutDate = firstPaydayOnOrAfter(
-          lastPayday,
-          state.policy.payPeriodLengthDays,
-          triggerDate,
-        )
+        const payoutDate = exact
+          ? triggerDate
+          : firstPaydayOnOrAfter(lastPayday, state.policy.payPeriodLengthDays, triggerDate)
         if (payoutDate < today || payoutDate > horizon) continue
         const iso = format(payoutDate, 'yyyy-MM-dd')
-        if (seenDates.has(iso)) continue
+        if (seenDates.has(iso) || !engineDates.has(iso)) continue
         seenDates.add(iso)
         events.push({
           uid:
@@ -313,7 +317,9 @@ function buildEvents(state: AppState, opts: IcalExportOptions): RawEvent[] {
               ? `bank-payout-${y}@${UID_DOMAIN}`
               : `bank-payout-end-${y}@${UID_DOMAIN}`,
           summary: '🏦 Bank hours payout',
-          description: `Banked / overtime hours are paid out on this pay date — the first payday on or after the payout window ${anchor.kind === 'start' ? 'opens' : 'closes'}.`,
+          description: exact
+            ? 'All banked / overtime hours are paid out at the end of this day.'
+            : 'Banked / overtime hours are paid out on this pay date — the first payday on or after the configured payout date.',
           date: payoutDate,
           categories: ['Bank'],
         })

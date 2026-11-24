@@ -138,7 +138,7 @@ describe('year-end insights', () => {
     // 60 + two December accruals (Dec 4, Dec 18) at the 6–10 year rate.
     expect(text).toContain('Into 2027: 69.23 vacation hrs carry over')
     expect(text).toContain('sick leave resets to 65 hrs on Jan 1')
-    expect(text).toContain('6 bank hrs projected to be paid out on Dec 18')
+    expect(text).toContain('6 bank hrs projected to be paid out on Dec 31')
   })
 
   it('does not show the new-year preview outside November and December', () => {

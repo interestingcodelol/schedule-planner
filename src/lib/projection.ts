@@ -423,6 +423,37 @@ export function firstPaydayOnOrAfter(
 }
 
 /**
+ * Every bank-hours payout date in calendar years [fromYear, toYear], sorted
+ * and deduped. Each configured payout date (bankHoursPayoutStart and
+ * bankHoursPayoutEnd) fires once a year — on that exact date, or on the first
+ * payday on or after it (the legacy behaviour, used when bankHoursPayoutTiming
+ * is unset). Shared by projection, catch-up, insights and calendar export so
+ * they always agree on when the bank is zeroed.
+ */
+export function bankPayoutDates(
+  policy: PolicyConfig,
+  lastPayday: Date,
+  fromYear: number,
+  toYear: number,
+): Date[] {
+  const seen = new Set<number>()
+  const out: Date[] = []
+  for (let y = fromYear; y <= toYear; y++) {
+    for (const anchor of [policy.bankHoursPayoutStart, policy.bankHoursPayoutEnd]) {
+      const trigger = isoMidnight(y, anchor.month, anchor.day)
+      const date =
+        policy.bankHoursPayoutTiming === 'exact_date'
+          ? trigger
+          : firstPaydayOnOrAfter(lastPayday, policy.payPeriodLengthDays, trigger)
+      if (seen.has(date.getTime())) continue
+      seen.add(date.getTime())
+      out.push(date)
+    }
+  }
+  return out.sort((a, b) => a.getTime() - b.getTime())
+}
+
+/**
  * The concrete date on which the vacation carryover cap payout will fire for
  * a given calendar year: the first payday on or after the
  * `carryoverPayoutDate` anchor. Returns null if the policy has no carryover
@@ -642,17 +673,12 @@ export function getNextBankPayout(state: AppState): BankPayoutOutlook {
   const tz = state.profile.timezone || DEFAULT_TZ
   const today = parseISO(getNowInZone(tz).isoDate)
   const lastPayday = parseISO(state.profile.lastPaydayDate)
-  const candidates: Date[] = []
-  for (let y = today.getFullYear(); y <= today.getFullYear() + 2; y++) {
-    for (const anchor of [state.policy.bankHoursPayoutStart, state.policy.bankHoursPayoutEnd]) {
-      const payday = firstPaydayOnOrAfter(
-        lastPayday,
-        state.policy.payPeriodLengthDays,
-        isoMidnight(y, anchor.month, anchor.day),
-      )
-      if (isAfter(payday, today)) candidates.push(payday)
-    }
-  }
+  const candidates = bankPayoutDates(
+    state.policy,
+    lastPayday,
+    today.getFullYear(),
+    today.getFullYear() + 2,
+  ).filter((d) => isAfter(d, today))
   const payoutDate = candidates.sort((a, b) => a.getTime() - b.getTime())[0] ?? null
   if (!payoutDate) return { payoutDate: null, projectedPayout: 0 }
   const iso = format(payoutDate, 'yyyy-MM-dd')
@@ -831,36 +857,18 @@ export function projectBalance(
     }
   }
 
-  // Bank hours pay out on the FIRST PAYDAY on/after EACH configured payout date
-  // — both the window-open (bankHoursPayoutStart, e.g. Dec 15) AND the
-  // window-close (bankHoursPayoutEnd, e.g. Feb 15). Between the two, bank hours
-  // can still be banked/used; each trigger zeroes whatever is banked as of its
-  // payday. Iterate one extra year each side to catch a payday from an adjacent
-  // year; dedup so a start/end pair resolving to the same payday pays once.
-  // Mirrors catchUp.ts exactly so projection and the persisted balance agree.
-  const bankAnchors = [
-    state.policy.bankHoursPayoutStart,
-    state.policy.bankHoursPayoutEnd,
-  ]
-  const bankPayoutPaydays = new Set<number>()
-  for (let y = startYear - 1; y <= endYear + 1; y++) {
-    for (const anchor of bankAnchors) {
-      const triggerDate = isoMidnight(y, anchor.month, anchor.day)
-      const payoutDate = firstPaydayOnOrAfter(
-        lastPayday,
-        state.policy.payPeriodLengthDays,
-        triggerDate,
-      )
-      if (!isAfter(payoutDate, today) || isAfter(payoutDate, target)) continue
-      if (bankPayoutPaydays.has(payoutDate.getTime())) continue
-      bankPayoutPaydays.add(payoutDate.getTime())
-      pendingEvents.push({
-        date: payoutDate,
-        type: 'bank_payout',
-        process: () => 0,
-        label: `Bank hours payout (${format(payoutDate, 'MMM d')})`,
-      })
-    }
+  // Bank hours pay out on each configured payout date (exact date, or first
+  // payday on/after it — see bankPayoutDates). Each payout zeroes whatever is
+  // banked as of that day. One extra year each side catches a payday that
+  // rolls across a year boundary. Mirrors catchUp.ts exactly.
+  for (const payoutDate of bankPayoutDates(state.policy, lastPayday, startYear - 1, endYear + 1)) {
+    if (!isAfter(payoutDate, today) || isAfter(payoutDate, target)) continue
+    pendingEvents.push({
+      date: payoutDate,
+      type: 'bank_payout',
+      process: () => 0,
+      label: `Bank hours payout (${format(payoutDate, 'MMM d')})`,
+    })
   }
 
   for (let y = startYear + 1; y <= endYear; y++) {

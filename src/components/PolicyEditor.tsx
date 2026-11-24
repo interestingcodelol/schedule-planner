@@ -555,9 +555,28 @@ export function PolicyEditor({ policy, onChange }: Props) {
               />
             </div>
           </div>
+          <div className="col-span-2">
+            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+              Paid out
+            </label>
+            <select
+              aria-label="When bank hours are paid out"
+              value={policy.bankHoursPayoutTiming ?? 'payday'}
+              onChange={(e) =>
+                onChange({
+                  ...policy,
+                  bankHoursPayoutTiming: e.target.value as 'payday' | 'exact_date',
+                })
+              }
+              className="w-full px-2 py-1.5 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="exact_date">On the payout date itself (e.g. Dec 31)</option>
+              <option value="payday">On the first payday on or after it</option>
+            </select>
+          </div>
           <p className="col-span-2 text-xs text-gray-400 dark:text-gray-500 leading-snug">
-            All banked hours are paid out on the first payday on or after each date.
-            Paid out only once a year? Set both dates the same.
+            All banked hours are paid out on each date. Paid out only once a year?
+            Set both dates the same.
           </p>
         </div>
         )}

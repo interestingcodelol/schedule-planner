@@ -17,6 +17,7 @@ import {
 import { catchUpState } from '../catchUp'
 import { computeHolidayDates } from '../holidays'
 import { defaultPolicy } from '../defaultPolicy'
+import { LEGACY_BANK_POLICY } from './legacyBankPolicy'
 import { parseISO } from 'date-fns'
 import type { AppState, PlannedVacation } from '../types'
 
@@ -34,7 +35,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
       currentBankHours: 0,
       lastPaydayDate: format(lastFriday, 'yyyy-MM-dd'),
     },
-    policy: { ...defaultPolicy },
+    policy: { ...defaultPolicy, ...LEGACY_BANK_POLICY },
     plannedVacations: [],
     bankHoursLog: [],
     theme: 'dark',

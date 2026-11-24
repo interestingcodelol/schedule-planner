@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { addDays, parseISO } from 'date-fns'
 import { buildIcalString, DEFAULT_ICAL_OPTIONS } from '../icalExport'
 import { defaultPolicy } from '../defaultPolicy'
+import { LEGACY_BANK_POLICY } from './legacyBankPolicy'
 import { accrualForPeriod, projectBalance } from '../projection'
 import type { AppState, PlannedVacation } from '../types'
 
@@ -15,7 +16,7 @@ function makeState(): AppState {
       currentBankHours: 0,
       lastPaydayDate: '2025-06-13',
     },
-    policy: { ...defaultPolicy },
+    policy: { ...defaultPolicy, ...LEGACY_BANK_POLICY },
     plannedVacations: [
       {
         id: 'abc123',

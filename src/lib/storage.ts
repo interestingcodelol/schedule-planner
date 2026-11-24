@@ -560,6 +560,7 @@ export function validateImportedState(data: unknown): data is AppState {
   if (!isValidMonthDay(policy.carryoverPayoutDate, true)) return false
   if (!isValidMonthDay(policy.bankHoursPayoutStart, true)) return false
   if (!isValidMonthDay(policy.bankHoursPayoutEnd, true)) return false
+  if (policy.bankHoursPayoutTiming !== undefined && policy.bankHoursPayoutTiming !== 'payday' && policy.bankHoursPayoutTiming !== 'exact_date') return false
 
   return true
 }

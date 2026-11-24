@@ -78,3 +78,40 @@ describe('migrateState — preserve customizations, backfill new fields', () => 
     expect(migrated.profile.currentVacationHours).toBe(10) // untouched
   })
 })
+
+describe('bank payout default migration', () => {
+  const withBank = (bank: Partial<AppState['policy']>): AppState => {
+    const base = migrateState(legacyState())
+    return { ...base, policy: { ...base.policy, ...bank } }
+  }
+
+  it('moves the untouched old Dec 15 + Feb 15 schedule to a single Dec 31 payout', () => {
+    const migrated = migrateState(withBank({
+      bankHoursPayoutStart: { month: 12, day: 15 },
+      bankHoursPayoutEnd: { month: 2, day: 15 },
+      bankHoursPayoutTiming: undefined,
+    }))
+    expect(migrated.policy.bankHoursPayoutStart).toEqual({ month: 12, day: 31 })
+    expect(migrated.policy.bankHoursPayoutEnd).toEqual({ month: 12, day: 31 })
+    expect(migrated.policy.bankHoursPayoutTiming).toBe('exact_date')
+    expect(migrateState(migrated).policy).toEqual(migrated.policy) // idempotent
+  })
+
+  it('keeps a customized schedule or an explicitly chosen timing', () => {
+    const custom = migrateState(withBank({
+      bankHoursPayoutStart: { month: 11, day: 30 },
+      bankHoursPayoutEnd: { month: 2, day: 15 },
+      bankHoursPayoutTiming: undefined,
+    }))
+    expect(custom.policy.bankHoursPayoutStart).toEqual({ month: 11, day: 30 })
+    expect(custom.policy.bankHoursPayoutTiming).toBeUndefined()
+
+    const chosen = migrateState(withBank({
+      bankHoursPayoutStart: { month: 12, day: 15 },
+      bankHoursPayoutEnd: { month: 2, day: 15 },
+      bankHoursPayoutTiming: 'payday',
+    }))
+    expect(chosen.policy.bankHoursPayoutEnd).toEqual({ month: 2, day: 15 })
+    expect(chosen.policy.bankHoursPayoutTiming).toBe('payday')
+  })
+})

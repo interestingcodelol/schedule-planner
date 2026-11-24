@@ -16,6 +16,7 @@ import type {
 } from './types'
 import {
   accrualForPeriod,
+  bankPayoutDates,
   computeAccrualTier,
   firstPaydayOnOrAfter,
   getScheduledDeductions,
@@ -307,50 +308,30 @@ export function catchUpState(state: AppState, now: Date = new Date()): CatchUpRe
   }
 
   // --- Bank payouts ------------------------------------------------------
-  // Bank hours are paid out via payroll on the FIRST PAYDAY on/after EACH
-  // configured payout date — BOTH the window-open (bankHoursPayoutStart, e.g.
-  // Dec 15) AND the window-close (bankHoursPayoutEnd, e.g. Feb 15). Between the
-  // two dates bank hours can still be banked and used; each trigger zeroes
-  // whatever is banked as of its payday, so the cycle is: pay out in Dec → bank
-  // refills → pay out again in Feb → nothing until the next Dec. Iterate one
-  // year on each side so a payday that fell during the catch-up gap from an
-  // adjacent calendar year is captured. Dedup so a start/end pair that happens
-  // to resolve to the same payday only pays out once.
-  const bankAnchors = [
-    state.policy.bankHoursPayoutStart,
-    state.policy.bankHoursPayoutEnd,
-  ]
-  const bankPayoutPaydays = new Set<number>()
-  for (let y = startYear - 1; y <= endYear + 1; y++) {
-    for (const anchor of bankAnchors) {
-      const triggerDate = isoMidnight(y, anchor.month, anchor.day)
-      const payday = firstPaydayOnOrAfter(
-        lastPayday,
-        state.policy.payPeriodLengthDays,
-        triggerDate,
-      )
-      if (!isAfter(payday, lastSync) || isAfter(payday, today)) continue
-      if (bankPayoutPaydays.has(payday.getTime())) continue
-      bankPayoutPaydays.add(payday.getTime())
-      const pCopy = payday
-      pending.push({
-        date: pCopy,
-        order: 4,
-        apply: () => {
-          if (pools.bank > 0) {
-            const payout = pools.bank
-            pools.bank = 0
-            events.push({
-              date: format(pCopy, 'yyyy-MM-dd'),
-              type: 'bank_payout',
-              pool: 'bank',
-              delta: -payout,
-              label: `Bank hours paid out: ${payout.toFixed(2)} hrs`,
-            })
-          }
-        },
-      })
-    }
+  // Each configured payout date zeroes whatever is banked as of that day
+  // (exact date, or first payday on/after it — see bankPayoutDates). One
+  // extra year each side catches a payday from an adjacent calendar year.
+  // Mirrors projection.ts exactly so projection and stored balances agree.
+  for (const payday of bankPayoutDates(state.policy, lastPayday, startYear - 1, endYear + 1)) {
+    if (!isAfter(payday, lastSync) || isAfter(payday, today)) continue
+    const pCopy = payday
+    pending.push({
+      date: pCopy,
+      order: 4,
+      apply: () => {
+        if (pools.bank > 0) {
+          const payout = pools.bank
+          pools.bank = 0
+          events.push({
+            date: format(pCopy, 'yyyy-MM-dd'),
+            type: 'bank_payout',
+            pool: 'bank',
+            delta: -payout,
+            label: `Bank hours paid out: ${payout.toFixed(2)} hrs`,
+          })
+        }
+      },
+    })
   }
 
   // --- Future-dated bank-log entries that have now passed --------------
