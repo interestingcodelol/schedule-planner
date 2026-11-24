@@ -52,8 +52,15 @@ export type PolicyConfig = {
   workDaysPerWeek: number[] // 0=Sun, 1=Mon, ..., 6=Sat
   hoursPerWorkDay: number
   holidays: HolidayRule[]
-  bankHoursPayoutStart: { month: number; day: number } // When bank hours get paid out (start)
-  bankHoursPayoutEnd: { month: number; day: number } // When bank hours payout period ends
+  /** First date each year that all banked hours are paid out. */
+  bankHoursPayoutStart: { month: number; day: number }
+  /** Second yearly payout date. Set it equal to bankHoursPayoutStart for a
+   *  single payout per year. */
+  bankHoursPayoutEnd: { month: number; day: number }
+  /** 'exact_date': the bank is zeroed at the end of the payout date itself
+   *  (e.g. Dec 31). 'payday' (also the meaning of undefined, for policies
+   *  saved before this option existed): on the first payday on or after it. */
+  bankHoursPayoutTiming?: 'payday' | 'exact_date'
   /** When true, hide all bank-hours UI for users whose plan has no such
    *  benefit. Display-only — balances still work (bank simply stays 0).
    *  Undefined/false means bank hours are shown. */

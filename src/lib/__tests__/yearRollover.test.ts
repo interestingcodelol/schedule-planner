@@ -3,6 +3,7 @@ import { addDays, format, parseISO } from 'date-fns'
 import { catchUpState, type CatchUpEvent } from '../catchUp'
 import { getCarryoverOutlook, getCurrentBalanceSummary, projectBalance } from '../projection'
 import { defaultPolicy } from '../defaultPolicy'
+import { LEGACY_BANK_POLICY } from './legacyBankPolicy'
 import type { AppState } from '../types'
 
 afterEach(() => vi.useRealTimers())
@@ -71,7 +72,7 @@ describe('December → January rollover (2026 → 2027)', () => {
     }
   })
 
-  it('resets sick hours on Jan 1, pays out bank hours twice and keeps accruing', () => {
+  it('resets sick hours on Jan 1, settles bank hours by Dec 31 and keeps accruing', () => {
     const { state, events } = openDaily(decemberState(), '2026-11-24', '2027-03-15')
     const on = (date: string, type: CatchUpEvent['type']) =>
       events.filter((e) => e.date === date && e.type === type).map((e) => e.delta)
@@ -79,9 +80,11 @@ describe('December → January rollover (2026 → 2027)', () => {
     // 70h sick: capped to the 40h carry-over limit, then +40h grant (80h max).
     expect(on('2027-01-01', 'sick_carryover_forfeit')).toEqual([-30])
     expect(on('2027-01-01', 'sick_grant')).toEqual([40])
-    // Bank pays out on the first payday after Dec 15 and after Feb 15.
-    expect(on('2026-12-18', 'bank_payout')).toEqual([-12])
-    expect(on('2027-02-26', 'bank_payout')).toEqual([-6])
+    // The Auto-sourced winter trip draws bank hours first (12h on Dec 28–29),
+    // so nothing is left to pay out on Dec 31; the 6h banked Jan 12 is kept.
+    expect(on('2026-12-28', 'vacation_deduction')).toEqual([-8])
+    expect(events.filter((e) => e.date === '2026-12-28')[0].pool).toBe('bank')
+    expect(events.filter((e) => e.type === 'bank_payout' && e.delta < 0)).toEqual([])
     // Biweekly accruals continue straight through the holidays.
     const accrualDates = events.filter((e) => e.type === 'accrual').map((e) => e.date)
     expect(accrualDates).toEqual([
@@ -97,7 +100,7 @@ describe('December → January rollover (2026 → 2027)', () => {
     ])
     expect(state.profile).toMatchObject({
       currentSickHours: 76, // 80 after the reset, minus the 4h appointment
-      currentBankHours: 0,
+      currentBankHours: 6,
       lastPaydayDate: '2027-03-12',
       lastSyncDate: '2027-03-15',
     })
@@ -179,41 +182,57 @@ describe('what carries into the new year', () => {
     expect(jan1(70, { sickLeaveCarryoverCap: undefined, sickLeaveMaxBalance: 200 })).toBe(110) // no limit
   })
 
-  it('bank hours are paid out in December; hours banked after that payday are kept', () => {
+  it('bank hours are all paid out at the end of Dec 31; new-year hours are kept', () => {
+    const start = base({ currentBankHours: 10, lastSyncDate: '2026-12-01', lastPaydayDate: '2026-11-20' }, {
+      bankHoursLog: [
+        { id: 'late-dec', date: '2026-12-21', hours: 5, appliedToBalance: false },
+        { id: 'new-years-eve', date: '2026-12-31', hours: 2, appliedToBalance: false },
+        { id: 'january', date: '2027-01-05', hours: 3, appliedToBalance: false },
+      ],
+    })
+    const { events, daily, state } = openDaily(start, '2026-12-01', '2027-03-31')
+    const bankPayouts = events.filter((e) => e.type === 'bank_payout' && e.delta < 0)
+    // Everything banked through Dec 31, including that day, is paid out once.
+    expect(bankPayouts.map((e) => [e.date, e.delta])).toEqual([['2026-12-31', -17]])
+    expect(daily.find((d) => d.iso === '2027-01-01')!.state.profile.currentBankHours).toBe(0)
+    // No February payout: January hours stay until next Dec 31.
+    expect(state.profile.currentBankHours).toBe(3)
+  })
+
+  it('the older Dec 15 + Feb 15 payday schedule still works when configured', () => {
     const start = base({ currentBankHours: 10, lastSyncDate: '2026-12-01', lastPaydayDate: '2026-11-20' }, {
       bankHoursLog: [{ id: 'late-dec', date: '2026-12-21', hours: 5, appliedToBalance: false }],
     })
+    start.policy = { ...start.policy, ...LEGACY_BANK_POLICY }
     const { events, daily } = openDaily(start, '2026-12-01', '2027-02-26')
-    const bankPayouts = events.filter((e) => e.type === 'bank_payout' && e.delta < 0)
-    expect(bankPayouts.map((e) => [e.date, e.delta])).toEqual([
+    expect(events.filter((e) => e.type === 'bank_payout' && e.delta < 0).map((e) => [e.date, e.delta])).toEqual([
       ['2026-12-18', -10], // first payday on/after Dec 15
       ['2027-02-26', -5], // first payday on/after Feb 15
     ])
-    const jan1 = daily.find((d) => d.iso === '2027-01-01')!.state
-    expect(jan1.profile.currentBankHours).toBe(5)
-
-    // With a single December payout date, late-December hours roll into the new year.
-    const single = base({ currentBankHours: 10, lastSyncDate: '2026-12-01', lastPaydayDate: '2026-11-20' }, {
-      bankHoursLog: [{ id: 'late-dec', date: '2026-12-21', hours: 5, appliedToBalance: false }],
-    })
-    single.policy = { ...single.policy, bankHoursPayoutEnd: { month: 12, day: 15 } }
-    const one = openDaily(single, '2026-12-01', '2027-03-31')
-    expect(one.events.filter((e) => e.type === 'bank_payout' && e.delta < 0).map((e) => e.date)).toEqual(['2026-12-18'])
-    expect(one.state.profile.currentBankHours).toBe(5)
+    expect(daily.find((d) => d.iso === '2027-01-01')!.state.profile.currentBankHours).toBe(5)
   })
 })
 
 describe('getNextBankPayout', () => {
-  it('finds the December payday and, after it, the February one', async () => {
+  it('defaults to Dec 31 each year', async () => {
     const { getNextBankPayout } = await import('../projection')
     const state: AppState = { ...decemberState(), plannedVacations: [], bankHoursLog: [] }
     at('2026-11-24')
     let next = getNextBankPayout(state)
-    expect(format(next.payoutDate!, 'yyyy-MM-dd')).toBe('2026-12-18')
+    expect(format(next.payoutDate!, 'yyyy-MM-dd')).toBe('2026-12-31')
     expect(next.projectedPayout).toBe(12)
+    at('2027-01-02')
+    next = getNextBankPayout({ ...state, profile: { ...state.profile, currentBankHours: 3, lastSyncDate: '2027-01-02' } })
+    expect(format(next.payoutDate!, 'yyyy-MM-dd')).toBe('2027-12-31')
+  })
+
+  it('follows the payday schedule when configured', async () => {
+    const { getNextBankPayout } = await import('../projection')
+    const base: AppState = { ...decemberState(), plannedVacations: [], bankHoursLog: [] }
+    const state: AppState = { ...base, policy: { ...base.policy, ...LEGACY_BANK_POLICY } }
+    at('2026-11-24')
+    expect(format(getNextBankPayout(state).payoutDate!, 'yyyy-MM-dd')).toBe('2026-12-18')
     at('2026-12-20')
-    next = getNextBankPayout({ ...state, profile: { ...state.profile, currentBankHours: 3 } })
-    expect(format(next.payoutDate!, 'yyyy-MM-dd')).toBe('2027-02-26')
-    expect(next.projectedPayout).toBe(3)
+    expect(format(getNextBankPayout(state).payoutDate!, 'yyyy-MM-dd')).toBe('2027-02-26')
   })
 })

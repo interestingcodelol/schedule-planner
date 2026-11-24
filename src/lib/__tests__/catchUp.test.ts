@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { catchUpState, summarizeCatchUp } from '../catchUp'
 import { projectBalance } from '../projection'
 import { defaultPolicy } from '../defaultPolicy'
+import { LEGACY_BANK_POLICY } from './legacyBankPolicy'
 import type { AppState } from '../types'
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
@@ -16,7 +17,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
       lastSyncDate: '2025-12-12',
       timezone: 'America/New_York',
     },
-    policy: { ...defaultPolicy },
+    policy: { ...defaultPolicy, ...LEGACY_BANK_POLICY },
     plannedVacations: [],
     bankHoursLog: [],
     theme: 'dark',

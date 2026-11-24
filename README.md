@@ -31,7 +31,7 @@ Schedule Planner solves this by projecting your balances forward day-by-day — 
 - **Holiday awareness** — 12 US federal holidays computed by formula, correct for any year; weekend holidays that would land on another holiday (e.g. Christmas Eve/Day in 2027–2028) move to the next free weekday instead of being lost
 - **Bank hours** — track extra hours worked, with history view and undo on delete
 - **Sick leave** — annual grant with carryover cap and max-balance cap, projected across years
-- **Bank hours payout** — dual payout dates (e.g. Dec and Feb), balance zeros and resets
+- **Bank hours payout** — by default all banked hours are paid out at the end of Dec 31; optionally a second payout date, or payouts on the first payday on/after each date
 - **Chat assistant** — plan time off with natural language
 - **Fully customizable** — accrual tiers, rates, holidays, pay periods, work schedule, timezone
 - **Responsive layout** — reflows cleanly from mobile (360 px) up to ultra-wide
@@ -61,7 +61,7 @@ The projection engine (`src/lib/projection.ts`) is a pure function that processe
 
 Key behaviors:
 - **Tier transitions** are prorated across the pay period that contains your service anniversary
-- **Bank hours payout** zeros the bank balance at both payout window start and end dates
+- **Bank hours payout** zeros the bank balance on each configured payout date (default: end of Dec 31, after that day's banked and used hours)
 - **Sick leave grant** applies the carryover cap on Jan 1, then adds the annual grant, then enforces the max-balance cap
 - **Vacation carryover** caps vacation hours on the payout date; the excess is paid out on the configured payout date
 - **"Any" pool deduction** uses bank first, then vacation, then sick
@@ -122,7 +122,7 @@ Open **Settings > Policy** to customize:
 - **Holidays** — add/remove holidays with fixed-date, nth-weekday, or last-weekday rules
 - **Hours per day** — default is 8, adjust for your schedule
 - **Sick leave** — annual grant, carryover cap, and max balance
-- **Bank hours payout** — start and end dates for the payout window
+- **Bank hours payout** — first and second payout dates (set both the same for one yearly payout) and whether payout happens on the date itself or the first payday on/after it
 
 ## Privacy
 

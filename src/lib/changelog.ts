@@ -16,6 +16,15 @@ export type ChangelogEntry = {
  */
 export const changelog: ChangelogEntry[] = [
   {
+    id: '2026-11-24-bank',
+    date: 'November 2026',
+    title: 'Bank hours paid out on Dec 31',
+    changes: [
+      { type: 'improved', text: 'Bank hours are now paid out once a year, at the end of December 31, by default. Hours you bank or use on Dec 31 count, and the new year starts with an empty bank.' },
+      { type: 'new', text: 'Settings → Policy → Bank Hours lets you choose whether payout happens on the date itself or on the first payday after it, and add a second payout date if your plan has one.' },
+    ],
+  },
+  {
     id: '2026-11-24',
     date: 'November 2026',
     title: 'Ready for the new year',

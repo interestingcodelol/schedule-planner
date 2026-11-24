@@ -34,6 +34,9 @@ export const defaultPolicy: PolicyConfig = {
     { type: 'fixed', month: 12, day: 24, name: 'Christmas Eve', weekendObservance: 'nearest_weekday' },
     { type: 'fixed', month: 12, day: 25, name: 'Christmas Day', weekendObservance: 'nearest_weekday' },
   ],
-  bankHoursPayoutStart: { month: 12, day: 15 },
-  bankHoursPayoutEnd: { month: 2, day: 15 },
+  // Bank hours are paid out once a year, at the end of Dec 31. Policies with
+  // a second (e.g. February) payout can set a different second date.
+  bankHoursPayoutStart: { month: 12, day: 31 },
+  bankHoursPayoutEnd: { month: 12, day: 31 },
+  bankHoursPayoutTiming: 'exact_date',
 }

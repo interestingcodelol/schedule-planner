@@ -23,7 +23,7 @@ Deleting or changing recorded days refunds only their actual draw. Unchanged row
 - Accrual tier changes are prorated across a pay period
 - Jan 1 sick carryover cap precedes the annual grant and maximum-balance cap
 - Accrual precedes PTO; vacation carryover and bank payout follow PTO on the same date
-- Both bank payout anchors resolve to paydays and coincident anchors run once
+- Bank payout anchors fire on the exact date (default: Dec 31) or, with payday timing, on the first payday on/after each anchor; coincident anchors run once
 - Bank hiding is a display preference; existing nonzero bank amounts remain auditable in balance details
 
 ## Storage and backup compatibility
