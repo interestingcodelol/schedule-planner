@@ -23,6 +23,7 @@ import {
   countWorkDays,
   getCarryoverOutlook,
   getSickOutlook,
+  getNextBankPayout,
 } from '../lib/projection'
 import { computeHolidayDates } from '../lib/holidays'
 
@@ -137,25 +138,31 @@ export function Insights() {
       }
     }
 
-    if (effective.bank > 0 && !state.policy.hideBankHours) {
-      const payoutMonth = state.policy.bankHoursPayoutStart.month
-      const monthNames = [
-        '',
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ]
+    if (!state.policy.hideBankHours) {
+      const bankPayout = getNextBankPayout(state)
+      if (bankPayout.payoutDate && bankPayout.projectedPayout > 0) {
+        pool.push({
+          text: `**${fmt(bankPayout.projectedPayout)} bank hrs** projected to be paid out on ${format(bankPayout.payoutDate, 'MMM d')}`,
+          type: 'info',
+        })
+      } else if (effective.bank > 0) {
+        pool.push({ text: `**${fmt(effective.bank)} bank hrs** in your account`, type: 'info' })
+      }
+    }
+
+    // New-year preview (Nov/Dec): what carries into January and where sick
+    // leave lands after the Jan 1 reset, so nobody is surprised by the rollover.
+    if (today.getMonth() >= 10) {
+      const nextYear = today.getFullYear() + 1
+      const jan1Proj = projectBalance(state, new Date(nextYear, 0, 1))
+      const sickAfterReset = jan1Proj.sickBalance
+      const vacationIntoJan = yearEndProj.vacationBalance
+      const keptNote =
+        carryover.cap !== null && carryover.projectedPayout > 0 && carryover.payoutDate
+          ? ` (anything over the ${Math.round(carryover.cap)}h cap and unused by ${format(carryover.payoutDate, 'MMM d')} is paid out)`
+          : ''
       pool.push({
-        text: `**${fmt(effective.bank)} bank hrs** in your account — payout window opens in ${monthNames[payoutMonth]}`,
+        text: `Into ${nextYear}: **${fmt(vacationIntoJan)} vacation hrs** carry over${keptNote}, and sick leave resets to **${fmt(sickAfterReset)} hrs** on Jan 1`,
         type: 'info',
       })
     }

@@ -273,7 +273,7 @@ export function BalanceForecast() {
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtH(sick.projectedForfeit)}
                 </span>{' '}
-                forfeited on Jan 1 — over the{' '}
+                forfeited on {format(sick.forfeitDate, 'MMM d, yyyy')} — over the{' '}
                 <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">
                   {fmtHRound(sick.carryoverCap ?? 0)}
                 </span>{' '}

@@ -127,3 +127,93 @@ describe('December → January rollover (2026 → 2027)', () => {
     expect(once.plannedVacations).toEqual(daily.plannedVacations)
   })
 })
+
+describe('what carries into the new year', () => {
+  // 3 years of service → 3.076 h/period; carry-over cap 3.076 × 26 = 79.98h.
+  const base = (profile: Partial<AppState['profile']>, extra: Partial<AppState> = {}): AppState => ({
+    ...decemberState({ hireDate: '2023-06-01', lastSyncDate: '2026-12-31', lastPaydayDate: '2026-12-18', ...profile }),
+    plannedVacations: [],
+    bankHoursLog: [],
+    ...extra,
+  })
+  const accrual = 3.076
+  // Paydays Jan 1 → Feb 12 2027 (the carry-over payout payday): 4 accruals.
+  const janToPayoutAccruals = 4 * accrual
+
+  it('vacation under the cap carries over in full and new-year accruals stack on top', () => {
+    const { events, state } = openDaily(base({ currentVacationHours: 70 }), '2026-12-31', '2027-02-12')
+    expect(events.filter((e) => e.type === 'carryover_payout')).toEqual([])
+    expect(state.profile.currentVacationHours).toBeCloseTo(70 + janToPayoutAccruals, 1)
+  })
+
+  it('vacation over the cap loses only the excess, and January usage counts against the excess first', () => {
+    const plain = openDaily(base({ currentVacationHours: 100 }), '2026-12-31', '2027-02-12')
+    const plainPayout = -plain.events.find((e) => e.type === 'carryover_payout')!.delta
+    expect(plainPayout).toBeCloseTo(100 - 79.98, 1)
+    // Keeps exactly the cap plus everything earned since Jan 1.
+    expect(plain.state.profile.currentVacationHours).toBeCloseTo(79.98 + janToPayoutAccruals, 1)
+
+    // Taking two days off in January means two fewer days are over the cap.
+    const usedInJanuary = openDaily(
+      base({ currentVacationHours: 100 }, {
+        plannedVacations: [{ id: 'jan', startDate: '2027-01-11', endDate: '2027-01-12', hourSource: 'vacation', locked: false }],
+      }),
+      '2026-12-31',
+      '2027-02-12',
+    )
+    const reducedPayout = -usedInJanuary.events.find((e) => e.type === 'carryover_payout')!.delta
+    expect(reducedPayout).toBeCloseTo(plainPayout - 16, 1)
+    expect(usedInJanuary.state.profile.currentVacationHours).toBeCloseTo(79.98 + janToPayoutAccruals, 1)
+  })
+
+  it('sick leave keeps everything up to the carry-over limit, then adds the yearly grant at once', () => {
+    const jan1 = (sick: number, policy: Partial<AppState['policy']> = {}) => {
+      const start = base({ currentSickHours: sick })
+      start.policy = { ...start.policy, ...policy }
+      return openDaily(start, '2026-12-31', '2027-01-01').state.profile.currentSickHours
+    }
+    expect(jan1(25)).toBe(65) // all 25 kept + 40
+    expect(jan1(40)).toBe(80) // exactly at the limit: nothing lost
+    expect(jan1(70)).toBe(80) // 30 over the 40h limit forfeited, then + 40
+    expect(jan1(25, { sickLeaveAnnualGrant: 56, sickLeaveMaxBalance: 120 })).toBe(81) // custom grant
+    expect(jan1(70, { sickLeaveCarryoverCap: undefined, sickLeaveMaxBalance: 200 })).toBe(110) // no limit
+  })
+
+  it('bank hours are paid out in December; hours banked after that payday are kept', () => {
+    const start = base({ currentBankHours: 10, lastSyncDate: '2026-12-01', lastPaydayDate: '2026-11-20' }, {
+      bankHoursLog: [{ id: 'late-dec', date: '2026-12-21', hours: 5, appliedToBalance: false }],
+    })
+    const { events, daily } = openDaily(start, '2026-12-01', '2027-02-26')
+    const bankPayouts = events.filter((e) => e.type === 'bank_payout' && e.delta < 0)
+    expect(bankPayouts.map((e) => [e.date, e.delta])).toEqual([
+      ['2026-12-18', -10], // first payday on/after Dec 15
+      ['2027-02-26', -5], // first payday on/after Feb 15
+    ])
+    const jan1 = daily.find((d) => d.iso === '2027-01-01')!.state
+    expect(jan1.profile.currentBankHours).toBe(5)
+
+    // With a single December payout date, late-December hours roll into the new year.
+    const single = base({ currentBankHours: 10, lastSyncDate: '2026-12-01', lastPaydayDate: '2026-11-20' }, {
+      bankHoursLog: [{ id: 'late-dec', date: '2026-12-21', hours: 5, appliedToBalance: false }],
+    })
+    single.policy = { ...single.policy, bankHoursPayoutEnd: { month: 12, day: 15 } }
+    const one = openDaily(single, '2026-12-01', '2027-03-31')
+    expect(one.events.filter((e) => e.type === 'bank_payout' && e.delta < 0).map((e) => e.date)).toEqual(['2026-12-18'])
+    expect(one.state.profile.currentBankHours).toBe(5)
+  })
+})
+
+describe('getNextBankPayout', () => {
+  it('finds the December payday and, after it, the February one', async () => {
+    const { getNextBankPayout } = await import('../projection')
+    const state: AppState = { ...decemberState(), plannedVacations: [], bankHoursLog: [] }
+    at('2026-11-24')
+    let next = getNextBankPayout(state)
+    expect(format(next.payoutDate!, 'yyyy-MM-dd')).toBe('2026-12-18')
+    expect(next.projectedPayout).toBe(12)
+    at('2026-12-20')
+    next = getNextBankPayout({ ...state, profile: { ...state.profile, currentBankHours: 3 } })
+    expect(format(next.payoutDate!, 'yyyy-MM-dd')).toBe('2027-02-26')
+    expect(next.projectedPayout).toBe(3)
+  })
+})

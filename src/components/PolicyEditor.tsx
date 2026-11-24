@@ -465,7 +465,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-              Payout starts (month/day)
+              First payout date (month/day)
             </label>
             <div className="flex gap-1">
               <select
@@ -511,7 +511,7 @@ export function PolicyEditor({ policy, onChange }: Props) {
           </div>
           <div>
             <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-              Payout ends (month/day)
+              Second payout date (month/day)
             </label>
             <div className="flex gap-1">
               <select
@@ -555,6 +555,10 @@ export function PolicyEditor({ policy, onChange }: Props) {
               />
             </div>
           </div>
+          <p className="col-span-2 text-xs text-gray-400 dark:text-gray-500 leading-snug">
+            All banked hours are paid out on the first payday on or after each date.
+            Paid out only once a year? Set both dates the same.
+          </p>
         </div>
         )}
       </div>

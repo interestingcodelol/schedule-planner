@@ -25,6 +25,8 @@ export const changelog: ChangelogEntry[] = [
       { type: 'fixed', text: 'The day after Thanksgiving now always falls the day after Thanksgiving, including years when November starts on a Friday.' },
       { type: 'improved', text: 'In November and December the forecast looks past New Year’s, through the January sick-leave reset and the February carry-over payout.' },
       { type: 'fixed', text: 'In January, the carry-over payout for the year that just ended is no longer shown next to the following year’s year-end balance.' },
+      { type: 'new', text: 'In November and December, the insights bar previews the new year: how many vacation hours carry over and where your sick leave lands after the Jan 1 reset.' },
+      { type: 'improved', text: 'The bank-hours insight now gives the actual payout date and amount. In Settings, the two bank payout dates are labelled clearly: bank hours are paid out on both dates, so set them the same if you get one payout a year.' },
     ],
   },
   {

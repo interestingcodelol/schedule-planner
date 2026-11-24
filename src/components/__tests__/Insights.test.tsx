@@ -123,3 +123,27 @@ describe('insight accounting and anniversary dates', () => {
     },
   )
 })
+
+describe('year-end insights', () => {
+  it('previews what carries into the new year and names the real bank payout date', () => {
+    const state = fixture()
+    Object.assign(state.profile, {
+      currentVacationHours: 60,
+      currentSickHours: 25,
+      currentBankHours: 6,
+      lastPaydayDate: '2026-11-20',
+    })
+    state.policy = { ...state.policy, sickLeaveCarryoverCap: 40 }
+    const text = show(state, '2026-11-24')
+    // 60 + two December accruals (Dec 4, Dec 18) at the 6–10 year rate.
+    expect(text).toContain('Into 2027: 69.23 vacation hrs carry over')
+    expect(text).toContain('sick leave resets to 65 hrs on Jan 1')
+    expect(text).toContain('6 bank hrs projected to be paid out on Dec 18')
+  })
+
+  it('does not show the new-year preview outside November and December', () => {
+    const state = fixture()
+    expect(show(state, '2026-06-10')).not.toContain('Into 2027')
+  })
+})
+
